@@ -1,0 +1,417 @@
+/* PersonaConfiguration specific styles extracted from ConfigurationPanel.css
+   This file contains the form layout and value-variation styles used by
+   PersonaConfiguration.jsx. Keeping these styles colocated simplifies
+   component reuse and encapsulation. */
+
+/* NOTE: Common form styles (.config-form__*) have been moved to ConfigurationCommon.css */
+
+.config-persona-result {
+	margin-top: 12px;
+	padding: 12px;
+	border: 1px solid #111111;
+	border-radius: 8px;
+	background-color: #f9fafb;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.config-persona-result__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.config-persona-result__actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.config-persona-result__title {
+	margin: 0;
+	font-size: 0.85rem;
+	font-weight: 600;
+	color: #111111;
+}
+
+.config-persona-result__button {
+	min-width: 80px;
+	justify-content: center;
+}
+
+.config-persona-result__content {
+	margin: 0;
+	font-family: 'Courier New', Courier, monospace;
+	font-size: 0.85rem;
+	line-height: 1.4;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: #111111;
+}
+
+.config-persona-result__editor {
+	border: 1px solid #111111;
+	border-radius: 8px;
+	padding: 10px;
+	font-family: 'Courier New', Courier, monospace;
+	font-size: 0.85rem;
+	line-height: 1.4;
+	background: #ffffff;
+	color: #111111;
+	resize: vertical;
+}
+
+.config-persona-result__editor:focus {
+	outline: none;
+	border-color: #000000;
+	box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.15);
+}
+
+.config-persona-result__footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+
+
+.config-value-variation__gallery {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.config-value-variation__label {
+	font-size: 0.78rem;
+	font-weight: 600;
+	color: #111111;
+}
+
+.config-value-variation__selectors {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+@media (min-width: 640px) {
+	.config-value-variation__selectors {
+		flex-direction: row;
+		align-items: flex-start;
+		gap: 16px;
+	}
+}
+
+.config-value-variation__hints-row {
+	display: flex;
+	flex-direction: row;
+	gap: 16px;
+	align-items: center;
+	min-height: 24px;
+}
+
+@media (min-width: 640px) {
+	.config-value-variation__hints-row {
+		margin-top: 4px;
+	}
+}
+
+.config-value-variation__controls {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	position: relative;
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.config-value-variation__select-wrapper {
+	position: relative;
+	width: 100%;
+}
+
+
+.config-value-variation__select,
+.config-value-variation__dropdown-trigger {
+	width: 100%;
+	padding: 8px 40px 8px 12px;
+	min-height: 40px;
+	border: 1px solid #111111;
+	border-radius: 999px;
+	background-color: #ffffff;
+	color: #111111;
+	font-size: 0.85rem;
+	font-weight: 500;
+	line-height: 1.25;
+	transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.config-value-variation__select:disabled,
+.config-value-variation__dropdown-trigger:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.config-value-variation__select:hover:not(:disabled),
+.config-value-variation__dropdown-trigger:hover:not(:disabled) {
+	background-color: #f3f4f6;
+	border-color: #000000;
+}
+
+.config-value-variation__select {
+	appearance: none;
+	-webkit-appearance: none;
+	-moz-appearance: none;
+	background-image: none;
+	cursor: pointer;
+}
+
+.config-value-variation__select::-ms-expand {
+	display: none;
+}
+
+
+.config-value-variation__header {
+	display: flex;
+	flex-direction: column;
+}
+
+@media (min-width: 640px) {
+	.config-value-variation__header {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+	}
+}
+
+.config-value-variation__dropdown-trigger {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 0;
+	letter-spacing: 0;
+	text-transform: none;
+	cursor: pointer;
+	position: relative;
+	text-align: left;
+}
+
+.config-value-variation__select:focus,
+.config-value-variation__dropdown-trigger:focus {
+	outline: none;
+	border-color: #000000;
+	box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.15);
+}
+
+.config-value-variation__dropdown {
+	position: relative;
+}
+
+.config-value-variation__dropdown--open .config-value-variation__dropdown-trigger {
+	border-color: #000000;
+	box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.15);
+}
+
+.config-value-variation__dropdown-indicator {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	position: absolute;
+	top: 50%;
+	right: 16px;
+	transform: translateY(-50%);
+	min-width: 16px;
+	font-size: 0.85rem;
+	pointer-events: none;
+	margin: 0;
+	color: #111111;
+}
+
+.config-value-variation__select:disabled + .config-value-variation__dropdown-indicator {
+	opacity: 0.5;
+}
+
+.config-value-variation__dropdown-trigger:disabled .config-value-variation__dropdown-indicator {
+	opacity: 0.5;
+}
+
+.config-value-variation__dropdown-menu {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	right: 0;
+	z-index: 3;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px;
+	border: 1px solid #111111;
+	border-radius: 8px;
+	background-color: #ffffff;
+	box-shadow: 0 8px 24px rgba(17, 17, 17, 0.12);
+}
+
+.config-value-variation__option {
+	display: grid;
+	grid-template-columns: auto auto 1fr;
+	align-items: center;
+	gap: 8px;
+	font-size: 0.8rem;
+	color: #111111;
+}
+
+.config-value-variation__option-input {
+	margin: 0;
+}
+
+.config-value-variation__option-color {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	border: 1px solid rgba(17, 17, 17, 0.15);
+}
+
+.config-value-variation__option-label {
+	line-height: 1.2;
+}
+
+.config-value-variation__chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.config-value-variation__chip {
+	display: inline-flex;
+	align-items: center;
+	padding: 4px 10px;
+	border-radius: 999px;
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: #111111;
+	border: 1px solid rgba(17, 17, 17, 0.05);
+}
+
+.config-value-variation__hint {
+	margin: 0;
+	font-size: 0.8rem;
+	color: #6b7280;
+	visibility: visible;
+	opacity: 1;
+	pointer-events: auto;
+	white-space: nowrap;
+	overflow: visible;
+}
+
+.config-value-variation__list {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.config-value-variation__item {
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+	padding: 12px;
+	background-color: #f9fafb;
+}
+
+.config-value-variation__item--inactive {
+	opacity: 0.8;
+	background-color: #fefefe;
+	border-style: dashed;
+}
+
+.config-value-variation__item-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.config-value-variation__item-title {
+	margin: 0;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 0.85rem;
+	font-weight: 600;
+	color: #111111;
+}
+
+.config-value-variation__color-dot {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	border: 1px solid rgba(17, 17, 17, 0.1);
+}
+
+.config-value-variation__item-actions {
+	display: flex;
+	gap: 8px;
+}
+
+.config-value-variation__button {
+	font-size: 0.75rem;
+}
+
+.config-value-variation__item-content {
+	margin: 8px 0 0;
+	font-family: 'Courier New', Courier, monospace;
+	font-size: 0.8rem;
+	line-height: 1.4;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: #111111;
+}
+
+.config-value-variation__editor {
+	width: 100%;
+	border: 1px solid #111111;
+	border-radius: 8px;
+	padding: 8px;
+	font-family: 'Courier New', Courier, monospace;
+	font-size: 0.8rem;
+	line-height: 1.4;
+	background: #ffffff;
+	color: #111111;
+	resize: vertical;
+	/* allow vertical scrolling but hide the visible scrollbar across browsers */
+	overflow-y: auto;
+	/* Firefox */
+	scrollbar-width: none;
+	/* IE 10+ */
+	-ms-overflow-style: none;
+}
+
+.config-value-variation__editor:focus {
+	outline: none;
+	border-color: #000000;
+	box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.15);
+}
+
+/* WebKit browsers (Chrome, Safari, Edge) - hide scrollbar */
+.config-value-variation__editor::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+}
+
+/* small transient toast for save confirmation */
+.save-toast {
+	position: fixed;
+	top: 20px;
+	left: 50%;
+	transform: translateX(-50%);
+	background: rgba(17,17,17,0.95);
+	color: #ffffff;
+	padding: 8px 12px;
+	border-radius: 8px;
+	box-shadow: 0 6px 18px rgba(17,17,17,0.25);
+	font-size: 0.85rem;
+	z-index: 10000;
+	max-width: 80%;
+	text-align: center;
+}

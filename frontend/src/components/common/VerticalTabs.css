@@ -1,0 +1,86 @@
+.vertical-tabs,
+.config-vertical-tabs {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	padding: 12px 0;
+	border-left: 1px solid #e5e7eb;
+	background-color: #fafbfc;
+	flex-shrink: 0;
+	min-width: 60px;
+	width: 60px;
+	overflow-y: auto;
+}
+
+.vertical-tabs__item,
+.config-vertical-tabs__item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	padding: 12px 6px;
+	border: none;
+	border-right: 3px solid transparent;
+	border-radius: 0;
+	background-color: transparent;
+	color: #6b7280;
+	font-size: 0.65rem;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	white-space: normal;
+	word-break: break-word;
+	min-height: auto;
+	text-align: center;
+	line-height: 1.1;
+}
+
+.vertical-tabs__item svg,
+.config-vertical-tabs__item svg {
+	width: 18px;
+	height: 18px;
+	flex-shrink: 0;
+}
+
+.vertical-tabs__item:hover:not(.vertical-tabs__item--active),
+.config-vertical-tabs__item:hover:not(.config-vertical-tabs__item--active) {
+	background-color: #f0f1f3;
+	color: #374151;
+}
+
+.vertical-tabs__item--active,
+.config-vertical-tabs__item--active {
+	background-color: #ffffff;
+	color: #1f2937;
+	border-right-color: #3b82f6;
+	font-weight: 600;
+	box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.05);
+}
+
+.vertical-tabs__item--active svg,
+.config-vertical-tabs__item--active svg {
+	color: #3b82f6;
+}
+
+.vertical-tabs__label,
+.config-vertical-tabs__label {
+	display: block;
+	line-height: 1.2;
+}
+
+/* Positioning logic based on parent panel area */
+.panel-area--configuration .config-vertical-tabs {
+	flex: 0 0 auto;
+	width: 60px;
+	min-width: 60px;
+	order: -1;
+}
+
+.panel-area--visualization .config-vertical-tabs {
+	flex: 0 0 auto;
+	width: 60px;
+	min-width: 60px;
+	order: 1;
+}
+

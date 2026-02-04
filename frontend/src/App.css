@@ -1,0 +1,227 @@
+.app-shell {
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
+	width: 100%;
+	background: #edf1f9;
+	color: #1a2233;
+	overflow: hidden;
+}
+
+.app-shell__banner {
+	flex: 0 0 auto;
+}
+
+.app-shell__banner .panel {
+	border-radius: 0;
+	border: none;
+	box-shadow: none;
+}
+
+.app-layout {
+	flex: 1 1 auto;
+	display: flex;
+	align-items: stretch;
+	height: 100%;
+	min-height: 0;
+	overflow: hidden;
+	gap: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+.panel-area {
+	position: relative;
+	display: flex;
+	flex-direction: row;
+	align-items: stretch;
+	justify-content: stretch;
+	min-width: 0;
+	min-height: 0;
+	margin: 0;
+	overflow: hidden;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+.panel-area--configuration,
+.panel-area--visualization {
+	flex: 1 1 0%;
+	min-width: 0;
+	flex-direction: row;
+}
+
+/* Internal content area - takes remaining space */
+.panel--configuration,
+
+
+
+
+.panel-stack {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.panel-stack > .panel-area {
+	flex: 1 1 0;
+	margin: 0;
+	border-radius: 0;
+	box-shadow: none;
+	border: none;
+}
+
+.panel {
+	--panel-header-bg: #ffffff;
+	--panel-body-bg: #ffffff;
+	--panel-border: #cbd5e1;
+	--panel-accent: #0f172a;
+	--panel-icon-bg: rgba(15, 23, 42, 0.08);
+
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+	min-width: 0;
+	background: var(--panel-body-bg);
+	border-radius: 0;
+	border: 1px solid var(--panel-border);
+	box-shadow: none;
+	overflow: hidden;
+}
+
+.panel-area--trajectory .panel,
+.panel-area--experiments .panel,
+.panel-area--criteria .panel {
+	border-top: none;
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+}
+
+.panel__body {
+	flex: 1 1 auto;
+	min-height: 0;
+	min-width: 0;
+	padding: 24px;
+	background: var(--panel-body-bg);
+	overflow: auto;
+}
+
+.panel-area--trajectory .panel__body {
+	overflow: hidden;
+}
+
+.panel-area--experiments .panel__body {
+	overflow: auto;
+	scrollbar-width: none;
+}
+
+.panel-area--experiments .panel__body::-webkit-scrollbar {
+	display: none;
+}
+
+.panel__placeholder {
+	margin: 0;
+	color: #475569;
+	font-size: 0.9rem;
+}
+
+.panel--page {
+	--panel-header-bg: #ffffff;
+	--panel-body-bg: #ffffff;
+	--panel-border: #d1d5db;
+	--panel-accent: #0f172a;
+	--panel-icon-bg: transparent;
+}
+
+.divider {
+	position: relative;
+	flex: 0 0 auto;
+	background: transparent;
+}
+
+.divider::before,
+.divider::after {
+	content: '';
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	transition: background 0.15s ease, width 0.15s ease, height 0.15s ease;
+}
+
+.divider::before {
+	background: #d1d5db;
+}
+
+.divider::after {
+	background: transparent;
+	pointer-events: auto;
+	cursor: inherit;
+}
+
+.divider--vertical {
+	position: relative;
+	width: 1px;
+	cursor: col-resize;
+	margin: 0;
+}
+
+.divider--vertical::before {
+	width: 1px;
+	top: 0;
+	bottom: 0;
+	transform: translateX(-50%);
+}
+
+.divider--vertical::after {
+	width: 12px;
+	top: -6px;
+	bottom: -6px;
+	transform: translateX(-50%);
+}
+
+.divider--horizontal {
+	position: relative;
+	height: 1px;
+	cursor: row-resize;
+	margin: 0;
+}
+
+.divider--horizontal::before {
+	height: 1px;
+	left: 0;
+	right: 0;
+	transform: translateY(-50%);
+}
+
+.divider--horizontal::after {
+	height: 12px;
+	left: -6px;
+	right: -6px;
+	transform: translateY(-50%);
+}
+
+.divider:hover::before {
+	background: #cbd5e1;
+}
+
+body.is-resizing--vertical .divider--vertical::before {
+	width: 6px;
+	background: #1f2937;
+}
+
+body.is-resizing--horizontal .divider--horizontal::before {
+	height: 6px;
+	background: #1f2937;
+}
+
+.divider:focus {
+	outline: 2px solid #4c6ef5;
+	outline-offset: -1px;
+}
+
+body.is-resizing {
+	user-select: none;
+}

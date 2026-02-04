@@ -1,0 +1,78 @@
+.action-button {
+	padding: 6px 16px;
+	border: 1.5px solid var(--panel-accent);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--panel-accent);
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+	white-space: nowrap;
+}
+
+.action-button:hover:not(:disabled) {
+	background: var(--panel-accent);
+	color: var(--panel-header-bg);
+	border-color: var(--panel-accent);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+	transform: translateY(-1px);
+}
+
+.action-button:active:not(:disabled) {
+	transform: translateY(0);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.action-button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.action-button--primary {
+	border-color: var(--panel-accent);
+	background: var(--panel-accent);
+	color: var(--panel-header-bg);
+}
+
+.action-button--primary:hover:not(:disabled) {
+	background: var(--panel-accent);
+	opacity: 0.9;
+}
+
+.action-button--secondary {
+	border-color: var(--panel-border);
+	color: var(--panel-accent);
+}
+
+.action-button--secondary:hover:not(:disabled) {
+	background: var(--panel-border);
+	border-color: var(--panel-accent);
+}
+
+.action-button--loading {
+	opacity: 0.7;
+	pointer-events: none;
+}
+
+.action-button__spinner {
+	display: inline-block;
+	width: 12px;
+	height: 12px;
+	border: 2px solid currentColor;
+	border-top-color: transparent;
+	border-radius: 50%;
+	animation: action-button__spinner-rotate 0.6s linear infinite;
+}
+
+@keyframes action-button__spinner-rotate {
+	to {
+		transform: rotate(360deg);
+	}
+}

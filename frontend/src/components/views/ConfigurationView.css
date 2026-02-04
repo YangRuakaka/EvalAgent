@@ -1,0 +1,157 @@
+.configuration-view {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.config-section {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	margin-top: -12px;
+	background-color: #ffffff;
+}
+
+.config-section__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: nowrap;
+	padding-bottom: 0px;
+	border-bottom: none;
+	font-size: 0.7rem;
+	font-weight: 400;
+	color: #000000;
+	line-height: 1.1;
+}
+
+.config-section__title {
+	margin: 0;
+}
+
+.config-section__action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	white-space: nowrap;
+	margin-left: 12px;
+	padding: 6px 10px;
+	min-width: 32px;
+	height: 32px;
+	cursor: pointer;
+	border: 1px solid #d1d5db;
+	background-color: #ffffff;
+	color: #374151;
+	border-radius: 4px;
+	transition: all 0.2s ease;
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.config-section__action:hover:not(:disabled) {
+	background-color: #f3f4f6;
+	border-color: #9ca3af;
+	color: #1f2937;
+}
+
+.config-section__action:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.config-section__action svg {
+	width: 16px;
+	height: 16px;
+	color: currentColor;
+	flex-shrink: 0;
+}
+
+.btn-label {
+	display: inline;
+	white-space: nowrap;
+}
+
+/* Button Group Container */
+.config-section__action-group {
+	display: inline-flex;
+	gap: 0;
+	border-radius: 4px;
+	overflow: hidden;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Left button in group */
+.config-section__action--left {
+	border-radius: 4px 0 0 4px;
+	border-right: 1px solid #d1d5db;
+	margin-left: 12px;
+}
+
+/* Right button in group */
+.config-section__action--right {
+	border-radius: 0 4px 4px 0;
+	margin-left: 0;
+}
+
+/* Vertical Tab Layout */
+.config-container {
+	display: flex;
+	flex-direction: row;
+	flex: 1 1 auto;
+	min-height: 0;
+	min-width: 0;
+	gap: 0;
+	border-right: 1px solid transparent;
+}
+
+/* Content Area - Vertical Tabs styles are imported from VerticalTabs.css */
+.config-content {
+	flex: 1 1 auto;
+	min-height: 0;
+	min-width: 0;
+	overflow-y: auto;
+	scrollbar-width: none; /* Firefox */
+	-ms-overflow-style: none; /* Internet Explorer 10+ */
+	padding: 16px;
+}
+
+.config-content::-webkit-scrollbar {
+	/* WebKit-based browsers (Chrome, Edge, Safari) */
+	width: 0;
+	height: 0;
+}
+
+/* Configuration Panel Specific Styles */
+.configuration-panel {
+--panel-header-bg: #ffffff;
+--panel-body-bg: #ffffff;
+--panel-border: #cbd5e1;
+--panel-accent: #0f172a;
+--panel-icon-bg: rgba(15, 23, 42, 0.08);
+
+display: flex;
+flex-direction: column;
+flex: 1 1 auto;
+min-height: 0;
+min-width: 0;
+background: var(--panel-body-bg);
+border-radius: 0;
+border: 1px solid var(--panel-border);
+box-shadow: none;
+overflow: hidden;
+}
+
+.configuration-panel__body {
+flex: 1 1 auto;
+min-height: 0;
+min-width: 0;
+padding: 24px;
+background: var(--panel-body-bg);
+overflow: auto;
+}
+

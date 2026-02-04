@@ -1,0 +1,223 @@
+
+.history-tabs__container {
+	position: relative;
+	flex: 0 0 auto;
+	padding: 0 24px 0 0;
+	background: linear-gradient(0deg, #e2e8f0 0%, #f8fafc 60%);
+	border-bottom: none;
+}
+
+.history-tabs__container::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 1px;
+	background: #cbd5e1;
+	z-index: 0;
+}
+
+.history-tabs__container--config {
+	flex: 1 1 auto;
+	padding: 0;
+	background: none;
+}
+
+.history-tabs__container--config::after {
+	display: none;
+}
+
+.history-tabs {
+	width: 100%;
+}
+
+.history-tabs__list {
+	display: flex;
+	gap: 0;
+	align-items: stretch;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+	scrollbar-width: none;
+}
+
+.history-tabs__list::-webkit-scrollbar {
+	display: none;
+}
+
+.history-tabs__item {
+	position: relative;
+	flex: 0 0 auto;
+}
+
+.history-tabs__item--closing {
+	pointer-events: none;
+}
+
+.history-tabs__button {
+	position: relative;
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+	padding: 4px 12px;
+	border: 1px solid transparent;
+	border-bottom: none;
+	border-radius: 10px 10px 0 0;
+	background: #e2e8f0;
+	color: #1f2937;
+	font-size: 0.75rem;
+	font-weight: 600;
+	text-align: left;
+	letter-spacing: 0.03em;
+	cursor: pointer;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset -1px 0 0 rgba(148, 163, 184, 0.35);
+	transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+	white-space: nowrap;
+}
+
+
+.history-tabs__button--closing {
+	opacity: 0;
+	padding-left: 0;
+	padding-right: 0;
+	cursor: default;
+	box-shadow: none;
+}
+
+.history-tabs__button--closing .history-tabs__close {
+	opacity: 0;
+}
+
+.history-tabs__button::after {
+	content: '';
+	position: absolute;
+	top: 6px;
+	bottom: 6px;
+	right: -1px;
+	width: 1px;
+	background: rgba(148, 163, 184, 0.35);
+}
+
+.history-tabs__button:last-child::after,
+.history-tabs__item--closing .history-tabs__button::after {
+	display: none;
+}
+
+.history-tabs__button:hover,
+.history-tabs__button:focus-visible {
+	background: #d1d9e6;
+	border-color: #cbd5e1;
+	outline: none;
+}
+
+.history-tabs__button--active:hover,
+.history-tabs__button--active:focus-visible {
+	background: #ffffff;
+	border-color: #cbd5e1;
+}
+
+.history-tabs__button--active {
+	background: #ffffff;
+	color: #0f172a;
+	border-color: #cbd5e1;
+	border-bottom: 1px solid transparent;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset -1px 0 0 rgba(148, 163, 184, 0.45);
+	transform: translateY(1px);
+	margin-bottom: -1px;
+	z-index: 2;
+}
+
+.history-tabs__button--active::after {
+	display: none;
+}
+
+.history-tabs__button--active::before {
+	content: '';
+	position: absolute;
+	left: -1px;
+	right: -1px;
+	bottom: -1px;
+	height: 2px;
+	background: #ffffff;
+	z-index: 3;
+}
+
+.history-tabs__label {
+	flex: 1 1 auto;
+	font-weight: 600;
+	text-transform: none;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.history-tabs__description {
+	display: none;
+}
+
+.history-tabs__close {
+	flex: 0 0 auto;
+	width: 16px;
+	height: 16px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	background: transparent;
+	color: #475569;
+	transition: background 0.2s ease, color 0.2s ease;
+	font-size: 0.9rem;
+	line-height: 1;
+	margin-left: auto;
+	cursor: pointer;
+}
+
+.history-tabs__button:hover .history-tabs__close,
+.history-tabs__button:focus-visible .history-tabs__close {
+	background: rgba(148, 163, 184, 0.2);
+	color: #0f172a;
+}
+
+.history-tabs__close:hover {
+	background: rgba(148, 163, 184, 0.3);
+}
+
+
+.history-tabs--full .history-tabs__list {
+	width: 100%;
+	display: flex;
+	flex-wrap: nowrap;
+	overflow: hidden;
+}
+
+.history-tabs--full .history-tabs__item {
+	flex: 1 1 0;
+	min-width: 0;
+	margin: 0;
+	display: flex;
+}
+
+.history-tabs--full .history-tabs__button {
+	width: 100%;
+	height: 100%;
+	justify-content: center;
+	white-space: normal;
+	text-align: center;
+	padding: 4px 8px;
+	flex-direction: column;
+}
+
+.history-tabs--full .history-tabs__button::after {
+	display: none;
+}
+
+.history-tabs--full .history-tabs__label {
+	text-align: center;
+	white-space: normal;
+	overflow: visible;
+	text-overflow: unset;
+	line-height: 1.2;
+}

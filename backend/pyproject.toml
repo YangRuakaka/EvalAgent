@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "value-agent-backend"
+version = "0.1.0"
+description = "FastAPI backend"
+authors = [ { name = "Your Name" } ]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "python-dotenv",
+  "pydantic>=2.0.0,<3.0.0",
+  "pydantic-settings>=2.0.0",
+  "langchain>=0.1.0",
+  "langchain-openai>=0.1.0",
+  "langchain-community>=0.0.10",
+  "openai>=1.0.0",
+  "httpx",
+  "browser-use>=0.1.24",
+  "langchain-anthropic>=0.1.0",
+  "langchain-google-genai>=0.0.8",
+  "pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "ruff", "mypy"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+strict = false

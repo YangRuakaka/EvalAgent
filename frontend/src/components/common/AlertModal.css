@@ -1,0 +1,117 @@
+/* Alert Modal Overlay */
+.alert-modal-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(2, 6, 23, 0.45);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1300;
+}
+
+/* Modal Container */
+.alert-modal {
+	width: 400px;
+	max-width: calc(100% - 32px);
+	background: #fff;
+	border-radius: 10px;
+	box-shadow: 0 12px 40px rgba(2, 6, 23, 0.28);
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+}
+
+/* Modal Header */
+.alert-modal__header {
+	padding: 16px 20px;
+	border-bottom: 1px solid rgba(17, 17, 17, 0.06);
+	flex: 0 0 auto;
+}
+
+.alert-modal__title {
+	margin: 0;
+	font-size: 1.1rem;
+	font-weight: 700;
+	color: #111827;
+}
+
+/* Modal Body */
+.alert-modal__body {
+	padding: 16px 20px;
+	flex: 1 1 auto;
+	min-height: 0;
+	max-height: 60vh;
+	overflow-y: auto;
+}
+
+.alert-modal__message {
+	margin: 0;
+	font-size: 0.95rem;
+	line-height: 1.5;
+	color: #374151;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+/* Error State */
+.alert-modal--error .alert-modal__title {
+	color: #991b1b;
+}
+
+.alert-modal--error .alert-modal__header {
+	border-bottom-color: #fee2e2;
+	background: #fef2f2;
+}
+
+/* Warning State */
+.alert-modal--warning .alert-modal__title {
+	color: #b45309;
+}
+
+.alert-modal--warning .alert-modal__header {
+	border-bottom-color: #fef3c7;
+	background: #fffbeb;
+}
+
+/* Info State */
+.alert-modal--info .alert-modal__title {
+	color: #0369a1;
+}
+
+.alert-modal--info .alert-modal__header {
+	border-bottom-color: #cffafe;
+	background: #ecfdf5;
+}
+
+/* Modal Actions */
+.alert-modal__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 10px;
+	padding: 14px 20px;
+	border-top: 1px solid rgba(17, 17, 17, 0.06);
+	flex: 0 0 auto;
+	background: #f9fafb;
+}
+
+.alert-modal__btn {
+	padding: 8px 16px;
+	border-radius: 6px;
+	border: 1px solid transparent;
+	font-size: 0.95rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	font-family: inherit;
+	background: #0f172a;
+	color: #fff;
+}
+
+.alert-modal__btn:hover {
+	background: #1a284a;
+}
+
+.alert-modal__btn:active {
+	background: #0f172a;
+	transform: scale(0.98);
+}

@@ -1,0 +1,132 @@
+/* Configuration Common Styles
+   Shared styles for configuration forms and inputs
+*/
+
+.config-form__container {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	width: 100%;
+}
+
+.config-form__section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.config-form__grid {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
+	align-items: flex-start;
+	justify-content: flex-start;
+	width: 100%;
+}
+
+.config-form__field {
+	display: grid;
+	grid-template-columns: var(--config-label-width, 80px) minmax(0, 1fr);
+	column-gap: 0px;
+	row-gap: 4px;
+	align-items: center;
+	flex: 1 1 280px;
+	max-width: 320px;
+	width: 100%;
+}
+
+.config-form__field--full {
+	grid-template-columns: minmax(0, 1fr);
+	align-items: stretch;
+	flex-basis: 100%;
+	max-width: none;
+}
+
+.config-form__field--textarea {
+	grid-template-columns: minmax(0, 1fr);
+	align-items: stretch;
+	flex-basis: 100%;
+	max-width: none;
+}
+
+.config-form__label {
+	margin: 0;
+	font-size: 0.85rem;
+	font-weight: 500;
+	color: #111111;
+}
+
+.config-form__field:not(.config-form__field--textarea) .config-form__label {
+	justify-self: start;
+	white-space: nowrap;
+}
+
+.config-form__field--textarea .config-form__label {
+	white-space: normal;
+	margin-bottom: 4px;
+}
+
+.config-form__input {
+	border: 1px solid #111111;
+	border-radius: 8px;
+	padding: 3px 0px 5px 6px;
+	font-size: 0.85rem;
+	background: #ffffff;
+	color: #111111;
+	transition: border-color 0.2s ease, box-shadow 0.2s ease;
+	width: 100%;
+	min-width: 0;
+}
+
+.config-form__input:focus {
+	outline: none;
+	border-color: #000000;
+	box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.15);
+}
+
+.config-form__input::placeholder {
+	color: #6b7280;
+	font-size: 0.75rem;
+}
+
+.config-form__input--textarea {
+	resize: vertical;
+	min-height: 56px;
+	max-height: 220px;
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+}
+
+.config-form__input--textarea::placeholder {
+	font-size: 0.7rem;
+}
+
+.config-form__input--textarea::-webkit-scrollbar {
+	display: none;
+}
+
+/* When a textarea is used inside the two-column .config-form__field
+   (label on the left), ensure the textarea aligns to the top of the
+   grid cell so it lines up visually with the label instead of being
+   vertically centered. Also respect the existing textarea min-height. */
+.config-form__field textarea.config-form__input {
+	align-self: start;
+	/* keep the existing min-height from .config-form__input--textarea */
+}
+
+/* Error styles */
+.config-form__error {
+	margin: 0;
+	color: #dc2626;
+	font-size: 0.8rem;
+	grid-column: 2;
+}
+
+.config-form__field--textarea .config-form__error,
+.config-form__field--full .config-form__error {
+	grid-column: 1;
+}
+
+.config-form__error--global {
+	text-align: right;
+}

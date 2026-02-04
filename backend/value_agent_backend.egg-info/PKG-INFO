@@ -1,0 +1,333 @@
+Metadata-Version: 2.4
+Name: value-agent-backend
+Version: 0.1.0
+Summary: FastAPI backend
+Author: Your Name
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: python-dotenv
+Requires-Dist: pydantic<3.0.0,>=2.0.0
+Requires-Dist: pydantic-settings>=2.0.0
+Requires-Dist: langchain>=0.1.0
+Requires-Dist: langchain-openai>=0.1.0
+Requires-Dist: langchain-community>=0.0.10
+Requires-Dist: openai>=1.0.0
+Requires-Dist: httpx
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: httpx; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+
+# Value Agent Backend
+
+A FastAPI-based backend service for generating detailed consumer personas using large language models. This service implements a complete pipeline from frontend keyword input to AI-generated persona output.
+
+## 🚀 Pipeline Architecture
+
+```
+Frontend Keywords → Backend Prompt Construction → LLM Generation → Response to Frontend
+```
+
+### Pipeline Flow:
+1. **Frontend**: Sends keywords via POST request to `/api/v1/persona/generate`
+2. **Backend**: Validates keywords and constructs optimized prompt using prompt engineering techniques
+3. **LLM Integration**: Sends prompt to OpenAI GPT via LangChain integration
+4. **Response Processing**: Formats and returns structured persona data
+5. **Frontend Display**: Renders generated persona content to user
+
+## 🔧 Features
+
+- **Complete LLM Integration**: Real OpenAI GPT integration via LangChain
+- **Advanced Prompt Engineering**: Optimized prompts for high-quality persona generation
+- **Structured API**: RESTful API with proper request/response validation
+- **Error Handling**: Comprehensive error handling with detailed messages
+- **CORS Support**: Configured for frontend integration
+- **Configuration Management**: Environment-based configuration
+- **Testing Interface**: Included HTML frontend for testing
+
+## 📦 Quick Setup
+
+### 1. Install Dependencies
+```bash
+# Run the setup script (Windows)
+setup.bat
+
+# Or manually:
+pip install -e .
+```
+
+### 2. Configure Environment
+```bash
+# Copy environment template
+copy .env.example .env
+
+# Edit .env and set your OpenAI API key:
+OPENAI_API_KEY=your-openai-api-key-here
+```
+
+### 3. Start the Server
+```bash
+# Run the start script (Windows)
+start.bat
+
+# Or manually:
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 4. Test the API
+- Open `docs/frontend-integration-example.html` in your browser
+- Or visit `http://localhost:8000/docs` for interactive API documentation
+
+## 🔄 API Usage
+
+### Generate Persona Endpoint
+
+**POST** `/api/v1/persona/generate`
+
+**Request:**
+```json
+{
+  "keywords": ["sustainable", "tech-savvy", "budget-conscious"]
+}
+```
+
+**Response:**
+```json
+{
+  "persona": "**Meet Sarah Chen - The Conscious Tech Consumer**\n\nSarah is a 29-year-old software product manager living in Austin, Texas. She works for a mid-sized SaaS company, earning $85,000 annually...",
+  "success": true,
+  "error_message": null
+}
+```
+
+## 🔌 Frontend Integration Examples
+
+### JavaScript/Fetch API
+```javascript
+async function generatePersona(keywords) {
+  const response = await fetch('http://localhost:8000/api/v1/persona/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keywords })
+  });
+  
+  const data = await response.json();
+  return data.success ? data.persona : Promise.reject(data.error_message);
+}
+
+// Usage
+generatePersona(['sustainable', 'tech-savvy'])
+  .then(persona => console.log(persona))
+  .catch(error => console.error(error));
+```
+
+### React Integration
+```jsx
+import { useState } from 'react';
+
+function PersonaGenerator() {
+  const [keywords, setKeywords] = useState('');
+  const [persona, setPersona] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/persona/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keywords: keywords.split(',').map(k => k.trim())
+        })
+      });
+      
+      const data = await response.json();
+      setPersona(data.success ? data.persona : data.error_message);
+    } catch (error) {
+      setPersona(`Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <input 
+        value={keywords}
+        onChange={(e) => setKeywords(e.target.value)}
+        placeholder="Enter keywords separated by commas"
+      />
+      <button onClick={handleGenerate} disabled={loading}>
+        {loading ? 'Generating...' : 'Generate Persona'}
+      </button>
+      <div style={{whiteSpace: 'pre-wrap'}}>{persona}</div>
+    </div>
+  );
+}
+```
+
+## 🏗️ Project Structure
+
+```
+backend/
+├── app/
+│   ├── main.py              # FastAPI app configuration
+│   ├── api/
+│   │   ├── routes.py        # API router setup
+│   │   ├── persona.py       # Persona generation endpoint
+│   │   └── deps.py          # API dependencies
+│   ├── core/
+│   │   └── config.py        # Application configuration
+│   ├── schemas/
+│   │   └── persona.py       # Request/response models
+│   └── services/
+│       └── persona_generator.py  # Core LLM integration logic
+├── docs/
+│   ├── PERSONA_GENERATION_API.md        # API documentation
+│   └── frontend-integration-example.html # Testing interface
+├── tests/
+│   ├── test_persona_generation_api.py   # API tests
+│   └── test_echo.py                     # Basic tests
+├── .env.example             # Environment template
+├── pyproject.toml          # Python dependencies
+├── setup.bat               # Windows setup script
+└── start.bat               # Windows start script
+```
+
+## 🔧 Technical Implementation
+
+### LLM Provider Architecture
+- **Abstract Base Class**: `LLMProvider` for extensible LLM support
+- **OpenAI Implementation**: `OpenAIProvider` using LangChain ChatOpenAI
+- **Configuration**: Environment-based API key and model configuration
+- **Error Handling**: Comprehensive error handling for API failures
+
+### Prompt Engineering
+- **Structured Templates**: `PersonaPromptTemplate` with detailed formatting
+- **Keyword Integration**: Dynamic prompt construction based on input keywords
+- **Response Optimization**: Prompts designed for consistent, high-quality output
+- **Persona Structure**: Generates personas with demographics, values, behavior, etc.
+
+### API Design
+- **FastAPI Framework**: Modern, fast, auto-documented API
+- **Pydantic Models**: Request/response validation and serialization
+- **CORS Support**: Frontend integration support
+- **Error Standards**: Consistent error response format
+
+## 🔐 Configuration Options
+
+### Environment Variables (.env)
+```bash
+# Required
+OPENAI_API_KEY=your-openai-api-key-here
+
+# Optional - Model Settings
+DEFAULT_LLM_MODEL=gpt-4                    # or gpt-3.5-turbo
+DEFAULT_MAX_TOKENS=1500                    # Response length limit
+
+# Optional - API Settings  
+PROJECT_NAME=Value Agent Backend
+API_V1_PREFIX=/api/v1
+
+# Optional - Validation Settings
+MAX_KEYWORDS_PER_REQUEST=10
+MIN_KEYWORD_LENGTH=2
+```
+
+## 🧪 Testing
+
+### Run Tests
+```bash
+pytest tests/
+```
+
+### Test Coverage
+- API endpoint validation
+- Request/response schema validation
+- Service layer functionality
+- Error handling scenarios
+
+### Manual Testing
+1. Use the included HTML test interface: `docs/frontend-integration-example.html`
+2. Visit FastAPI docs: `http://localhost:8000/docs`
+3. Use curl commands from API documentation
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+**"OpenAI API key not configured"**
+- Ensure `.env` file exists with valid `OPENAI_API_KEY`
+- API key must start with `sk-`
+
+**"Network error" in frontend**
+- Check if backend server is running on port 8000
+- Verify CORS settings in `app/main.py`
+
+**Slow generation (30+ seconds)**
+- Normal for detailed personas
+- Reduce `DEFAULT_MAX_TOKENS` for faster responses
+- Check OpenAI API rate limits
+
+**"Rate limit exceeded"**
+- OpenAI API rate limit reached
+- Wait and retry, or upgrade OpenAI plan
+
+## 📝 Generated Persona Format
+
+Each persona includes:
+- **Demographics**: Age, location, occupation, income, education
+- **Psychographics**: Values, lifestyle, personality, motivations
+- **Shopping Behavior**: Research patterns, decision-making process
+- **Value Assessment**: How they evaluate products and make trade-offs
+- **Technology Usage**: Digital habits and preferences
+- **Pain Points**: Current frustrations and unmet needs
+
+## 🚀 Deployment
+
+### Development
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Production
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+### Docker (Future)
+```dockerfile
+# Dockerfile template for containerized deployment
+FROM python:3.11-slim
+WORKDIR /app
+COPY . .
+RUN pip install -e .
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+## 🔄 Future Enhancements
+
+- [ ] Support for additional LLM providers (Anthropic Claude, Cohere)
+- [ ] Response caching for identical keyword combinations
+- [ ] Batch persona generation for multiple keyword sets
+- [ ] Advanced prompt optimization based on keyword analysis
+- [ ] User authentication and API rate limiting
+- [ ] Persona templates for different industries/use cases
+- [ ] Integration with vector databases for persona similarity matching
+
+## 📖 Documentation
+
+- **API Documentation**: See `docs/PERSONA_GENERATION_API.md`
+- **Interactive Docs**: Visit `/docs` when server is running
+- **Test Interface**: Use `docs/frontend-integration-example.html`
+
+## 🤝 Contributing
+
+1. Follow the existing code structure and patterns
+2. Add tests for new features
+3. Update documentation accordingly
+4. Use English comments throughout the codebase

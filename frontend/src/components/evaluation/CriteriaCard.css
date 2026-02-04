@@ -1,0 +1,156 @@
+/* ========== Criteria Card ========== */
+.criteria-card {
+	display: flex;
+	align-items: stretch;
+	gap: 6px;
+	padding: 6px 8px;
+	border: 1px solid #e5e7eb;
+	/* Use left border for color identification, similar to ConditionCard state */
+	border-left: 4px solid var(--criteria-color, #3b82f6);
+	border-radius: 6px;
+	background-color: #fff;
+	transition: all 0.2s ease;
+	min-height: 48px;
+	max-height: 90px;
+	position: relative;
+	overflow: hidden;
+	cursor: grab;
+}
+
+.criteria-card:hover {
+	background-color: #f9fafb;
+	border-color: #d1d5db;
+	/* Ensure left border color stays correct */
+	border-left-color: var(--criteria-color, #3b82f6);
+	box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.criteria-card--selected {
+	/* Use color-mix to create a light tint of the criteria color for background */
+	background-color: color-mix(in srgb, var(--criteria-color, #3b82f6) 8%, white);
+	border-color: var(--criteria-color, #3b82f6);
+	/* Maintain thick left border even when selected */
+	border-left-width: 4px;
+	/* Use color-mix to create a transparent tint of the criteria color for shadow */
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--criteria-color, #3b82f6) 20%, transparent);
+}
+
+.criteria-card--draggable {
+	cursor: grab;
+}
+
+.criteria-card--dragging {
+	opacity: 0.6;
+	border-style: dashed;
+	cursor: grabbing !important;
+}
+
+.criteria-card:active {
+	cursor: grabbing;
+}
+
+/* ========== Color Strip (Hidden in favor of border-left) ========== */
+.criteria-card__color-strip {
+	display: none;
+}
+
+/* ========== Content ========== */
+.criteria-card__content {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	overflow: hidden;
+	min-height: 0;
+}
+
+/* ========== Title ========== */
+.criteria-card__title {
+	font-size: 12px;
+	font-weight: 600;
+	color: #1f2937;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex-shrink: 0;
+}
+
+/* ========== Description ========== */
+.criteria-card__description {
+	flex: 1 1 auto;
+	min-height: 0;
+	font-size: 11px;
+	color: #6b7280;
+	line-height: 1.3;
+	
+	/* Styles removed for simpler look */
+	background-color: transparent;
+	padding: 0;
+	
+	overflow-y: auto;
+	overflow-x: hidden;
+	word-break: break-word;
+}
+
+/* Scrollbar styles matching ConditionCard */
+.criteria-card__description::-webkit-scrollbar {
+	width: 4px;
+}
+
+.criteria-card__description::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.criteria-card__description::-webkit-scrollbar-thumb {
+	background: #d1d5db;
+	border-radius: 2px;
+}
+
+.criteria-card__description::-webkit-scrollbar-thumb:hover {
+	background: #9ca3af;
+}
+
+/* ========== Drag Handle ========== */
+.criteria-card__drag-handle {
+	position: absolute;
+	right: -2px;
+	top: 50%;
+	transform: translateY(-50%);
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 24px;
+	color: #9ca3af;
+	font-size: 16px;
+	cursor: grab;
+	transition: color 0.2s ease;
+	user-select: none;
+}
+
+.criteria-card__drag-handle:hover {
+	color: #6b7280;
+}
+
+.criteria-card:active .criteria-card__drag-handle {
+	cursor: grabbing;
+}
+
+/* ========== Responsive ========== */
+@media (max-width: 768px) {
+	.criteria-card {
+		padding: 8px;
+		gap: 8px;
+		min-height: 70px;
+	}
+
+	.criteria-card__title {
+		font-size: 12px;
+	}
+
+	.criteria-card__description {
+		font-size: 11px;
+	}
+}

@@ -1,0 +1,349 @@
+/* ========== Evaluation Panel Container ========== */
+.evaluation-panel {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+	min-width: 0;
+	overflow: hidden;
+	background-color: #fff;
+	border-left: 1px solid #e5e7eb;
+}
+
+/* ========== Panel Header ========== */
+.evaluation-panel > :first-child {
+	flex-shrink: 0;
+}
+
+/* ========== Content Area ========== */
+.evaluation-panel__content {
+	flex: 1 1 auto;
+	min-height: 0;
+	min-width: 0;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+/* ========== Sections ========== */
+.evaluation-panel__section {
+	display: flex;
+	flex-direction: column;
+	border-bottom: 1px solid #e5e7eb;
+	padding: 6px;
+	overflow: hidden;
+	min-height: 0;
+}
+
+/* Criteria Section - Increased height for split view */
+.evaluation-panel__section--criteria {
+	flex: 0 0 30%;
+	border-bottom: 1px solid #e5e7eb;
+}
+
+/* Conditions Section - Remaining height */
+.evaluation-panel__section--conditions {
+	flex: 1 1 auto;
+	border-bottom: none;
+	min-height: 0;
+}
+
+/* ========== Section Title ========== */
+.evaluation-panel__section-title {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding-bottom: 3px;
+	margin-bottom: 3px;
+	border-bottom: 1px solid #e5e7eb;
+	font-size: 12px;
+	font-weight: 600;
+	color: #1f2937;
+	flex-shrink: 0;
+	gap: 8px;
+}
+
+.evaluation-panel__count {
+	font-size: 11px;
+	color: #9ca3af;
+	font-weight: 500;
+	flex-shrink: 0;
+}
+
+/* ========== Cards Container ========== */
+.evaluation-panel__cards-container {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	overflow-x: hidden;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding-right: 4px;
+}
+
+/* Criteria cards container - grid with auto-fill */
+.evaluation-panel__cards-container--criteria {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: 8px;
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding-right: 6px;
+	flex: 1 1 auto;
+	min-height: 0;
+	align-content: start;
+}
+
+/* Invisible scrollbar for criteria - WebKit browsers */
+.evaluation-panel__cards-container--criteria::-webkit-scrollbar {
+	width: 8px;
+}
+
+.evaluation-panel__cards-container--criteria::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.evaluation-panel__cards-container--criteria::-webkit-scrollbar-thumb {
+	background: transparent;
+	border-radius: 3px;
+}
+
+.evaluation-panel__cards-container--criteria:hover::-webkit-scrollbar-thumb {
+	background: #d1d5db;
+}
+
+.evaluation-panel__cards-container--criteria::-webkit-scrollbar-thumb:hover {
+	background: #9ca3af;
+}
+
+/* Conditions cards container - vertical list */
+.evaluation-panel__cards-container--conditions {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	overflow-y: auto;
+	overflow-x: hidden;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+/* Invisible scrollbar for conditions - WebKit browsers */
+.evaluation-panel__cards-container--conditions::-webkit-scrollbar {
+	width: 6px;
+}
+
+.evaluation-panel__cards-container--conditions::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.evaluation-panel__cards-container--conditions::-webkit-scrollbar-thumb {
+	background: transparent;
+	border-radius: 3px;
+	transition: background 0.2s ease;
+}
+
+.evaluation-panel__cards-container--conditions:hover::-webkit-scrollbar-thumb {
+	background: #d1d5db;
+}
+
+.evaluation-panel__cards-container--conditions::-webkit-scrollbar-thumb:hover {
+	background: #9ca3af;
+}
+
+/* ========== Criteria Wrapper (Left-Right Layout) ========== */
+.evaluation-panel__criteria-wrapper {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	gap: 8px;
+	overflow: hidden;
+}
+
+/* Criteria Area */
+.evaluation-panel__criteria-area {
+	flex: 1 1 50%;
+	min-width: 0;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid #e5e7eb;
+	border-radius: 4px;
+	padding: 8px;
+	background-color: #fafafa;
+	transition: all 0.2s ease;
+	overflow: hidden;
+	position: relative;
+}
+
+.evaluation-panel__criteria-area--selected {
+	background-color: #f0fdf4;
+	border-color: #bbf7d0;
+}
+
+.evaluation-panel__criteria-area--unselected {
+	background-color: #f9fafb;
+	border-color: #e5e7eb;
+}
+
+.evaluation-panel__criteria-area:hover {
+	border-color: #9ca3af;
+}
+
+/* Criteria Label */
+.evaluation-panel__criteria-label {
+	font-size: 10px;
+	font-weight: 600;
+	color: #6b7280;
+	margin-bottom: 6px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	flex-shrink: 0;
+}
+
+/* ========== Conditions Wrapper (Left-Right Layout) ========== */
+.evaluation-panel__conditions-wrapper {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	gap: 8px;
+	overflow: hidden;
+}
+
+/* Conditions Area */
+.evaluation-panel__conditions-area {
+	flex: 1 1 50%;
+	min-width: 0;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid #e5e7eb;
+	border-radius: 4px;
+	padding: 8px;
+	background-color: #fafafa;
+	transition: all 0.2s ease;
+	overflow: hidden;
+	position: relative;
+}
+
+.evaluation-panel__conditions-area--selected {
+	background-color: #f0fdf4;
+	border-color: #bbf7d0;
+}
+
+.evaluation-panel__conditions-area--unselected {
+	background-color: #f9fafb;
+	border-color: #e5e7eb;
+}
+
+/* Hover effects for drag over */
+.evaluation-panel__conditions-area:hover {
+	border-color: #9ca3af;
+}
+
+/* Trash Overlay */
+.evaluation-panel__trash-overlay {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background-color: rgba(254, 226, 226, 0.95);
+	border: 2px dashed #ef4444;
+	border-radius: 4px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	z-index: 10;
+	pointer-events: none;
+	animation: fadeIn 0.2s ease;
+}
+
+.evaluation-panel__trash-overlay-icon {
+	font-size: 48px;
+	margin-bottom: 8px;
+	filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+}
+
+.evaluation-panel__trash-overlay-text {
+	font-size: 14px;
+	font-weight: 600;
+	color: #dc2626;
+	text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+}
+
+@keyframes fadeIn {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+/* ========== Conditions Label ========== */
+.evaluation-panel__conditions-label {
+	font-size: 10px;
+	font-weight: 600;
+	color: #6b7280;
+	margin-bottom: 6px;
+	flex-shrink: 0;
+	padding-bottom: 4px;
+	border-bottom: 1px solid #d1d5db;
+}
+
+/* ========== Empty State ========== */
+.evaluation-panel__empty-state {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	color: #9ca3af;
+	text-align: center;
+}
+
+.evaluation-panel__empty-state > p {
+	margin: 0;
+	font-size: 14px;
+}
+
+.evaluation-panel__empty-state-hint {
+	font-size: 12px;
+	color: #d1d5db;
+	margin-top: 8px;
+}
+
+/* ========== Responsive ========== */
+@media (max-width: 1024px) {
+	.evaluation-panel__cards-container--criteria {
+		grid-template-columns: repeat(3, 1fr);
+	}
+}
+
+@media (max-width: 768px) {
+	.evaluation-panel__section {
+		padding: 12px;
+	}
+
+	.evaluation-panel__section-title {
+		font-size: 13px;
+	}
+
+	.evaluation-panel__count {
+		font-size: 11px;
+	}
+
+	.evaluation-panel__cards-container--criteria {
+		grid-template-columns: repeat(2, 1fr);
+	}
+
+	.evaluation-panel__conditions-wrapper {
+		flex-direction: column;
+	}
+
+	.evaluation-panel__conditions-area {
+		flex: 1 1 50%;
+	}
+}
+
+/* ========== Delete Zone ========== */
+/* Removed as per new design */

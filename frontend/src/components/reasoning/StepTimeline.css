@@ -1,0 +1,292 @@
+.step-timeline {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	width: 100%;
+	height: auto;
+	min-height: 0;
+}
+
+.step-timeline-empty {
+	text-align: center;
+	color: #999;
+	font-size: 12px;
+	margin: 0;
+	padding: 8px;
+}
+
+.step-timeline-container {
+	position: relative;
+	display: flex;
+	align-items: center;
+	padding: 4px 0;
+	flex: 0 0 auto;
+	min-height: 0;
+	width: 100%;
+	height: auto;
+}
+
+/* Horizontal connecting line */
+.step-timeline-line {
+	position: absolute;
+	top: 50%;
+	left: 5%;
+	right: 5%;
+	height: 2px;
+	background: none;
+	border-top: 2px dashed #d1d5db;
+	transform: translateY(-50%);
+	z-index: 0;
+	display: block;
+}
+
+/* Step nodes container */
+.step-timeline-nodes {
+	position: relative;
+	display: flex;
+	gap: 8px;
+	width: 100%;
+	padding: 16px 0 0 0;
+	z-index: 1;
+	flex: 0 0 auto;
+	min-height: 0;
+	align-items: center;
+	justify-content: space-between;
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+}
+
+.step-timeline-nodes::-webkit-scrollbar {
+	display: none;
+}
+
+/* Individual step node */
+.step-timeline-node {
+	flex: 1 1 auto;
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	min-width: 40px;
+	max-width: 60px;
+	height: 45px;
+	padding: 2px;
+	border: none;
+	background: none;
+	cursor: pointer;
+	border-radius: 4px;
+	transition: all 0.2s ease;
+	appearance: none;
+	-webkit-appearance: none;
+	overflow: hidden;
+}
+
+.step-timeline-node:hover {
+	background: rgba(59, 130, 246, 0.1);
+	border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.step-timeline-node:focus-visible {
+	outline: 2px solid #3b82f6;
+	outline-offset: 2px;
+}
+
+.step-timeline-node-inner {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: #fff;
+	border: 2px solid rgba(148, 163, 184, 0.4);
+	box-shadow: 0 2px 4px rgba(15, 23, 42, 0.08);
+	transition: all 0.2s ease;
+}
+
+/* Active step node */
+.step-timeline-node--active {
+	z-index: 10;
+}
+
+.step-timeline-node--active .step-timeline-node-inner {
+	width: 18px;
+	height: 18px;
+	border-color: #3b82f6;
+	border-width: 2px;
+	background: #3b82f6;
+	box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1), 0 2px 8px rgba(59, 130, 246, 0.25);
+}
+
+.step-timeline-node:hover .step-timeline-node-inner {
+	border-color: #60a5fa;
+	box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15), 0 2px 6px rgba(96, 165, 250, 0.2);
+}
+
+/* Screenshot thumbnail styles */
+.step-timeline-screenshot {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	border-radius: 4px;
+	border: 2px solid rgba(148, 163, 184, 0.2);
+	transition: all 0.2s ease;
+}
+
+.step-timeline-node--active .step-timeline-screenshot {
+	border-color: #3b82f6;
+	box-shadow: 0 0 0 2px #fff, 0 0 0 4px #3b82f6;
+}
+
+.step-timeline-node:hover .step-timeline-screenshot {
+	border-color: #60a5fa;
+}
+
+.step-timeline-placeholder {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #e5e7eb;
+	border-radius: 4px;
+	border: 2px solid rgba(148, 163, 184, 0.2);
+	font-size: 10px;
+	color: #999;
+	font-weight: 500;
+}
+
+/* Step counter info */
+.step-timeline-info {
+	display: flex;
+	justify-content: center;
+	gap: 8px;
+	padding: 2px 0;
+	flex-shrink: 0;
+}
+
+.step-timeline-counter {
+	font-size: 11px;
+	font-weight: 600;
+	color: #6b7280;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+/* Cluster指示器层 */
+.step-timeline-clusters {
+	position: relative;
+	height: 24px;
+	margin-bottom: 8px;
+	border-bottom: 1px solid #e5e7eb;
+}
+
+.cluster-indicator {
+	position: absolute;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	padding: 0 8px;
+	background-color: rgba(59, 130, 246, 0.08);
+	border-left: 2px solid #3b82f6;
+	border-right: 2px solid #3b82f6;
+	font-size: 12px;
+	color: #1e40af;
+	font-weight: 500;
+	box-sizing: border-box;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.cluster-indicator:hover {
+	background-color: rgba(59, 130, 246, 0.15);
+	box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+	border-left-color: #1e40af;
+	border-right-color: #1e40af;
+}
+
+.cluster-indicator:active {
+	background-color: rgba(59, 130, 246, 0.2);
+}
+
+.cluster-label {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Step evaluation指示器 */
+.step-timeline-node-wrapper {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	flex: 1 1 auto;
+	width: 100%;
+	position: relative;
+}
+
+.step-timeline-node-wrapper.has-evaluations {
+	opacity: 1;
+}
+
+.step-evaluation-indicators {
+	display: flex;
+	gap: 3px;
+	align-items: center;
+	justify-content: center;
+	flex-wrap: nowrap;
+	max-width: 100%;
+	position: absolute;
+	top: -20px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 20;
+	pointer-events: none;
+}
+
+.evaluation-indicator-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	border: 1.5px solid;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	flex-shrink: 0;
+	pointer-events: auto;
+}
+
+.evaluation-indicator-icon:hover {
+	transform: scale(1.25);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+	z-index: 10;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+	.step-timeline-nodes {
+		justify-content: flex-start;
+		overflow-x: auto;
+		gap: 6px;
+	}
+
+	.step-timeline-node {
+		min-width: 35px;
+		max-width: 55px;
+		height: 40px;
+		padding: 1px;
+	}
+
+	.step-timeline-counter {
+		font-size: 10px;
+	}
+
+	.cluster-indicator {
+		font-size: 10px;
+		padding: 0 4px;
+	}
+}

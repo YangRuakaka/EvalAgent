@@ -10,7 +10,7 @@ import { PersonaIcon, EnvironmentIcon } from './components/common/icons';
 import { processVisualizationData } from './components/views/utils/visualizationDataProcessor';
 import { useData } from './context/DataContext';
 import CriteriaManagerModal from './components/criteria/CriteriaManagerModal';
-
+import { initializeApp } from "firebase/app";
 const clamp = (value, min, max) => {
 	if (Number.isNaN(value)) {
 		return min;

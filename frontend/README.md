@@ -1,3 +1,38 @@
+# 部署方法
+
+在部署之前，请确保设置以下代理和环境变量（如果需要）：
+
+```bash
+set http_proxy=http://127.0.0.1:1080
+set https_proxy=http://127.0.0.1:1080
+set NODE_TLS_REJECT_UNAUTHORIZED=0
+```
+
+然后按照以下步骤进行部署：
+
+1. 安装依赖：
+   ```bash
+   npm install
+   ```
+
+2. 构建项目：
+   ```bash
+   npm run build
+   ```
+
+4. 登录：
+   ```bash
+   firebase login
+   ```
+3. 部署到 Firebase Hosting：
+   ```bash
+   firebase deploy --only hosting
+   ```
+
+更多信息请参考下方的 [Create React App 部署文档](https://facebook.github.io/create-react-app/docs/deployment)。
+
+---
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).

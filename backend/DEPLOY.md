@@ -23,17 +23,38 @@ gcloud auth login
 gcloud config set project <YOUR_PROJECT_ID>
 
 # 3. 设置代理 (仅中国大陆用户需要，根据实际端口修改，例如 7890)
-# gcloud config set proxy/type http
-# gcloud config set proxy/address 127.0.0.1
-# gcloud config set proxy/port 1080
+gcloud config set proxy/type http
+gcloud config set proxy/address 127.0.0.1
+gcloud config set proxy/port 1080
 ```
 
-### 2. 部署到 Cloud Run
+### 2. 准备持久化存储 (重要)
 
-在 `backend` 目录下直接运行部署命令：
+为了在重新部署后保留历史记录 (`history_logs`) 和截图，我们使用 Google Cloud Storage (GCS) 进行挂载。
 
+1.  **创建存储桶** (如果尚未创建)：
+    ```powershell
+    # 替换 <YOUR_PROJECT_ID> 为你的真实项目 ID
+    gcloud storage buckets create gs://<YOUR_PROJECT_ID>-history-logs --location=us-central1
+    ```
+
+2.  **上传本地预置数据** (可选，将本地现有的 logs 和截图上传)：
+    ```powershell
+    # 进入 history_logs 目录
+    cd history_logs
+    # 递归上传所有内容到 Bucket 根目录
+    gcloud storage cp -r . gs://<YOUR_PROJECT_ID>-history-logs/
+    # 返回上级目录
+    cd ..
+    ```
+
+### 3. 部署到 Cloud Run (带存储挂载)
+
+在 `backend` 目录下运行以下命令。请将 `<YOUR_PROJECT_ID>` 替换为实际 ID。
+
+**PowerShell / CMD:**
 ```powershell
-gcloud run deploy eval-agent-backend --source . --region us-central1 --allow-unauthenticated
+gcloud run deploy eval-agent-backend --source . --region us-central1 --allow-unauthenticated --execution-environment gen2 --add-volume name=logs-storage,type=cloud-storage,bucket=1099182984762-history-logs --add-volume-mount volume=logs-storage,mount-path=/app/history_logs
 ```
 
 **交互提示说明：**

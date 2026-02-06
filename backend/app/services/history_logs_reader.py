@@ -106,7 +106,10 @@ class HistoryLogsService:
         if not path_str:
             return None
 
-        candidate = Path(str(path_str))
+        # Normalize path separators to forward slashes to handle Windows-generated paths on Linux
+        clean_path = str(path_str).replace("\\", "/")
+        candidate = Path(clean_path)
+        
         if candidate.is_absolute():
             return candidate
 

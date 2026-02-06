@@ -12,7 +12,7 @@ const sanitizeBaseUrl = (value) => {
 };
 
 const defaultConfig = {
-  baseUrl: sanitizeBaseUrl('https://eval-agent-backend-1099182984762.us-central1.run.app/api/v1/'),
+  baseUrl: sanitizeBaseUrl(process.env.REACT_APP_API_BASE_URL || 'https://eval-agent-backend-1099182984762.us-central1.run.app/api/v1/'),
   enableNetwork: true,
 };
 

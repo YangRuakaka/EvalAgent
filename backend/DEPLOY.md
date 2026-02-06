@@ -52,9 +52,14 @@ gcloud run deploy eval-agent-backend --source . --region us-central1 --allow-una
 
 ## 常见问题处理
 
-### 1. 权限错误 (Permission Denied)
-*   **现象**：提示 API disabled 或 permission denied。
-*   **解决**：等待 1-2 分钟让 API 启用生效，然后重试命令。
+### 1. 权限错误 (Permission Denied) / API Disabled
+*   **现象**：
+    *   提示 `API disabled` (例如 `Cloud Run Admin API has not been used in project ...`).
+    *   提示 `permission denied`.
+*   **解决**：
+    *   **启用 API**：根据报错提示的链接（通常是 console.developers.google.com/...）去启用相应的 API (如 Cloud Run Admin API)。
+    *   或者使用命令启用：`gcloud services enable run.googleapis.com`
+    *   启用后，等待 1-2 分钟让变更生效，然后重试命令。
 
 ### 2. 网络错误 (SSL Error / Connection Reset)
 *   **现象**：`SSLError(SSLEOFError)` 或连接超时。

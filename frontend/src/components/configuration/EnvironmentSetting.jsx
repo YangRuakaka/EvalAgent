@@ -103,10 +103,11 @@ const EnvironmentSetting = ({
               )}
 
               {environmentPersonaId ? (
-                environmentPersonaVariations.length > 0 ? (
+                environmentPersonaVariations.filter(v => v.content).length > 0 ? (
                   <div className="config-panel__card-list">
                     {environmentPersonaVariations
                       .filter((v) => !environmentVariationIds.includes(v.valueKey))
+                      .filter((v) => v.content)
                       .map((variation) => {
                         const option = VALUE_VARIATION_OPTIONS.find((item) => item.value === variation.valueKey);
                         const accentColor = variation.color || option?.color || '#e5e7eb';

@@ -9,6 +9,13 @@
 3.  **Firebase 项目（可选）**：如果与前端集成，建议使用 Firebase 项目。
 4.  **Billing**：项目必须绑定计费账户（Blaze 计划），但在免费额度内通常不收费。
 
+## ⚠️ 重要提示：环境变量配置
+
+**必须配置 API Key**：EvalAgent 默认使用 DeepSeek 作为大模型提供商。部署到服务器（Cloud Run）时，必须通过环境变量提供 API Key，否则程序会尝试连接本地的 Ollama (`localhost:11434`) —— 这在 Cloud Run 环境中是不存在的，从而导致连接错误。
+
+报错示例：
+> `Cannot connect to host localhost:11434 ssl:default [Connect call failed ('127.0.0.1', 11434)]`
+
 ## 部署步骤
 
 ### 1. 初始化 Google Cloud 环境
@@ -54,7 +61,8 @@ gcloud config set proxy/port 1080
 
 **PowerShell / CMD:**
 ```powershell
-gcloud run deploy eval-agent-backend --source . --region us-central1 --allow-unauthenticated --execution-environment gen2 --add-volume name=logs-storage,type=cloud-storage,bucket=1099182984762-history-logs --add-volume-mount volume=logs-storage,mount-path=/app/history_logs
+# 请务必替换 <YOUR_API_KEY> 为你的真实 DeepSeek API Key
+gcloud run deploy eval-agent-backend --source . --region us-central1 --allow-unauthenticated --execution-environment gen2 --add-volume name=logs-storage,type=cloud-storage,bucket=1099182984762-history-logs --add-volume-mount volume=logs-storage,mount-path=/app/history_logs --set-env-vars "DEEPSEEK_API_KEY=<YOUR_API_KEY>,DEFAULT_LLM_MODEL=deepseek-chat"
 ```
 
 **交互提示说明：**

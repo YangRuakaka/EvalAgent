@@ -341,8 +341,12 @@ const PersonaConfiguration = ({
               const isSelected = selectedVariationValues.includes(variation.valueKey);
               const isRegenerating = regeneratingVariationKey === variation.valueKey;
               const formattedContent = formatVariationContent(variation.content, highlightColor);
+              const hasContent = Boolean(variation.content);
+
+              if (!isSelected) return null;
+
               return (
-                <article key={variation.valueKey} className={`config-value-variation__item${isSelected ? '' : ' config-value-variation__item--inactive'}`}>
+                <article key={variation.valueKey} className="config-value-variation__item">
                   <div className="config-value-variation__item-header">
                     <h5 className="config-value-variation__item-title">
                       <span className="config-value-variation__color-dot" style={{ backgroundColor: accentColor }} />
@@ -362,7 +366,9 @@ const PersonaConfiguration = ({
                             onClick={() => handleVariationRegeneration(variation.valueKey)}
                             disabled={isRegenerating || isGeneratingVariation}
                           >
-                            {isRegenerating ? 'Regenerating...' : 'Regenerate'}
+                            {isRegenerating
+                              ? (hasContent ? 'Regenerating...' : 'Generating...')
+                              : (hasContent ? 'Regenerate' : 'Generate')}
                           </button>
                           <button type="button" className="panel__action config-value-variation__button" onClick={() => handleStartVariationEdit(variation.valueKey)}>Edit</button>
                         </>

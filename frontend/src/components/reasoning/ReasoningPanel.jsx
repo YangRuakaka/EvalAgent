@@ -559,7 +559,7 @@ const HighlightText = ({ text, highlights, tagName = 'div', className = '', sour
 		h5: ({children}) => <strong style={{fontSize: 'inherit', display: tagName === 'span' ? 'inline' : 'block'}}>{children}</strong>,
 		h6: ({children}) => <strong style={{fontSize: 'inherit', display: tagName === 'span' ? 'inline' : 'block'}}>{children}</strong>,
 		// Ensure links open in new tab if any
-		a: ({node, ...props}) => <a {...props} target="_blank" rel="noopener noreferrer" style={{color: 'inherit', textDecoration: 'underline'}} />
+		a: ({node, children, ...props}) => <a {...props} target="_blank" rel="noopener noreferrer" style={{color: 'inherit', textDecoration: 'underline'}}>{children}</a>
 	};
 
 	// Helper to render content (either markdown or plain)

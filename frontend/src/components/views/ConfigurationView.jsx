@@ -40,8 +40,12 @@ const createEnvironmentTargetOption = (path, label) => ({
 
 const ENVIRONMENT_MODEL_OPTIONS = [
 	{ value: 'deepseek-chat', label: 'DeepSeek Chat' },
+	{ value: 'gpt-4o', label: 'OpenAI GPT-4o' },
 	{ value: 'gpt-4o-mini', label: 'OpenAI GPT-4o Mini' },
-	{ value: 'claude-3-haiku', label: 'Anthropic Claude 3 Haiku' },
+	{ value: 'claude-3-5-sonnet-20240620', label: 'Anthropic Claude 3.5 Sonnet' },
+	{ value: 'claude-3-haiku-20240307', label: 'Anthropic Claude 3 Haiku' },
+	{ value: 'gemini-1.5-pro', label: 'Google Gemini 1.5 Pro' },
+	{ value: 'llama3.1', label: 'Ollama Llama 3.1' },
 	{ value: 'llama3.2', label: 'Ollama Llama 3.2' },
 ];
 

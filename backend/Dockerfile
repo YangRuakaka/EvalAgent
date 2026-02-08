@@ -1,11 +1,14 @@
 # 使用官方 Python 运行时作为基础镜像
 FROM python:3.11-slim
 
+# 设置非交互式前端，避免安装过程中的提示
+ENV DEBIAN_FRONTEND=noninteractive
+
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统基础工具 (Playwright 需要)
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# 升级 pip
+RUN pip install --upgrade pip
 
 # 复制 requirements.txt
 COPY requirements.txt .
@@ -14,7 +17,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 安装 Playwright 浏览器和系统依赖
-RUN playwright install --with-deps chromium
+# 注意: playwright install --with-deps 可能需要 sudo，即使是 root 用户也建议安装
+RUN apt-get update && apt-get install -y curl sudo && \
+    playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
 
 # 复制项目所有文件
 COPY . .

@@ -262,17 +262,20 @@ const EnvironmentSetting = ({
 
               <div className="config-environment__field">
                 <label className="config-environment__label" htmlFor="task-url">Target URL</label>
-                <select
+                <input
                   id="task-url"
+                  type="text"
                   className="config-environment__select"
                   value={environmentTaskUrl}
                   onChange={(e) => handleTaskUrlChange(e.target.value)}
-                >
-                  <option value="">Select a target</option>
-                  <option value="http://localhost:3000/riverbuy">RiverBuy</option>
-                  <option value="http://localhost:3000/zoomcar">ZoomCar</option>
-                  <option value="http://localhost:3000/dwellio">Dwellio</option>
-                </select>
+                  list="task-url-options"
+                  placeholder="http://localhost:3000/..."
+                />
+                <datalist id="task-url-options">
+                  <option value="http://localhost:3000/riverbuy" label="RiverBuy" />
+                  <option value="http://localhost:3000/zoomcar" label="ZoomCar" />
+                  <option value="http://localhost:3000/dwellio" label="Dwellio" />
+                </datalist>
               </div>
             </div>
             {environmentErrors.tasks && (

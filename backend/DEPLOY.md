@@ -27,7 +27,7 @@
 gcloud auth login
 
 # 2. 设置项目 ID (替换 <YOUR_PROJECT_ID>)
-gcloud config set project <YOUR_PROJECT_ID>
+gcloud config set project charged-sled-486613-b7
 
 # 3. 设置代理 (仅中国大陆用户需要，根据实际端口修改，例如 7890)
 gcloud config set proxy/type http
@@ -77,6 +77,24 @@ gcloud run deploy eval-agent-backend --source . --region us-central1 --allow-una
 
 访问 `https://<你的URL>/docs` 即可查看 Swagger API 文档。
 
+### 4. 查看运行日志
+
+如果服务运行出错（如 500 Internal Server Error），可以通过以下两种方式查看报错堆栈：
+
+#### 方式一：Google Cloud Console (网页端推荐)
+1.  进入 [Cloud Run 控制台列表](https://console.cloud.google.com/run)。
+2.  点击你的服务名称（如 `eval-agent-backend`）。
+3.  点击顶部的 **"Logs" (日志)** 标签页。
+4.  这里可以看到所有 `print()` 输出和 Python 报错堆栈。建议在 "Severity" 过滤器中选择 **"Error"** 或 **"Critical"** 以快速定位错误。
+
+#### 方式二：命令行 (gcloud CLI)
+如果你更习惯终端查看实时日志（类似 `tail -f`）：
+
+```powershell
+# 替换 <YOUR_PROJECT_ID>
+gcloud beta run services logs tail eval-agent-backend --project <YOUR_PROJECT_ID>
+```
+
 ---
 
 ## 常见问题处理
@@ -112,3 +130,5 @@ gcloud run deploy eval-agent-backend --source . --region us-central1 --allow-una
 
 ### .dockerignore
 用于排除不需要上传到云端的文件（如 `venv`, `.env`, `__pycache__` 等），加快构建速度。
+
+Bucket:https://console.cloud.google.com/storage/browser

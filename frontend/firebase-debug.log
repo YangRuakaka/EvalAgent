@@ -1,0 +1,127 @@
+[debug] [2026-02-08T13:37:18.288Z] ----------------------------------------------------------------------
+[debug] [2026-02-08T13:37:18.290Z] Command:       D:\nodeJS\node.exe D:\nodeJS\node_global\node_modules\firebase-tools\lib\bin\firebase.js deploy --only hosting
+[debug] [2026-02-08T13:37:18.290Z] CLI Version:   15.5.1
+[debug] [2026-02-08T13:37:18.290Z] Platform:      win32
+[debug] [2026-02-08T13:37:18.290Z] Node Version:  v20.12.1
+[debug] [2026-02-08T13:37:18.290Z] Time:          Sun Feb 08 2026 21:37:18 GMT+0800 (中国标准时间)
+[debug] [2026-02-08T13:37:18.290Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-02-08T13:37:19.854Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-08T13:37:19.854Z] > authorizing via signed-in user (yangyyk22@gmail.com)
+[debug] [2026-02-08T13:37:19.855Z] [iam] checking project evalagent-67802 for permissions ["firebase.projects.get","firebasehosting.sites.update"]
+[debug] [2026-02-08T13:37:19.856Z] Checked if tokens are valid: false, expires at: 1770555174318
+[debug] [2026-02-08T13:37:19.856Z] Checked if tokens are valid: false, expires at: 1770555174318
+[debug] [2026-02-08T13:37:19.856Z] > refreshing access token with scopes: []
+[debug] [2026-02-08T13:37:19.857Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-02-08T13:37:19.858Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-02-08T13:37:21.340Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-02-08T13:37:21.341Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-02-08T13:37:21.350Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/evalagent-67802:testIamPermissions [none]
+[debug] [2026-02-08T13:37:21.350Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/evalagent-67802:testIamPermissions  x-goog-user-project=evalagent-67802
+[debug] [2026-02-08T13:37:21.350Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/evalagent-67802:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2026-02-08T13:37:23.690Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/evalagent-67802:testIamPermissions 200
+[debug] [2026-02-08T13:37:23.691Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/evalagent-67802:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2026-02-08T13:37:23.693Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:23.693Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:23.695Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/evalagent-67802 [none]
+[debug] [2026-02-08T13:37:26.221Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/evalagent-67802 200
+[debug] [2026-02-08T13:37:26.221Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/evalagent-67802 {"projectId":"evalagent-67802","projectNumber":"588077581214","displayName":"EvalAgent","name":"projects/evalagent-67802","resources":{"hostingSite":"evalagent-67802"},"state":"ACTIVE","etag":"1_5f1156f8-e35f-4779-a6fd-55f2c2ed3729"}
+[info] 
+[info] === Deploying to 'evalagent-67802'...
+[info] 
+[info] i  deploying hosting 
+[debug] [2026-02-08T13:37:26.232Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:26.232Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:26.233Z] >>> [apiv2][query] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/versions [none]
+[debug] [2026-02-08T13:37:26.233Z] >>> [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/versions {"status":"CREATED","labels":{"deployment-tool":"cli-firebase"}}
+[debug] [2026-02-08T13:37:27.784Z] <<< [apiv2][status] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/versions 200
+[debug] [2026-02-08T13:37:27.784Z] <<< [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/versions {"name":"projects/588077581214/sites/evalagent-67802/versions/2faa3e7629ddc7e5","status":"CREATED","config":{},"labels":{"deployment-tool":"cli-firebase"}}
+[info] i  hosting[evalagent-67802]: beginning deploy... 
+[info] i  hosting[evalagent-67802]: found 14 files in build 
+[debug] [2026-02-08T13:37:49.857Z] [hosting] uploading with 200 concurrency
+[debug] [2026-02-08T13:37:50.059Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:50.059Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:50.059Z] [hosting] hash cache [YnVpbGQ] stored for 14 files
+[debug] [2026-02-08T13:37:50.060Z] [hosting][hash queue][FINAL] {"max":196,"min":2,"avg":23,"active":0,"complete":14,"success":14,"errored":0,"retried":0,"total":14,"elapsed":201}
+[debug] [2026-02-08T13:37:50.060Z] >>> [apiv2][query] POST https://firebasehosting.googleapis.com/v1beta1/projects/588077581214/sites/evalagent-67802/versions/2faa3e7629ddc7e5:populateFiles [none]
+[debug] [2026-02-08T13:37:50.060Z] >>> [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/588077581214/sites/evalagent-67802/versions/2faa3e7629ddc7e5:populateFiles {"files":{"/robots.txt":"bfe106a3fb878dc83461c86818bf74fc1bdc7f28538ba613cd3e775516ce8b49","/manifest.json":"ee04fb47e525c67d8424ffe9b4d8a8a24e434504478afca4e0ca602146836d4c","/logo512.png":"212b102aa09e51b3b3e06647e81f7801a61333e171f6582e8124379aabccb41d","/logo192.png":"79e2b749561016bc8af300ea19f48347ceed3cb1a54f48ae456172eca45e08f0","/favicon.ico":"27edce7be5922cf0bef7d4136f69b5bfbdd5bf8c13c7b026f71187d41a00aa7d","/index.html":"8a74b9dcc71c9fc6bd710b65000da612df847280daf871d8f32a85c9fc750ce9","/asset-manifest.json":"120c7672d56a88cfa6f148b9d18539ae49d37280ee4c45b59cb73efe73a241c0","/static/js/453.d5177e3c.chunk.js":"b18ef3767678a341dba996ab26e20599832ec0889b87bd465ef80ecf6ed46786","/static/js/main.be4c0e1d.js.LICENSE.txt":"b66096bc0aff35730d07b1276c55f0fb447bf3b2fb7350efa7660b2a5145f6f1","/static/js/453.d5177e3c.chunk.js.map":"f64ccf1ed62e01f418fbc8337ce74ed348089289ad5e0c56750b6818665c0fd3","/static/css/main.3b00f244.css":"e56569a1955f9f31ff841f45caccb94f3cf77ed9da14f42d91e2437366bf2875","/static/css/main.3b00f244.css.map":"c9ed4f234c70ff03e01b6196d4ae3ab9f7d87eb9561046d36110d9ac5b2e3d07","/static/js/main.be4c0e1d.js":"465a37693667db1854ec9635edec0e44b33b112132035c42941147bb2093a489","/static/js/main.be4c0e1d.js.map":"6332e47edaf7ac544696712092c0c6faddce99ac7a3b747050eecd68ef8acabd"}}
+[debug] [2026-02-08T13:37:53.358Z] <<< [apiv2][status] POST https://firebasehosting.googleapis.com/v1beta1/projects/588077581214/sites/evalagent-67802/versions/2faa3e7629ddc7e5:populateFiles 200
+[debug] [2026-02-08T13:37:53.358Z] <<< [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/588077581214/sites/evalagent-67802/versions/2faa3e7629ddc7e5:populateFiles {"uploadRequiredHashes":["6332e47edaf7ac544696712092c0c6faddce99ac7a3b747050eecd68ef8acabd","8a74b9dcc71c9fc6bd710b65000da612df847280daf871d8f32a85c9fc750ce9","465a37693667db1854ec9635edec0e44b33b112132035c42941147bb2093a489","120c7672d56a88cfa6f148b9d18539ae49d37280ee4c45b59cb73efe73a241c0"],"uploadUrl":"https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files"}
+[debug] [2026-02-08T13:37:53.359Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:53.360Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:53.360Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:53.360Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:53.361Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:53.361Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:53.362Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:53.362Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:53.362Z] >>> [apiv2][query] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/6332e47edaf7ac544696712092c0c6faddce99ac7a3b747050eecd68ef8acabd [none]
+[debug] [2026-02-08T13:37:53.362Z] >>> [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/6332e47edaf7ac544696712092c0c6faddce99ac7a3b747050eecd68ef8acabd [stream]
+[debug] [2026-02-08T13:37:53.363Z] >>> [apiv2][query] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/8a74b9dcc71c9fc6bd710b65000da612df847280daf871d8f32a85c9fc750ce9 [none]
+[debug] [2026-02-08T13:37:53.363Z] >>> [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/8a74b9dcc71c9fc6bd710b65000da612df847280daf871d8f32a85c9fc750ce9 [stream]
+[debug] [2026-02-08T13:37:53.364Z] >>> [apiv2][query] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/465a37693667db1854ec9635edec0e44b33b112132035c42941147bb2093a489 [none]
+[debug] [2026-02-08T13:37:53.365Z] >>> [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/465a37693667db1854ec9635edec0e44b33b112132035c42941147bb2093a489 [stream]
+[debug] [2026-02-08T13:37:53.366Z] >>> [apiv2][query] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/120c7672d56a88cfa6f148b9d18539ae49d37280ee4c45b59cb73efe73a241c0 [none]
+[debug] [2026-02-08T13:37:53.366Z] >>> [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/120c7672d56a88cfa6f148b9d18539ae49d37280ee4c45b59cb73efe73a241c0 [stream]
+[debug] [2026-02-08T13:37:53.367Z] [hosting][populate queue][FINAL] {"max":3304,"min":3304,"avg":3304,"active":0,"complete":1,"success":1,"errored":0,"retried":0,"total":1,"elapsed":3309}
+[debug] [2026-02-08T13:37:53.368Z] [hosting] uploads queued: 4
+[debug] [2026-02-08T13:37:56.225Z] <<< [apiv2][status] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/6332e47edaf7ac544696712092c0c6faddce99ac7a3b747050eecd68ef8acabd 200
+[debug] [2026-02-08T13:37:56.225Z] <<< [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/6332e47edaf7ac544696712092c0c6faddce99ac7a3b747050eecd68ef8acabd [stream]
+[debug] [2026-02-08T13:37:56.271Z] <<< [apiv2][status] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/465a37693667db1854ec9635edec0e44b33b112132035c42941147bb2093a489 200
+[debug] [2026-02-08T13:37:56.271Z] <<< [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/465a37693667db1854ec9635edec0e44b33b112132035c42941147bb2093a489 [stream]
+[debug] [2026-02-08T13:37:56.380Z] <<< [apiv2][status] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/8a74b9dcc71c9fc6bd710b65000da612df847280daf871d8f32a85c9fc750ce9 200
+[debug] [2026-02-08T13:37:56.380Z] <<< [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/8a74b9dcc71c9fc6bd710b65000da612df847280daf871d8f32a85c9fc750ce9 [stream]
+[debug] [2026-02-08T13:37:58.052Z] <<< [apiv2][status] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/120c7672d56a88cfa6f148b9d18539ae49d37280ee4c45b59cb73efe73a241c0 200
+[debug] [2026-02-08T13:37:58.052Z] <<< [apiv2][body] POST https://upload-firebasehosting.googleapis.com/upload/sites/evalagent-67802/versions/2faa3e7629ddc7e5/files/120c7672d56a88cfa6f148b9d18539ae49d37280ee4c45b59cb73efe73a241c0 [stream]
+[debug] [2026-02-08T13:37:58.052Z] [hosting][upload queue][FINAL] {"max":4691,"min":2867,"avg":3372,"active":0,"complete":4,"success":4,"errored":0,"retried":0,"total":4,"elapsed":4693}
+[info] +  hosting[evalagent-67802]: file upload complete 
+[debug] [2026-02-08T13:37:58.052Z] [hosting] deploy completed after 8223ms
+[debug] [2026-02-08T13:37:58.052Z] [
+  {
+    "config": {
+      "public": "build",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "site": "evalagent-67802"
+    },
+    "version": "projects/588077581214/sites/evalagent-67802/versions/2faa3e7629ddc7e5"
+  }
+]
+[info] i  hosting[evalagent-67802]: finalizing version... 
+[debug] [2026-02-08T13:37:58.054Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:58.054Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:58.054Z] >>> [apiv2][query] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/versions/2faa3e7629ddc7e5 updateMask=status%2Cconfig
+[debug] [2026-02-08T13:37:58.054Z] >>> [apiv2][body] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/versions/2faa3e7629ddc7e5 {"status":"FINALIZED","config":{"rewrites":[{"glob":"**","path":"/index.html"}]}}
+[debug] [2026-02-08T13:37:59.705Z] <<< [apiv2][status] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/versions/2faa3e7629ddc7e5 200
+[debug] [2026-02-08T13:37:59.706Z] <<< [apiv2][body] PATCH https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/versions/2faa3e7629ddc7e5 {"name":"projects/588077581214/sites/evalagent-67802/versions/2faa3e7629ddc7e5","status":"FINALIZED","config":{"rewrites":[{"glob":"**","path":"/index.html"}]},"labels":{"deployment-tool":"cli-firebase"},"createTime":"2026-02-08T13:37:26.476836Z","createUser":{"email":"yangyyk22@gmail.com"},"finalizeTime":"2026-02-08T13:37:58.794370Z","finalizeUser":{"email":"yangyyk22@gmail.com"}}
+[debug] [2026-02-08T13:37:59.706Z] [hosting] finalized version for evalagent-67802:[object Object]
+[info] +  hosting[evalagent-67802]: version finalized 
+[info] i  hosting[evalagent-67802]: releasing new version... 
+[debug] [2026-02-08T13:37:59.707Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:59.707Z] Checked if tokens are valid: true, expires at: 1770561440341
+[debug] [2026-02-08T13:37:59.709Z] >>> [apiv2][query] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/channels/live/releases versionName=projects%2F588077581214%2Fsites%2Fevalagent-67802%2Fversions%2F2faa3e7629ddc7e5
+[debug] [2026-02-08T13:37:59.709Z] >>> [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/channels/live/releases {}
+[debug] [2026-02-08T13:38:02.167Z] <<< [apiv2][status] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/channels/live/releases 200
+[debug] [2026-02-08T13:38:02.167Z] <<< [apiv2][body] POST https://firebasehosting.googleapis.com/v1beta1/projects/-/sites/evalagent-67802/channels/live/releases {"name":"projects/588077581214/sites/evalagent-67802/channels/live/releases/1770557880657000","version":{"name":"projects/588077581214/sites/evalagent-67802/versions/2faa3e7629ddc7e5","status":"FINALIZED","config":{"rewrites":[{"glob":"**","path":"/index.html"}]},"labels":{"deployment-tool":"cli-firebase"},"createTime":"2026-02-08T13:37:26.476836Z","createUser":{"email":"yangyyk22@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocJKRRfgC32xdzKlCJZV4fUuW_YJqUZ0p9lswRcrrO7fPABVIKQ"},"finalizeTime":"2026-02-08T13:37:58.794370Z","finalizeUser":{"email":"yangyyk22@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocJKRRfgC32xdzKlCJZV4fUuW_YJqUZ0p9lswRcrrO7fPABVIKQ"}},"type":"DEPLOY","releaseTime":"2026-02-08T13:38:00.657Z","releaseUser":{"email":"yangyyk22@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocJKRRfgC32xdzKlCJZV4fUuW_YJqUZ0p9lswRcrrO7fPABVIKQ"}}
+[debug] [2026-02-08T13:38:02.167Z] [hosting] release: {"name":"projects/588077581214/sites/evalagent-67802/channels/live/releases/1770557880657000","version":{"name":"projects/588077581214/sites/evalagent-67802/versions/2faa3e7629ddc7e5","status":"FINALIZED","config":{"rewrites":[{"glob":"**","path":"/index.html"}]},"labels":{"deployment-tool":"cli-firebase"},"createTime":"2026-02-08T13:37:26.476836Z","createUser":{"email":"yangyyk22@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocJKRRfgC32xdzKlCJZV4fUuW_YJqUZ0p9lswRcrrO7fPABVIKQ"},"finalizeTime":"2026-02-08T13:37:58.794370Z","finalizeUser":{"email":"yangyyk22@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocJKRRfgC32xdzKlCJZV4fUuW_YJqUZ0p9lswRcrrO7fPABVIKQ"}},"type":"DEPLOY","releaseTime":"2026-02-08T13:38:00.657Z","releaseUser":{"email":"yangyyk22@gmail.com","imageUrl":"https://lh3.googleusercontent.com/a/ACg8ocJKRRfgC32xdzKlCJZV4fUuW_YJqUZ0p9lswRcrrO7fPABVIKQ"}}
+[info] +  hosting[evalagent-67802]: release complete 
+[info] 
+[info] +  Deploy complete! 
+[info] 
+[info] Project Console: https://console.firebase.google.com/project/evalagent-67802/overview
+[info] Hosting URL: https://evalagent-67802.web.app
+[debug] [2026-02-08T13:38:12.199Z] Error: Timed out.
+    at Timeout._onTimeout (D:\nodeJS\node_global\node_modules\firebase-tools\lib\utils.js:308:49)
+    at listOnTimeout (node:internal/timers:573:17)
+    at process.processTimers (node:internal/timers:514:7)
+[error] 
+[error] Error: An unexpected error has occurred.

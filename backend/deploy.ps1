@@ -28,6 +28,9 @@ $Region = "us-central1"
 $BucketName = "1099182984762-history-logs" # GCS Bucket for history persistence
 $MountPath = "/app/history_logs"
 $DefaultLLMModel = "deepseek-chat"
+$Memory = "4Gi"
+$Cpu = "2"
+$BrowserAgentMaxConcurrent = "1"
 
 # --- Pre-flight Checks ---
 
@@ -39,14 +42,17 @@ if (-not (Get-Command "gcloud" -ErrorAction SilentlyContinue)) {
 
 # 2. API Key Handling
 $ApiKey = $env:DEEPSEEK_API_KEY
+$OpenAiStackApiKey = $env:OPENAI_API_KEY
 
-if (-not $ApiKey -and (Test-Path ".env")) {
-    Write-Host "Reading API Key from .env file..." -ForegroundColor Cyan
+if (Test-Path ".env") {
+    Write-Host "Reading API Keys from .env file..." -ForegroundColor Cyan
     $EnvContent = Get-Content ".env"
     foreach ($line in $EnvContent) {
-        if ($line -match "^DEEPSEEK_API_KEY=(.*)$") {
+        if ($line -match "^DEEPSEEK_API_KEY=(.*)$" -and -not $ApiKey) {
             $ApiKey = $matches[1].Trim()
-            break
+        }
+        if ($line -match "^OPENAI_API_KEY=(.*)$" -and -not $OpenAiStackApiKey) {
+            $OpenAiStackApiKey = $matches[1].Trim()
         }
     }
 }
@@ -64,6 +70,12 @@ if (-not $ApiKey) {
     Write-Host "Using DEEPSEEK_API_KEY from environment variables." -ForegroundColor Green
 }
 
+if ($OpenAiStackApiKey) {
+    Write-Host "Using OPENAI_API_KEY from environment variables." -ForegroundColor Green
+} else {
+    Write-Host "OPENAI_API_KEY not found. Some features (GPT-4o) may not work." -ForegroundColor Yellow
+}
+
 # --- Deployment ---
 
 Write-Host "Starting deployment for service: $ServiceName..." -ForegroundColor Cyan
@@ -78,9 +90,11 @@ $gcloudArgs = @(
     "--region", $Region,
     "--allow-unauthenticated",
     "--execution-environment", "gen2",
+    "--memory", $Memory,
+    "--cpu", $Cpu,
     "--add-volume", "name=logs-storage,type=cloud-storage,bucket=$BucketName",
     "--add-volume-mount", "volume=logs-storage,mount-path=$MountPath",
-    "--set-env-vars", "DEEPSEEK_API_KEY=$ApiKey,DEFAULT_LLM_MODEL=$DefaultLLMModel"
+    "--set-env-vars", "DEEPSEEK_API_KEY=$ApiKey,OPENAI_API_KEY=$OpenAiStackApiKey,DEFAULT_LLM_MODEL=$DefaultLLMModel,BROWSER_AGENT_MAX_CONCURRENT=$BrowserAgentMaxConcurrent"
 )
 
 Write-Host "Executing gcloud command..." -ForegroundColor DarkGray

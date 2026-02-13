@@ -141,6 +141,9 @@ class BrowserAgentService:
             # Use the explicitly selected model from the UI
             llm = get_browser_use_llm(model=model_name)
 
+            # Set timeout for BrowserStartEvent to avoid server timeouts (default is 30s)
+            os.environ["TIMEOUT_BrowserStartEvent"] = "60"
+
             from browser_use import Agent, BrowserSession
             import tempfile
 
@@ -148,12 +151,20 @@ class BrowserAgentService:
             tmp_profile = tempfile.mkdtemp(prefix="bu_profile_")
             
             # Explicitly configure browser session to avoid CDP connection issues
-            # BrowserSession may not accept chromium_args, so we'll use only supported parameters
+            # We use extra args for server environments
             browser_session = BrowserSession(
                 headless=True,
                 user_data_dir=tmp_profile,
                 storage_state=None,
                 keep_alive=False,
+                args=[
+                    "--no-sandbox", 
+                    "--disable-dev-shm-usage", 
+                    "--disable-gpu",
+                    "--disable-setuid-sandbox",
+                    "--no-zygote",
+                    "--disable-software-rasterizer",
+                ],
             )
             
             agent = Agent(

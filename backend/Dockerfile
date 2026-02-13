@@ -29,5 +29,8 @@ COPY . .
 EXPOSE 8080
 
 # 启动命令
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+
+# 启动命令
 # Cloud Run 会注入 PORT 环境变量，exec 确保信号正确传递
 CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}

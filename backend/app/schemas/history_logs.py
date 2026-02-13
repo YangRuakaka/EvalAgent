@@ -29,7 +29,7 @@ class HistoryLogDetails(BaseModel):
     structured_output: Any = Field(
         default=None, description="Structured output emitted by the agent, when available."
     )
-    step_descriptions: List[str] = Field(
+    step_descriptions: List[Optional[str]] = Field(
         default_factory=list,
         description="Description of each step performed by the agent."
     )

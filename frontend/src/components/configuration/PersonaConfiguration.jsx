@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { PersonaIcon, VariationIcon } from '../common/icons';
 
 import './ConfigurationCommon.css';
 import './PersonaConfiguration.css';
@@ -45,7 +46,9 @@ const PersonaConfiguration = ({
   handleVariationEditChange,
   handleSaveVariationEdit,
   handleCancelVariationEdit,
+  handleVariationGeneration,
   handleVariationRegeneration,
+  isGenerating,
   isGeneratingVariation,
   regeneratingVariationKey,
   formatVariationContent,
@@ -190,6 +193,19 @@ const PersonaConfiguration = ({
               ))}
             </select>
           </div>
+        </div>
+        <div className="config-form__actions" style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="submit"
+            className="panel__action config-form__submit-button"
+            disabled={isGenerating}
+            title="Generate Persona"
+          >
+            <PersonaIcon />
+            <span className="btn-label" style={{ marginLeft: '0.5rem' }}>
+              {isGenerating ? 'Generating...' : 'Generate Persona'}
+            </span>
+          </button>
         </div>
       </section>
 
@@ -338,6 +354,21 @@ const PersonaConfiguration = ({
               })}
             </div>
           </div>
+        </div>
+
+        <div className="config-value-variation__actions" style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+          <button
+            type="button"
+            className="panel__action"
+            onClick={handleVariationGeneration}
+            disabled={isGeneratingVariation || !selectedPersonaId || selectedVariationValues.length === 0}
+            title="Generate Variations"
+          >
+            <VariationIcon />
+            <span className="btn-label" style={{ marginLeft: '0.5rem' }}>
+              {isGeneratingVariation ? 'Generating...' : 'Generate Variations'}
+            </span>
+          </button>
         </div>
 
         {/* Unified Hint: Show only when persona or values are not selected */}

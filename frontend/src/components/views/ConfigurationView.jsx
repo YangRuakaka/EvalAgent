@@ -950,39 +950,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 	};
 
 	let actionButton = null;
-	if (currentActiveTab === 'persona') {
-		// When on the persona tab show two actions: generate persona (form submit)
-		// and generate variations (based on the selected persona / values).
-		actionButton = (
-			<div className="config-section__action-group" title="Generate Persona / Variations">
-				<button
-					type="submit"
-					form="persona-form"
-					className="config-section__action config-section__action--left panel__action"
-					disabled={isGenerating}
-					title="Generate Persona"
-				>
-					<PersonaIcon />
-					<span className="btn-label">
-						{isGenerating ? 'Generating...' : 'Persona'}
-					</span>
-				</button>
-
-				<button
-					type="button"
-					className="config-section__action config-section__action--right panel__action"
-					onClick={handleVariationGeneration}
-					disabled={isGeneratingVariation || !selectedPersonaId || selectedVariationValues.length === 0}
-					title="Generate Variations"
-				>
-					<VariationIcon />
-					<span className="btn-label">
-						{isGeneratingVariation ? 'Generating...' : 'Variations'}
-					</span>
-				</button>
-			</div>
-		);
-	} else if (currentActiveTab === 'environment') {
+	if (currentActiveTab === 'environment') {
 		actionButton = (
 			<button
 				type="button"
@@ -1031,7 +999,9 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 										handleVariationEditChange={handleVariationEditChange}
 										handleSaveVariationEdit={handleSaveVariationEdit}
 										handleCancelVariationEdit={handleCancelVariationEdit}
+										handleVariationGeneration={handleVariationGeneration}
 										handleVariationRegeneration={handleVariationRegeneration}
+										isGenerating={isGenerating}
 										isGeneratingVariation={isGeneratingVariation}
 										regeneratingVariationKey={regeneratingVariationKey}
 										formatVariationContent={formatVariationContent}

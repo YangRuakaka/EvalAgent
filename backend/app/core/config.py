@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
-    DEFAULT_LLM_MODEL: str = "deepseek-chat"
+    DEFAULT_LLM_MODEL: str = "gpt-4o"
     DEFAULT_MAX_TOKENS: int = 1000
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     LLM_BASE_URL: Optional[str] = None

@@ -31,10 +31,9 @@ class HistoryLogsService:
         for json_path in sorted(self._cache_dir.glob("*.json")):
             try:
                 logs.append(self._load_single_log(json_path))
-            except Exception as exc:  # pragma: no cover - serialization must remain stable
-                raise HistoryLogsServiceError(
-                    f"Unable to load history log '{json_path.name}': {exc}"
-                ) from exc
+            except Exception as exc:
+                print(f"Warning: Skipping corrupted or invalid log file '{json_path.name}': {exc}")
+                continue
         return logs
 
     def _load_single_log(self, json_path: Path) -> HistoryLogPayload:

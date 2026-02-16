@@ -25,7 +25,7 @@ $ErrorActionPreference = "Stop"
 # --- Configuration ---
 $ServiceName = "eval-agent-backend"
 $Region = "us-central1"
-$BucketName = "1099182984762-history-logs" # GCS Bucket for history persistence
+$BucketName = "evalagent-67802-history-logs" # GCS Bucket for history persistence
 $MountPath = "/app/history_logs"
 $DefaultLLMModel = "deepseek-chat"
 $Memory = "4Gi"
@@ -76,6 +76,29 @@ if ($OpenAiStackApiKey) {
     Write-Host "OPENAI_API_KEY not found. Some features (GPT-4o) may not work." -ForegroundColor Yellow
 }
 
+# --- Sync History Logs ---
+if (Test-Path "history_logs") {
+    Write-Host "Syncing local history_logs to GCS Bucket ($BucketName)..." -ForegroundColor Cyan
+    # Use gsutil to sync files. -m for multi-threaded, -r for recursive.
+    # We use Start-Process to ensure it runs correctly across environments or call gsutil directly if in path.
+    
+    $GsutilCommand = "gsutil"
+    if ($IsWindows -and (Get-Command "gsutil.cmd" -ErrorAction SilentlyContinue)) {
+        $GsutilCommand = "gsutil.cmd"
+    }
+
+    if (Get-Command $GsutilCommand -ErrorAction SilentlyContinue) {
+        & $GsutilCommand -m cp -r ".\history_logs\*" "gs://$BucketName/"
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "History logs synced successfully." -ForegroundColor Green
+        } else {
+            Write-Warning "Failed to sync history logs. Continuing with deployment..."
+        }
+    } else {
+        Write-Warning "gsutil not found. Skipping history logs sync."
+    }
+}
+
 # --- Deployment ---
 
 Write-Host "Starting deployment for service: $ServiceName..." -ForegroundColor Cyan
@@ -99,9 +122,15 @@ $gcloudArgs = @(
 
 Write-Host "Executing gcloud command..." -ForegroundColor DarkGray
 
+# Determine correct gcloud command (avoid .ps1 execution policy issues on Windows)
+$GcloudCommand = "gcloud"
+if ($IsWindows -and (Get-Command "gcloud.cmd" -ErrorAction SilentlyContinue)) {
+    $GcloudCommand = "gcloud.cmd"
+}
+
 # Execute the command
 # Using Start-Process to pass arguments cleanly, or direct invocation
-& gcloud @gcloudArgs
+& $GcloudCommand @gcloudArgs
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "`nDeployment completed successfully!" -ForegroundColor Green

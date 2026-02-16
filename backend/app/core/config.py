@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: Optional[str] = None
     ANTHROPIC_BASE_URL: Optional[str] = None
     GEMINI_BASE_URL: Optional[str] = None
+    ENABLE_OLLAMA: bool = False
     # Free fallback LLM (Ollama)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     FALLBACK_LLM_MODEL: str = "llama3.2"  # Default free model for Ollama

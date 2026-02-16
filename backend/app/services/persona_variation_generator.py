@@ -114,11 +114,10 @@ class PersonaVariationGeneratorService:
 
     def __init__(self, api_key: str | None = None, model: str | None = None, max_tokens: int | None = None):
         """Initialise the persona variation generator with LLM configuration."""
-        self.api_key = api_key or settings.DEEPSEEK_API_KEY or settings.OPENAI_API_KEY
+        self.api_key = api_key
         self.model = model or settings.DEFAULT_LLM_MODEL
         self.max_tokens = max_tokens or settings.DEFAULT_MAX_TOKENS
         self.temperature = settings.PERSONA_VARIATION_LLM_TEMPERATURE
-        self._fallback_llm = None
 
         try:
             self.llm = get_chat_llm(
@@ -131,40 +130,6 @@ class PersonaVariationGeneratorService:
             raise ValueError(str(exc)) from exc
 
         self.template = PersonaVariationTemplate()
-    
-    def _get_fallback_llm(self):
-        """Get or create fallback Ollama LLM for free model fallback."""
-        if self._fallback_llm is None:
-            try:
-                from .llm_factory import get_chat_llm, LLMProvider
-                self._fallback_llm = get_chat_llm(
-                    provider=LLMProvider.OLLAMA.value,
-                    model=settings.FALLBACK_LLM_MODEL,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                )
-                logger.info(f"Created fallback LLM (Ollama) with model: {settings.FALLBACK_LLM_MODEL}")
-            except Exception as e:
-                logger.warning(f"Failed to create fallback LLM: {str(e)}")
-                return None
-        return self._fallback_llm
-    
-    def _is_api_error(self, error: Exception) -> bool:
-        """Check if error is an API error (insufficient balance, API key issue, etc.)."""
-        error_str = str(error).lower()
-        # Check for common API error patterns
-        api_error_indicators = [
-            "insufficient balance",
-            "error code: 402",
-            "invalid_request_error",
-            "authentication",
-            "api key",
-            "unauthorized",
-            "forbidden",
-            "rate limit",
-            "quota",
-        ]
-        return any(indicator in error_str for indicator in api_error_indicators)
 
     async def generate_persona_variation_prompt(
         self, persona: str | None = None, values: List[str] | None = None
@@ -258,35 +223,7 @@ class PersonaVariationGeneratorService:
                 except Exception as exc:  # pylint: disable=broad-except
                     error_str = str(exc)
                     logger.error("Error generating variation for value '%s': %s", value, error_str)
-                    
-                    # Check if it's an API error and try fallback
-                    is_api_error = self._is_api_error(exc)
-                    logger.debug("Is API error for value '%s': %s", value, is_api_error)
-                    
-                    if is_api_error:
-                        logger.info("API error detected for value '%s', attempting fallback to free Ollama model...", value)
-                        fallback_llm = self._get_fallback_llm()
-                        
-                        if fallback_llm:
-                            try:
-                                logger.info("Using fallback Ollama LLM for value '%s'", value)
-                                message = HumanMessage(content=variation_prompt)
-                                response = await fallback_llm.ainvoke([message])
-                                varied_persona = response.content.strip()
-                                logger.info("Successfully generated variation for value '%s' using fallback Ollama model", value)
-                                variations.append({
-                                    "value": value,
-                                    "varied_persona": varied_persona,
-                                })
-                                continue
-                            except Exception as fallback_error:
-                                logger.error("Fallback LLM also failed for value '%s': %s", value, str(fallback_error))
-                                logger.error("Fallback error type: %s", type(fallback_error).__name__)
-                        else:
-                            logger.warning("Fallback LLM not available for value '%s'. Please ensure Ollama is installed and running.", value)
-                    else:
-                        logger.debug("Error for value '%s' is not an API error, skipping fallback", value)
-                    
+
                     variations.append(
                         {
                             "value": value,
@@ -320,7 +257,6 @@ def create_persona_variation_generator_service() -> PersonaVariationGeneratorSer
     """Factory helper to construct a persona variation generator service instance."""
     try:
         return PersonaVariationGeneratorService(
-            api_key=settings.DEEPSEEK_API_KEY,
             model=settings.DEFAULT_LLM_MODEL,
             max_tokens=settings.DEFAULT_MAX_TOKENS,
         )

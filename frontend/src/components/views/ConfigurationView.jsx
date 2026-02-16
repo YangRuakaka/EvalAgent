@@ -115,6 +115,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 	const currentActiveTab = externalActiveTab !== undefined ? externalActiveTab : activeTab;
 	const [isGeneratingVariation, setIsGeneratingVariation] = useState(false);
 	const [formData, setFormData] = useState(EMPTY_FORM);
+	const [personaModel, setPersonaModel] = useState(ENVIRONMENT_MODEL_OPTIONS[1].value);
 	const [errors, setErrors] = useState({});
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [personaResult, setPersonaResult] = useState(null);
@@ -651,7 +652,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				interests: formData.interests.trim() || undefined,
 			};
 
-			const response = await generatePersona(demographic);
+			const response = await generatePersona(demographic, personaModel);
 
 			if (!response.ok) {
 				const message = extractErrorMessage(response.data);
@@ -1008,6 +1009,9 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 								<form id="persona-form" className="config-form" onSubmit={handlePersonaGeneration} noValidate>
 									<PersonaConfiguration
 										formData={formData}
+										personaModel={personaModel}
+										onModelChange={setPersonaModel}
+										modelOptions={ENVIRONMENT_MODEL_OPTIONS}
 										errors={errors}
 										onInputChange={handleInputChange}
 										personaGallery={personaGallery}

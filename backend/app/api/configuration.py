@@ -67,7 +67,7 @@ async def generate_persona(
             "interests": request.demographic.interests,
         }
 
-        result = await service.generate_persona(demographic=demographic_dict)
+        result = await service.generate_persona(demographic=demographic_dict, model=request.model)
 
         if result["success"]:
             logger.info("Persona generation completed successfully")

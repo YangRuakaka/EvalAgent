@@ -2,11 +2,10 @@
 Persona generation service using LangChain and large language models.
 Handles the core logic for generating value agent personas based on demographic information.
 """
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import logging
 
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 
 # Import configuration
 from ..core.config import get_settings
@@ -96,64 +95,41 @@ Persona:"""
 class PersonaGeneratorService:
     """Service for generating personas using a configured LangChain chat model."""
 
-    def __init__(self, llm: ChatOpenAI):
+    def __init__(self, llm: Any):
         """Initialize the persona generator service with a chat model instance."""
 
         self.llm = llm
         self.prompt_template = PersonaPromptTemplate()
-        self._fallback_llm = None
         
-    def _get_fallback_llm(self):
-        """Get or create fallback Ollama LLM for free model fallback."""
-        if self._fallback_llm is None:
-            try:
-                from .llm_factory import get_chat_llm, LLMProvider
-                self._fallback_llm = get_chat_llm(
-                    provider=LLMProvider.OLLAMA.value,
-                    model=settings.FALLBACK_LLM_MODEL,
-                    max_tokens=settings.DEFAULT_MAX_TOKENS,
-                    temperature=settings.PERSONA_LLM_TEMPERATURE,
-                )
-                logger.info(f"Created fallback LLM (Ollama) with model: {settings.FALLBACK_LLM_MODEL}")
-            except Exception as e:
-                logger.warning(f"Failed to create fallback LLM: {str(e)}")
-                return None
-        return self._fallback_llm
-        
-    def _is_api_error(self, error: Exception) -> bool:
-        """Check if error is an API error (insufficient balance, API key issue, etc.)."""
-        error_str = str(error).lower()
-        # Check for common API error patterns
-        api_error_indicators = [
-            "insufficient balance",
-            "error code: 402",
-            "invalid_request_error",
-            "authentication",
-            "api key",
-            "unauthorized",
-            "forbidden",
-            "rate limit",
-            "quota",
-        ]
-        return any(indicator in error_str for indicator in api_error_indicators)
-        
-    async def generate_persona(self, demographic: Dict[str, Any]) -> Dict[str, Any]:
+    async def generate_persona(
+        self,
+        demographic: Dict[str, Any],
+        model: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Generate a persona based on provided demographic information.
-        Falls back to free Ollama model if API errors occur.
         
         Args:
             demographic: Dictionary containing demographic information
+            model: Optional model identifier to use (overrides default)
             
         Returns:
             Dictionary containing generation results
         """
-        logger.info(f"Starting persona generation with demographic: {demographic}")
+        logger.info(f"Starting persona generation with demographic: {demographic}, model: {model}")
         
         # Build the prompt using prompt engineering logic (all handled in backend)
         prompt = self.prompt_template.build_prompt(demographic=demographic)
         
         try:
+            # Determine which LLM instance to use
+            if model:
+                # Create a temporary LLM instance for this specific model request
+                llm = get_chat_llm(model=model)
+            else:
+                # Use the default configured instance
+                llm = self.llm
+
             # Generate persona using configured LLM
             print("\n" + "="*80)
             print("[PersonaGeneratorService.generate_persona]")
@@ -163,7 +139,7 @@ class PersonaGeneratorService:
             print("="*80)
             
             message = HumanMessage(content=prompt)
-            response = await self.llm.ainvoke([message])
+            response = await llm.ainvoke([message])
             generated_persona = response.content.strip()
             
             print("[RESPONSE FROM LLM]:")
@@ -180,33 +156,7 @@ class PersonaGeneratorService:
         except Exception as e:
             error_str = str(e)
             logger.error(f"Error generating persona: {error_str}")
-            
-            # Check if it's an API error and try fallback
-            if self._is_api_error(e):
-                logger.info("API error detected, attempting fallback to free Ollama model...")
-                fallback_llm = self._get_fallback_llm()
-                
-                if fallback_llm:
-                    try:
-                        message = HumanMessage(content=prompt)
-                        response = await fallback_llm.ainvoke([message])
-                        generated_persona = response.content.strip()
-                        logger.info("Successfully generated persona using fallback Ollama model")
-                        return {
-                            "persona": generated_persona,
-                            "success": True,
-                            "error_message": None
-                        }
-                    except Exception as fallback_error:
-                        logger.error(f"Fallback LLM also failed: {str(fallback_error)}")
-                        return {
-                            "persona": None,
-                            "success": False,
-                            "error_message": f"Primary LLM failed ({error_str}), fallback also failed: {str(fallback_error)}"
-                        }
-                else:
-                    logger.warning("Fallback LLM not available")
-            
+
             return {
                 "persona": None,
                 "success": False,
@@ -218,38 +168,22 @@ class PersonaGeneratorService:
 def create_persona_generator_service() -> PersonaGeneratorService:
     """
     Factory function to create and configure persona generator service.
-    Falls back to free Ollama model if primary LLM cannot be configured.
     
     Returns:
         Configured PersonaGeneratorService instance
     """
-    # Try to get primary LLM (DeepSeek or configured default)
     try:
         llm = get_chat_llm(
-            api_key=settings.DEEPSEEK_API_KEY,
             model=settings.DEFAULT_LLM_MODEL,
             max_tokens=settings.DEFAULT_MAX_TOKENS,
             temperature=settings.PERSONA_LLM_TEMPERATURE,
         )
-        logger.info("Created persona generator with primary LLM")
+        logger.info("Created persona generator with configured LLM provider")
     except LLMConfigurationError as exc:
-        logger.warning(f"Primary LLM configuration failed: {str(exc)}. Falling back to free Ollama model.")
-        # Fallback to free Ollama model
-        try:
-            from .llm_factory import LLMProvider
-            llm = get_chat_llm(
-                provider=LLMProvider.OLLAMA.value,
-                model=settings.FALLBACK_LLM_MODEL,
-                max_tokens=settings.DEFAULT_MAX_TOKENS,
-                temperature=settings.PERSONA_LLM_TEMPERATURE,
-            )
-            logger.info(f"Created persona generator with fallback Ollama model: {settings.FALLBACK_LLM_MODEL}")
-        except Exception as fallback_exc:
-            logger.error(f"Fallback LLM also failed: {str(fallback_exc)}")
-            raise ValueError(
-                f"Primary LLM configuration failed: {str(exc)}. "
-                f"Fallback to Ollama also failed: {str(fallback_exc)}. "
-                f"Please ensure Ollama is installed and running (or configure API keys)."
-            ) from fallback_exc
+        logger.error("Persona LLM configuration failed: %s", exc)
+        raise ValueError(
+            f"Persona LLM configuration failed: {str(exc)}. "
+            "Please configure a valid API key for the selected provider."
+        ) from exc
 
     return PersonaGeneratorService(llm=llm)

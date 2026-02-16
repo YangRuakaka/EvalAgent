@@ -74,7 +74,7 @@ class JudgeEvaluatorService:
         task_name: str,
         personas_str: str,
         models_str: str,
-        model_name: str = "deepseek-chat",
+        model_name: Optional[str] = None,
         is_first_step: bool = False
     ) -> EvaluationResult:
         """Asynchronously evaluate a single step against a criterion.
@@ -174,7 +174,7 @@ class JudgeEvaluatorService:
         task_name: str,
         personas: List[str],
         models: List[str],
-        model_name: str = "deepseek-chat"
+        model_name: Optional[str] = None
     ) -> List[EvaluationResult]:
         """Evaluate multiple steps concurrently.
         
@@ -233,8 +233,8 @@ class JudgeEvaluatorService:
         task_name: str,
         personas: List[str],
         models: List[str],
-        model_name: str = "deepseek-chat",
         all_steps: Optional[List[Dict[str, Any]]] = None,
+        model_name: Optional[str] = None,
         criterion_description: Optional[str] = None
     ) -> EvaluationResult:
         """Evaluate a single criterion against aggregated steps.

@@ -59,10 +59,15 @@ class PersonaGenerationRequest(BaseModel):
     
     Attributes:
         demographic: Demographic information for persona generation
+        model: Model identifier to use for generation (optional)
     """
     demographic: DemographicInfo = Field(
         ...,
         description="Demographic information to guide persona generation"
+    )
+    model: Optional[str] = Field(
+        None,
+        description="Model identifier to use for generation, e.g. 'gpt-4o'"
     )
 
 

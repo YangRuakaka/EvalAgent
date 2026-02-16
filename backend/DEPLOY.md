@@ -11,10 +11,9 @@
 
 ## ⚠️ 重要提示：环境变量配置
 
-**必须配置 API Key**：EvalAgent 默认使用 DeepSeek 作为大模型提供商。部署到服务器（Cloud Run）时，必须通过环境变量提供 API Key，否则程序会尝试连接本地的 Ollama (`localhost:11434`) —— 这在 Cloud Run 环境中是不存在的，从而导致连接错误。
+**必须配置有效 API Key**：部署到 Cloud Run 时，需为你选择的模型提供商配置对应 API Key（如 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`）。
 
-报错示例：
-> `Cannot connect to host localhost:11434 ssl:default [Connect call failed ('127.0.0.1', 11434)]`
+当前版本默认**禁用 Ollama**（`ENABLE_OLLAMA=false`），不会自动回退到本地 `localhost:11434`。
 
 ## 部署步骤
 
@@ -61,8 +60,8 @@ gcloud config set proxy/port 1080
 
 **PowerShell / CMD:**
 ```powershell
-# 请务必替换 <YOUR_API_KEY> 为你的真实 DeepSeek API Key
-gcloud run deploy eval-agent-backend --source . --region us-central1 --allow-unauthenticated --execution-environment gen2 --add-volume name=logs-storage,type=cloud-storage,bucket=1099182984762-history-logs --add-volume-mount volume=logs-storage,mount-path=/app/history_logs --set-env-vars "DEEPSEEK_API_KEY=<YOUR_API_KEY>,DEFAULT_LLM_MODEL=deepseek-chat"
+# 请按模型提供商替换 API Key；例如使用 OpenAI 时请配置 OPENAI_API_KEY
+gcloud run deploy eval-agent-backend --source . --region us-central1 --allow-unauthenticated --execution-environment gen2 --add-volume name=logs-storage,type=cloud-storage,bucket=1099182984762-history-logs --add-volume-mount volume=logs-storage,mount-path=/app/history_logs --set-env-vars "OPENAI_API_KEY=<YOUR_OPENAI_API_KEY>,DEFAULT_LLM_MODEL=gpt-4o,ENABLE_OLLAMA=false"
 ```
 
 **交互提示说明：**

@@ -127,6 +127,7 @@ class ChatLLMFactory:
 
         resolved_model = model_override or settings.DEFAULT_LLM_MODEL
         resolved_provider = self._resolve_provider(provider_override, resolved_model)
+        self._validate_provider_enabled(resolved_provider)
 
         resolved_api_key = self._resolve_api_key(resolved_provider, api_key_override)
         # Ollama doesn't require an API key
@@ -151,6 +152,12 @@ class ChatLLMFactory:
             max_tokens=resolved_max_tokens,
             temperature=resolved_temperature,
         )
+
+    def _validate_provider_enabled(self, provider: LLMProvider) -> None:
+        if provider is LLMProvider.OLLAMA and not self._settings.ENABLE_OLLAMA:
+            raise LLMConfigurationError(
+                "Ollama provider is disabled. Set ENABLE_OLLAMA=true to enable it."
+            )
 
     def _resolve_provider(
         self,
@@ -202,7 +209,7 @@ class ChatLLMFactory:
         if provider is LLMProvider.GEMINI:
             return settings.GEMINI_API_KEY
 
-        return settings.OPENAI_API_KEY or settings.DEEPSEEK_API_KEY
+        return settings.OPENAI_API_KEY
 
     def _resolve_base_url(
         self,

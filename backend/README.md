@@ -23,6 +23,7 @@ OPENAI_API_KEY=your-openai-api-key
 DEEPSEEK_API_KEY=your-deepseek-api-key
 ANTHROPIC_API_KEY=your-anthropic-api-key
 GEMINI_API_KEY=your-gemini-api-key
+ENABLE_OLLAMA=false
 ```
 
 Optional overrides for custom gateways:

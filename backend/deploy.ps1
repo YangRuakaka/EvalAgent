@@ -27,7 +27,7 @@ $ServiceName = "eval-agent-backend"
 $Region = "us-central1"
 $BucketName = "evalagent-67802-history-logs" # GCS Bucket for history persistence
 $MountPath = "/app/history_logs"
-$DefaultLLMModel = "deepseek-chat"
+$DefaultLLMModel = "gpt-4o"
 $Memory = "4Gi"
 $Cpu = "2"
 $BrowserAgentMaxConcurrent = "1"
@@ -41,39 +41,39 @@ if (-not (Get-Command "gcloud" -ErrorAction SilentlyContinue)) {
 }
 
 # 2. API Key Handling
-$ApiKey = $env:DEEPSEEK_API_KEY
-$OpenAiStackApiKey = $env:OPENAI_API_KEY
+$ApiKey = $env:OPENAI_API_KEY
+$DeepSeekApiKey = $env:DEEPSEEK_API_KEY
 
 if (Test-Path ".env") {
     Write-Host "Reading API Keys from .env file..." -ForegroundColor Cyan
     $EnvContent = Get-Content ".env"
     foreach ($line in $EnvContent) {
-        if ($line -match "^DEEPSEEK_API_KEY=(.*)$" -and -not $ApiKey) {
+        if ($line -match "^OPENAI_API_KEY=(.*)$" -and -not $ApiKey) {
             $ApiKey = $matches[1].Trim()
         }
-        if ($line -match "^OPENAI_API_KEY=(.*)$" -and -not $OpenAiStackApiKey) {
-            $OpenAiStackApiKey = $matches[1].Trim()
+        if ($line -match "^DEEPSEEK_API_KEY=(.*)$" -and -not $DeepSeekApiKey) {
+            $DeepSeekApiKey = $matches[1].Trim()
         }
     }
 }
 
 if (-not $ApiKey) {
-    Write-Host "Environment variable 'DEEPSEEK_API_KEY' is not found in environment or .env file." -ForegroundColor Yellow
-    Write-Host "The backend requires an API Key to function correctly on Cloud Run."
-    $ApiKey = Read-Host "Please enter your DeepSeek API Key"
+    Write-Host "Environment variable 'OPENAI_API_KEY' is not found in environment or .env file." -ForegroundColor Yellow
+    Write-Host "The backend requires an OpenAI API Key to function correctly on Cloud Run."
+    $ApiKey = Read-Host "Please enter your OpenAI API Key"
     
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
         Write-Error "API Key cannot be empty. Deployment aborted."
         exit 1
     }
 } else {
-    Write-Host "Using DEEPSEEK_API_KEY from environment variables." -ForegroundColor Green
+    Write-Host "Using OPENAI_API_KEY from environment variables." -ForegroundColor Green
 }
 
-if ($OpenAiStackApiKey) {
-    Write-Host "Using OPENAI_API_KEY from environment variables." -ForegroundColor Green
+if ($DeepSeekApiKey) {
+    Write-Host "Using DEEPSEEK_API_KEY from environment variables." -ForegroundColor Green
 } else {
-    Write-Host "OPENAI_API_KEY not found. Some features (GPT-4o) may not work." -ForegroundColor Yellow
+    Write-Host "DEEPSEEK_API_KEY not found." -ForegroundColor Yellow
 }
 
 # --- Sync History Logs ---
@@ -117,7 +117,7 @@ $gcloudArgs = @(
     "--cpu", $Cpu,
     "--add-volume", "name=logs-storage,type=cloud-storage,bucket=$BucketName",
     "--add-volume-mount", "volume=logs-storage,mount-path=$MountPath",
-    "--set-env-vars", "DEEPSEEK_API_KEY=$ApiKey,OPENAI_API_KEY=$OpenAiStackApiKey,DEFAULT_LLM_MODEL=$DefaultLLMModel,BROWSER_AGENT_MAX_CONCURRENT=$BrowserAgentMaxConcurrent"
+    "--set-env-vars", "DEEPSEEK_API_KEY=$DeepSeekApiKey,OPENAI_API_KEY=$ApiKey,DEFAULT_LLM_MODEL=$DefaultLLMModel,BROWSER_AGENT_MAX_CONCURRENT=$BrowserAgentMaxConcurrent,ENABLE_OLLAMA=false"
 )
 
 Write-Host "Executing gcloud command..." -ForegroundColor DarkGray

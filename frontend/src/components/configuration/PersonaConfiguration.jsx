@@ -25,6 +25,9 @@ const PersonaConfiguration = ({
   formData,
   errors,
   onInputChange,
+  personaModel,
+  onModelChange,
+  modelOptions = [],
   personaGallery = [],
   selectedPersonaId,
   handlePersonaSelect,
@@ -169,6 +172,23 @@ const PersonaConfiguration = ({
               onChange={onInputChange}
             />
             {errors.interests && <p className="config-form__error">{errors.interests}</p>}
+          </div>
+          <div className="config-form__field config-form__field--model">
+            <label className="config-form__label" htmlFor="persona-model">
+              Model
+            </label>
+            <select
+              id="persona-model"
+              className="config-form__input"
+              value={personaModel}
+              onChange={(e) => onModelChange(e.target.value)}
+            >
+              {modelOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </section>

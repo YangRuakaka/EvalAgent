@@ -3,9 +3,9 @@ import { API_ENDPOINTS } from './endpoints';
 
 const defaultClient = createApiClient();
 
-export const generatePersona = (demographic, client = defaultClient) => {
-	console.log('[API] generatePersona - Request:', { demographic });
-	return client.post(API_ENDPOINTS.persona.generate, { demographic }).then(response => {
+export const generatePersona = (demographic, model, client = defaultClient) => {
+	console.log('[API] generatePersona - Request:', { demographic, model });
+	return client.post(API_ENDPOINTS.persona.generate, { demographic, model }).then(response => {
 		console.log('[API] generatePersona - Response:', response);
 		return response;
 	});

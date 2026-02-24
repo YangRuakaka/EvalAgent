@@ -34,7 +34,8 @@ $HistoryLogsPath = Join-Path $PSScriptRoot "history_logs"
 $DefaultLLMModel = "gpt-4o"
 $Memory = "4Gi"
 $Cpu = "2"
-$BrowserAgentMaxConcurrent = "1"
+$BrowserAgentMaxConcurrent = "2"
+$BrowserAgentMaxSteps = "30"
 
 # --- Pre-flight Checks ---
 
@@ -133,6 +134,11 @@ $gcloudArgs = @(
 $EnvVars = @(
     "DEFAULT_LLM_MODEL=$DefaultLLMModel",
     "BROWSER_AGENT_MAX_CONCURRENT=$BrowserAgentMaxConcurrent",
+    "BROWSER_AGENT_MAX_STEPS=$BrowserAgentMaxSteps",
+    "BROWSER_AGENT_ENABLE_SCREENSHOT_PROCESSING=false",
+    "BROWSER_AGENT_MAX_SCREENSHOTS=3",
+    "BROWSER_AGENT_INCLUDE_SCREENSHOTS_IN_RUN_RESPONSE=false",
+    "BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD=false",
     "ENABLE_OLLAMA=false"
 )
 

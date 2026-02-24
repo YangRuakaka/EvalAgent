@@ -47,10 +47,8 @@ export const runBrowserAgent = (payload, optionsOrClient, maybeClient) => {
 
 	console.log('[API] runBrowserAgent - Request:', payload);
 	return client.post(API_ENDPOINTS.browserAgent.run, payload, {
-		retryOnNetworkError:	requestOptions.retryOnNetworkError ?? true,
-		maxRetries:		requestOptions.maxRetries ?? Infinity,
-		retryDelayMs:	requestOptions.retryDelayMs ?? 1500,
-		onRetry:		requestOptions.onRetry,
+		retryOnNetworkError:	false,
+		maxRetries:		0,
 		...(requestOptions.headers ? { headers: requestOptions.headers } : {}),
 	}).then(response => {
 		console.log('[API] runBrowserAgent - Response:', response);

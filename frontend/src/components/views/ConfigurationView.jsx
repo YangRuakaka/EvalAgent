@@ -140,7 +140,6 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 	const [environmentRunResult, setEnvironmentRunResult] = useState(null);
 	const [isRunningEnvironment, setIsRunningEnvironment] = useState(false);
 	const [environmentWaitSeconds, setEnvironmentWaitSeconds] = useState(0);
-	const [environmentRetryCount, setEnvironmentRetryCount] = useState(0);
 	const [regeneratingVariationKey, setRegeneratingVariationKey] = useState(null);
 	const dropdownRef = useRef(null);
 
@@ -903,7 +902,6 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		setEnvironmentRunResult(null);
 		setIsRunningEnvironment(true);
 		setEnvironmentWaitSeconds(0);
-		setEnvironmentRetryCount(0);
 		const waitTimer = window.setInterval(() => {
 			setEnvironmentWaitSeconds((prev) => prev + 1);
 		}, 1000);
@@ -931,10 +929,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				run_times: parsedRunTimes,
 			};
 			const response = await runBrowserAgent(requestBody, {
-				onRetry: ({ attempt, error }) => {
-					setEnvironmentRetryCount(attempt);
-					console.warn('[EnvironmentRun] retrying browser-agent request', { attempt, error });
-				},
+				retryOnNetworkError: false,
 			});
 			console.info('[browser-agent/run] Raw response payload:', response.data);
 			if (!response.ok) {
@@ -977,7 +972,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				disabled={isRunningEnvironment || isCacheLoading}
 			>
 				{isRunningEnvironment
-					? `Waiting ${environmentWaitSeconds}s${environmentRetryCount > 0 ? ` · Retry ${environmentRetryCount}` : ''}`
+					? `Waiting ${environmentWaitSeconds}s`
 					: (isCacheLoading ? 'Running...' : 'Run')}
 			</button>
 		);

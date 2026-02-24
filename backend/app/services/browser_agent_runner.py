@@ -52,7 +52,7 @@ class _RunContext:
 @dataclass
 class _ScreenshotArtifact:
     path: str
-    base64_content: str
+    base64_content: Optional[str] = None
 
 
 class BrowserAgentService:
@@ -61,6 +61,21 @@ class BrowserAgentService:
     def __init__(self) -> None:
         self._settings = get_settings()
         self._output_dir = Path(self._settings.BROWSER_AGENT_OUTPUT_DIR).resolve()
+        self._enable_screenshots = getattr(self._settings, "BROWSER_AGENT_ENABLE_SCREENSHOTS", True)
+        self._enable_screenshot_processing = getattr(
+            self._settings,
+            "BROWSER_AGENT_ENABLE_SCREENSHOT_PROCESSING",
+            False,
+        )
+        self._max_screenshots = max(
+            0,
+            int(getattr(self._settings, "BROWSER_AGENT_MAX_SCREENSHOTS", 3)),
+        )
+        self._include_screenshots_in_run_response = getattr(
+            self._settings,
+            "BROWSER_AGENT_INCLUDE_SCREENSHOTS_IN_RUN_RESPONSE",
+            False,
+        )
 
     async def run(self, request: BrowserAgentRunRequest) -> List[BrowserAgentRunResult]:
         """Execute the browser agent across all persona/model combinations."""
@@ -240,13 +255,17 @@ class BrowserAgentService:
                 history_path=self._to_relative_path(context.history_path),
                 history_payload=history_payload,
                 screenshot_paths=[self._to_relative_path(Path(path)) for path in screenshot_paths],
-                screenshots=[
-                    BrowserAgentScreenshot(
-                        path=self._to_relative_path(Path(artifact.path)),
-                        content_base64=artifact.base64_content,
-                    )
-                    for artifact in screenshot_artifacts
-                ],
+                screenshots=(
+                    [
+                        BrowserAgentScreenshot(
+                            path=self._to_relative_path(Path(artifact.path)),
+                            content_base64=artifact.base64_content or "",
+                        )
+                        for artifact in screenshot_artifacts
+                    ]
+                    if self._include_screenshots_in_run_response
+                    else []
+                ),
                 metadata={
                     "value": persona.value,
                     "persona": persona.content
@@ -399,6 +418,9 @@ class BrowserAgentService:
     def _save_screenshots(self, history: Any, context: _RunContext) -> List[_ScreenshotArtifact]:
         """Persist screenshots from the agent history and return saved artifacts."""
 
+        if not self._enable_screenshots:
+            return []
+
         artifacts: List[_ScreenshotArtifact] = []
         screenshots_attr = getattr(history, "screenshots", None)
 
@@ -415,10 +437,13 @@ class BrowserAgentService:
             logger.debug(f"No screenshots found in history object. Type: {type(history)}, Has screenshots attr: {hasattr(history, 'screenshots')}")
             return artifacts
 
-        # Extract action descriptions and element bounding boxes from history for each step
-        action_descriptions = self._extract_action_descriptions(history)
-        element_bboxes = self._extract_element_bounding_boxes(history)
+        # Extract rich metadata only when screenshot processing is enabled
+        action_descriptions = self._extract_action_descriptions(history) if self._enable_screenshot_processing else {}
+        element_bboxes = self._extract_element_bounding_boxes(history) if self._enable_screenshot_processing else {}
         
+        if self._max_screenshots > 0:
+            screenshots = list(screenshots)[: self._max_screenshots]
+
         logger.info(f"Processing {len(screenshots)} screenshots with {len(element_bboxes)} bounding boxes available")
         
         for index, screenshot_data in enumerate(screenshots, start=1):
@@ -435,7 +460,7 @@ class BrowserAgentService:
                 continue
 
             # Apply intelligent cropping and add text overlay if PIL is available
-            if PIL_AVAILABLE:
+            if PIL_AVAILABLE and self._enable_screenshot_processing:
                 try:
                     # Get description and bounding box for this step (index-1 because actions are 0-indexed)
                     description = action_descriptions.get(index - 1, None)
@@ -469,7 +494,11 @@ class BrowserAgentService:
             artifacts.append(
                 _ScreenshotArtifact(
                     path=str(target_path),
-                    base64_content=base64.b64encode(image_bytes).decode("utf-8"),
+                    base64_content=(
+                        base64.b64encode(image_bytes).decode("utf-8")
+                        if self._include_screenshots_in_run_response
+                        else None
+                    ),
                 )
             )
 

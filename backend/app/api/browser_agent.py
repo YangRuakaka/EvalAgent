@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+from ..core.config import get_settings
 from ..schemas.browser_agent import BrowserAgentRunRequest, BrowserAgentRunResponse
 from ..services.browser_agent_runner import (
     BrowserAgentExecutionError,
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/browser-agent", tags=["browser-agent"])
 _service = BrowserAgentService()
+_settings = get_settings()
 
 
 @router.post(
@@ -41,6 +43,12 @@ async def run_browser_agent(request: BrowserAgentRunRequest) -> BrowserAgentRunR
         results = await _service.run(request)
     except BrowserAgentExecutionError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    include_base64_in_history_payload = getattr(
+        _settings,
+        "BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD",
+        False,
+    )
 
     # Add metadata field
     now_utc = datetime.now(timezone.utc).isoformat()
@@ -80,38 +88,33 @@ async def run_browser_agent(request: BrowserAgentRunRequest) -> BrowserAgentRunR
             "metadata": raw_payload.get("metadata"),
         }
 
-        # Build inline base64 screenshots list from available paths
-        inline_screenshots: list[str] = []
-        candidate_paths = history_payload.get("screenshot_paths") or history_payload.get("screenshots") or []
-        for rel_path in candidate_paths:
-            try:
-                rel_path_str = str(rel_path)
-                file_path = Path(rel_path_str)
-                # try a couple of sensible fallbacks if the path isn't already absolute
-                if not file_path.exists():
-                    file_path = Path.cwd() / rel_path_str
-                if not file_path.exists() and hasattr(result, "history_path"):
-                    # try relative to history file directory
-                    try:
-                        file_path = Path(result.history_path).resolve().parent / rel_path_str
-                    except Exception:
-                        pass
+        if include_base64_in_history_payload:
+            inline_screenshots: list[str] = []
+            candidate_paths = history_payload.get("screenshot_paths") or history_payload.get("screenshots") or []
+            for rel_path in candidate_paths:
+                try:
+                    rel_path_str = str(rel_path)
+                    file_path = Path(rel_path_str)
+                    if not file_path.exists():
+                        file_path = Path.cwd() / rel_path_str
+                    if not file_path.exists() and hasattr(result, "history_path"):
+                        try:
+                            file_path = Path(result.history_path).resolve().parent / rel_path_str
+                        except Exception:
+                            pass
 
-                if not file_path.exists():
-                    logger.warning("Screenshot file not found, skipping: %s", rel_path_str)
+                    if not file_path.exists():
+                        logger.warning("Screenshot file not found, skipping: %s", rel_path_str)
+                        continue
+
+                    with file_path.open("rb") as fh:
+                        b = fh.read()
+                    inline_screenshots.append(base64.b64encode(b).decode("ascii"))
+                except Exception as exc:
+                    logger.exception("Failed to read/encode screenshot %s: %s", rel_path, exc)
                     continue
 
-                with file_path.open("rb") as fh:
-                    b = fh.read()
-                b64 = base64.b64encode(b).decode("ascii")
-                # Only include the base64 string inside history_payload["screenshots"] as requested
-                inline_screenshots.append(b64)
-            except Exception as exc:
-                logger.exception("Failed to read/encode screenshot %s: %s", rel_path, exc)
-                continue
-
-        # Put the inline base64 images into the history payload (replace paths)
-        history_payload["screenshots"] = inline_screenshots
+            history_payload["screenshots"] = inline_screenshots
 
         # Build new result structure
         new_result = {

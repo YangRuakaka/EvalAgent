@@ -28,11 +28,7 @@ const TestAutoBuy = ({ onAddRun }) => {
             }, 1000);
 
             console.log('TestAutoBuy sending payload:', payload);
-            const response = await runBrowserAgent(payload, {
-                onRetry: ({ attempt, error }) => {
-                    console.warn('[TestAutoBuy] retrying browser-agent request', { attempt, error });
-                },
-            });
+            const response = await runBrowserAgent(payload);
             if (response.ok && response.data && response.data.results) {
                 if (onAddRun) {
                     console.log('TestAutoBuy calling onAddRun with:', response.data.results);

@@ -202,14 +202,19 @@ class ChatLLMFactory:
         if api_key_override:
             return api_key_override
 
+        if provider is LLMProvider.OPENAI:
+            return settings.OPENAI_API_KEY
+            
         if provider is LLMProvider.DEEPSEEK:
-            return settings.DEEPSEEK_API_KEY or settings.OPENAI_API_KEY
+            return settings.DEEPSEEK_API_KEY
+            
         if provider is LLMProvider.ANTHROPIC:
             return settings.ANTHROPIC_API_KEY
+            
         if provider is LLMProvider.GEMINI:
             return settings.GEMINI_API_KEY
 
-        return settings.OPENAI_API_KEY
+        return None
 
     def _resolve_base_url(
         self,

@@ -139,6 +139,7 @@ async def generate_persona_variations(
         result = await service.generate_persona_variations(
             persona=request.persona,
             values=request.values,
+            model=request.model,
         )
 
         if result["success"]:

@@ -1,12 +1,16 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { runBrowserAgent } from '../../services/api';
 
 const TestAutoBuy = ({ onAddRun }) => {
+    const timerRef = useRef(null);
+    const [isWaiting, setIsWaiting] = useState(false);
+    const [waitSeconds, setWaitSeconds] = useState(0);
+
     const handleTest = async () => {
         const payload = {
             task: {
-                name: 'Tell me who is Yukun Yang',
-                url: 'https://yangruakaka.github.io/Yukun_Yang/'
+                name: 'Find me a ticket from New York to San Francisco next week(you don\'t need to actually buy it, just find the best option and tell me the details)',
+                url: 'https://www.google.com/travel/flights?gl=US&hl=en-US'
             },
             model: ['deepseek-chat'],
             persona: [
@@ -17,8 +21,18 @@ const TestAutoBuy = ({ onAddRun }) => {
         };
 
         try {
+            setIsWaiting(true);
+            setWaitSeconds(0);
+            timerRef.current = window.setInterval(() => {
+                setWaitSeconds((prev) => prev + 1);
+            }, 1000);
+
             console.log('TestAutoBuy sending payload:', payload);
-            const response = await runBrowserAgent(payload);
+            const response = await runBrowserAgent(payload, {
+                onRetry: ({ attempt, error }) => {
+                    console.warn('[TestAutoBuy] retrying browser-agent request', { attempt, error });
+                },
+            });
             if (response.ok && response.data && response.data.results) {
                 if (onAddRun) {
                     console.log('TestAutoBuy calling onAddRun with:', response.data.results);
@@ -31,6 +45,12 @@ const TestAutoBuy = ({ onAddRun }) => {
         } catch (error) {
             console.error('TestAutoBuy error:', error);
             alert('TestAutoBuy error. Check console.');
+        } finally {
+            if (timerRef.current) {
+                window.clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+            setIsWaiting(false);
         }
     };
 
@@ -46,7 +66,7 @@ const TestAutoBuy = ({ onAddRun }) => {
                 marginLeft: '8px'
             }}
         >
-            Test: Buy Milk
+            {isWaiting ? `Waiting Backend ${waitSeconds}s` : 'Test: Find Flight'}
         </button>
     );
 };

@@ -1,7 +1,9 @@
 <#
 .SYNOPSIS
     Automated deployment script for EvalAgent Backend on Google Cloud Run.
-    Based on DEPLOY.md instructions.
+
+    # Google Cloud Storage bucket status URL:
+    # https://console.cloud.google.com/storage/browser/evalagent-67802-history-logs
 
 .DESCRIPTION
     This script automates the deployment of the EvalAgent backend service to Cloud Run.
@@ -27,6 +29,8 @@ $ServiceName = "eval-agent-backend"
 $Region = "us-central1"
 $BucketName = "evalagent-67802-history-logs" # GCS Bucket for history persistence
 $MountPath = "/app/history_logs"
+$SourcePath = $PSScriptRoot
+$HistoryLogsPath = Join-Path $PSScriptRoot "history_logs"
 $DefaultLLMModel = "gpt-4o"
 $Memory = "4Gi"
 $Cpu = "2"
@@ -41,43 +45,49 @@ if (-not (Get-Command "gcloud" -ErrorAction SilentlyContinue)) {
 }
 
 # 2. API Key Handling
+$EnvPath = Join-Path $PSScriptRoot ".env"
+
 $ApiKey = $env:OPENAI_API_KEY
 $DeepSeekApiKey = $env:DEEPSEEK_API_KEY
+$AnthropicApiKey = $env:ANTHROPIC_API_KEY
+$GeminiApiKey = $env:GEMINI_API_KEY
 
-if (Test-Path ".env") {
-    Write-Host "Reading API Keys from .env file..." -ForegroundColor Cyan
-    $EnvContent = Get-Content ".env"
+if (Test-Path $EnvPath) {
+    Write-Host "Reading configuration from $EnvPath..." -ForegroundColor Cyan
+    $EnvContent = Get-Content $EnvPath
     foreach ($line in $EnvContent) {
-        if ($line -match "^OPENAI_API_KEY=(.*)$" -and -not $ApiKey) {
-            $ApiKey = $matches[1].Trim()
-        }
-        if ($line -match "^DEEPSEEK_API_KEY=(.*)$" -and -not $DeepSeekApiKey) {
-            $DeepSeekApiKey = $matches[1].Trim()
+        # Skip comments and empty lines
+        if ($line.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($line)) { continue }
+        
+        if ($line -match "^([^=]+)=(.*)$") {
+            $Key = $matches[1].Trim()
+            $Value = $matches[2].Trim()
+            # Remove potential quotes
+            $Value = $Value -replace '^"|"$|^''|''$', ''
+            
+            switch ($Key) {
+                "OPENAI_API_KEY" { if (-not $ApiKey) { $ApiKey = $Value } }
+                "DEEPSEEK_API_KEY" { if (-not $DeepSeekApiKey) { $DeepSeekApiKey = $Value } }
+                "ANTHROPIC_API_KEY" { if (-not $AnthropicApiKey) { $AnthropicApiKey = $Value } }
+                "GEMINI_API_KEY" { if (-not $GeminiApiKey) { $GeminiApiKey = $Value } }
+                "DEFAULT_LLM_MODEL" { if (-not $env:DEFAULT_LLM_MODEL) { $DefaultLLMModel = $Value } }
+            }
         }
     }
 }
 
-if (-not $ApiKey) {
-    Write-Host "Environment variable 'OPENAI_API_KEY' is not found in environment or .env file." -ForegroundColor Yellow
-    Write-Host "The backend requires an OpenAI API Key to function correctly on Cloud Run."
-    $ApiKey = Read-Host "Please enter your OpenAI API Key"
-    
-    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        Write-Error "API Key cannot be empty. Deployment aborted."
-        exit 1
-    }
-} else {
-    Write-Host "Using OPENAI_API_KEY from environment variables." -ForegroundColor Green
+if (-not $ApiKey -and -not $DeepSeekApiKey -and -not $AnthropicApiKey -and -not $GeminiApiKey) {
+    Write-Warning "No API Keys found in environment or .env file."
+    Write-Host "The backend requires at least one API Key to function correctly."
 }
 
-if ($DeepSeekApiKey) {
-    Write-Host "Using DEEPSEEK_API_KEY from environment variables." -ForegroundColor Green
-} else {
-    Write-Host "DEEPSEEK_API_KEY not found." -ForegroundColor Yellow
-}
+if ($ApiKey) { Write-Host "OPENAI_API_KEY configured." -ForegroundColor Green }
+if ($DeepSeekApiKey) { Write-Host "DEEPSEEK_API_KEY configured." -ForegroundColor Green }
+if ($AnthropicApiKey) { Write-Host "ANTHROPIC_API_KEY configured." -ForegroundColor Green }
+if ($GeminiApiKey) { Write-Host "GEMINI_API_KEY configured." -ForegroundColor Green }
 
 # --- Sync History Logs ---
-if (Test-Path "history_logs") {
+if (Test-Path $HistoryLogsPath) {
     Write-Host "Syncing local history_logs to GCS Bucket ($BucketName)..." -ForegroundColor Cyan
     # Use gsutil to sync files. -m for multi-threaded, -r for recursive.
     # We use Start-Process to ensure it runs correctly across environments or call gsutil directly if in path.
@@ -88,7 +98,7 @@ if (Test-Path "history_logs") {
     }
 
     if (Get-Command $GsutilCommand -ErrorAction SilentlyContinue) {
-        & $GsutilCommand -m cp -r ".\history_logs\*" "gs://$BucketName/"
+        & $GsutilCommand -m cp -r "$HistoryLogsPath\*" "gs://$BucketName/"
         if ($LASTEXITCODE -eq 0) {
             Write-Host "History logs synced successfully." -ForegroundColor Green
         } else {
@@ -109,16 +119,30 @@ Write-Host "Storage Bucket: $BucketName"
 # Note: volume parameters might vary slightly based on gcloud version, but these match DEPLOY.md
 $gcloudArgs = @(
     "run", "deploy", $ServiceName,
-    "--source", ".",
+    "--source", $SourcePath,
     "--region", $Region,
     "--allow-unauthenticated",
     "--execution-environment", "gen2",
     "--memory", $Memory,
     "--cpu", $Cpu,
     "--add-volume", "name=logs-storage,type=cloud-storage,bucket=$BucketName",
-    "--add-volume-mount", "volume=logs-storage,mount-path=$MountPath",
-    "--set-env-vars", "DEEPSEEK_API_KEY=$DeepSeekApiKey,OPENAI_API_KEY=$ApiKey,DEFAULT_LLM_MODEL=$DefaultLLMModel,BROWSER_AGENT_MAX_CONCURRENT=$BrowserAgentMaxConcurrent,ENABLE_OLLAMA=false"
+    "--add-volume-mount", "volume=logs-storage,mount-path=$MountPath"
 )
+
+# Build environment variables list
+$EnvVars = @(
+    "DEFAULT_LLM_MODEL=$DefaultLLMModel",
+    "BROWSER_AGENT_MAX_CONCURRENT=$BrowserAgentMaxConcurrent",
+    "ENABLE_OLLAMA=false"
+)
+
+if ($ApiKey) { $EnvVars += "OPENAI_API_KEY=$ApiKey" }
+if ($DeepSeekApiKey) { $EnvVars += "DEEPSEEK_API_KEY=$DeepSeekApiKey" }
+if ($AnthropicApiKey) { $EnvVars += "ANTHROPIC_API_KEY=$AnthropicApiKey" }
+if ($GeminiApiKey) { $EnvVars += "GEMINI_API_KEY=$GeminiApiKey" }
+
+$gcloudArgs += "--set-env-vars"
+$gcloudArgs += ($EnvVars -join ",")
 
 Write-Host "Executing gcloud command..." -ForegroundColor DarkGray
 

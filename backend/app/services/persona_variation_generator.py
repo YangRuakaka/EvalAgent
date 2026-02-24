@@ -181,10 +181,24 @@ class PersonaVariationGeneratorService:
                 "error_message": f"Persona variation prompt generation failed: {exc}",
             }
 
-    async def generate_persona_variations(self, persona: str, values: List[str]) -> Dict[str, Any]:
+    async def generate_persona_variations(
+        self,
+        persona: str,
+        values: List[str],
+        model: str | None = None,
+    ) -> Dict[str, Any]:
         """Generate persona variations for each provided value using few-shot prompting."""
         try:
             logger.info("Starting persona variation generation for %d values", len(values))
+
+            llm = self.llm
+            if model:
+                llm = get_chat_llm(
+                    api_key=self.api_key,
+                    model=model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                )
 
             variations = []
             for value in values:
@@ -205,7 +219,7 @@ class PersonaVariationGeneratorService:
 
                     message = HumanMessage(content=variation_prompt)
 
-                    response = await self.llm.ainvoke([message])
+                    response = await llm.ainvoke([message])
 
                     varied_persona = response.content.strip()
                     

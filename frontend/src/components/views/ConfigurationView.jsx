@@ -139,6 +139,8 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 	const [environmentRunError, setEnvironmentRunError] = useState('');
 	const [environmentRunResult, setEnvironmentRunResult] = useState(null);
 	const [isRunningEnvironment, setIsRunningEnvironment] = useState(false);
+	const [environmentWaitSeconds, setEnvironmentWaitSeconds] = useState(0);
+	const [environmentRetryCount, setEnvironmentRetryCount] = useState(0);
 	const [regeneratingVariationKey, setRegeneratingVariationKey] = useState(null);
 	const dropdownRef = useRef(null);
 
@@ -719,6 +721,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 			const response = await generatePersonaVariation(
 				selectedPersona.content ?? '',
 				selectedVariationValues,
+				personaModel,
 			);
 
 			if (!response.ok) {
@@ -801,7 +804,11 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		setVariationError('');
 		setRegeneratingVariationKey(valueKey);
 		try {
-			const response = await generatePersonaVariation(selectedPersona.content ?? '', [valueKey]);
+			const response = await generatePersonaVariation(
+				selectedPersona.content ?? '',
+				[valueKey],
+				personaModel,
+			);
 
 			if (!response.ok) {
 				const message = extractErrorMessage(
@@ -895,6 +902,11 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		setEnvironmentRunError('');
 		setEnvironmentRunResult(null);
 		setIsRunningEnvironment(true);
+		setEnvironmentWaitSeconds(0);
+		setEnvironmentRetryCount(0);
+		const waitTimer = window.setInterval(() => {
+			setEnvironmentWaitSeconds((prev) => prev + 1);
+		}, 1000);
 		try {
 			const personaState = variationStateByPersona[environmentPersonaId] || {
 				variations: [],
@@ -918,7 +930,12 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				model: modelPayload,
 				run_times: parsedRunTimes,
 			};
-			const response = await runBrowserAgent(requestBody);
+			const response = await runBrowserAgent(requestBody, {
+				onRetry: ({ attempt, error }) => {
+					setEnvironmentRetryCount(attempt);
+					console.warn('[EnvironmentRun] retrying browser-agent request', { attempt, error });
+				},
+			});
 			console.info('[browser-agent/run] Raw response payload:', response.data);
 			if (!response.ok) {
 				const message = extractErrorMessage(
@@ -945,6 +962,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				error?.message || 'Failed to run the browser agent. Please try again later.',
 			);
 		} finally {
+			window.clearInterval(waitTimer);
 			setIsRunningEnvironment(false);
 		}
 	};
@@ -958,7 +976,9 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				onClick={handleEnvironmentRun}
 				disabled={isRunningEnvironment || isCacheLoading}
 			>
-				{isRunningEnvironment || isCacheLoading ? 'Running...' : 'Run'}
+				{isRunningEnvironment
+					? `Waiting ${environmentWaitSeconds}s${environmentRetryCount > 0 ? ` · Retry ${environmentRetryCount}` : ''}`
+					: (isCacheLoading ? 'Running...' : 'Run')}
 			</button>
 		);
 	}

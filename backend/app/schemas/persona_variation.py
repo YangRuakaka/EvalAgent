@@ -31,6 +31,10 @@ class PersonaVariationRequest(BaseModel):
         min_items=1,
         description="List of values to generate persona variations for",
     )
+    model: Optional[str] = Field(
+        None,
+        description="Model identifier to use for generation, e.g. 'gpt-4o'",
+    )
 
 
 class PersonaVariationResponse(BaseModel):

@@ -25,6 +25,9 @@ export const API_ENDPOINTS = {
     analyzeGranularity: '/judge/analyze-granularity',
     aggregateSteps: '/judge/aggregate-steps',
   },
+  maintenance: {
+    cleanupFiles: '/maintenance/cleanup-files',
+  },
 };
 
 export default API_ENDPOINTS;

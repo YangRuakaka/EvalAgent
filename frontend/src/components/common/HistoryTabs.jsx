@@ -7,6 +7,47 @@ const HistoryTabs = ({ items, activeId, onSelect, onClose, closable, fullWidth }
   const tabRefs = useRef(new Map());
   const [closingTabs, setClosingTabs] = useState({});
 
+  // Helper to process labels
+  const getDisplayLabel = (label, index, allLabels) => {
+    const MAX_LENGTH = 15; // Set desired length limit
+    
+    // 1. Truncate
+    let display = label.length > MAX_LENGTH 
+      ? `${label.substring(0, MAX_LENGTH)}...` 
+      : label;
+      
+    // 2. Handle duplicates
+    // Check how many times this SAME truncated label appears in the list up to this point
+    // or overall. To do strict "123" numbering for duplicates, we need to know 
+    // which instance this is.
+    
+    // We can pre-calculate unique display names data in the render, 
+    // but doing it here locally is fine if items length is small.
+    // However, it's better to compute this once for all items.
+    return display;
+  };
+
+  const processedItems = React.useMemo(() => {
+    const MAX_LENGTH = 20;
+    const labelCounts = {};
+    
+    // First pass to determine duplicates
+    return items.map(item => {
+      let label = item.label;
+      if (label.length > MAX_LENGTH) {
+        label = label.substring(0, MAX_LENGTH) + '...';
+      }
+      
+      if (!labelCounts[label]) {
+        labelCounts[label] = 1;
+        return { ...item, displayLabel: label };
+      } else {
+        labelCounts[label] += 1;
+        return { ...item, displayLabel: `${label} (${labelCounts[label]})` };
+      }
+    });
+  }, [items]);
+
   useLayoutEffect(() => {
     setClosingTabs((prev) => {
       const next = { ...prev };
@@ -96,7 +137,7 @@ const HistoryTabs = ({ items, activeId, onSelect, onClose, closable, fullWidth }
   return (
     <nav className={navClassName} aria-label="Experiment and trajectory history">
       <ul className="history-tabs__list">
-        {items.map((item) => {
+        {processedItems.map((item) => {
           const isActive = item.id === activeId;
           const closingInfo = closingTabs[item.id];
           const itemStyle = closingInfo
@@ -137,7 +178,7 @@ const HistoryTabs = ({ items, activeId, onSelect, onClose, closable, fullWidth }
                   onSelect(item.id);
                 }}
               >
-                <span className="history-tabs__label">{item.label}</span>
+                <span className="history-tabs__label" title={item.label}>{item.displayLabel}</span>
                 {item.description && (
                   <span className="history-tabs__description">{item.description}</span>
                 )}

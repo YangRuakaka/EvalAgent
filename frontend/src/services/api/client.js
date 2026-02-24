@@ -47,6 +47,25 @@ const parseResponse = async (response) => {
   return payload;
 };
 
+const sleep = (durationMs) =>
+  new Promise((resolve) => {
+    window.setTimeout(resolve, durationMs);
+  });
+
+const shouldRetryNetworkError = (error) => {
+  if (!(error instanceof TypeError)) {
+    return false;
+  }
+
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('failed to fetch')
+    || message.includes('networkerror')
+    || message.includes('load failed')
+    || message.includes('err_connection_closed')
+  );
+};
+
 const mockResponse = (path, method) => {
   return Promise.resolve({
     status: 200,
@@ -66,6 +85,10 @@ export const createApiClient = (overrides = {}) => {
 
   const request = async (path, options = {}) => {
     const method = options.method || 'GET';
+    const retryOnNetworkError = Boolean(options.retryOnNetworkError);
+    const maxRetries = Number.isFinite(options.maxRetries) ? Number(options.maxRetries) : Infinity;
+    const retryDelayMs = Number.isFinite(options.retryDelayMs) ? Number(options.retryDelayMs) : 1500;
+    const onRetry = typeof options.onRetry === 'function' ? options.onRetry : null;
 
     if (!config.enableNetwork) {
       console.info('[api-client] Mocked request', { path, method });
@@ -73,11 +96,43 @@ export const createApiClient = (overrides = {}) => {
     }
 
     const url = buildUrl(config.baseUrl, path);
-    console.log('[api-client] Sending request:', { url, method, headers: options.headers });
-    const response = await fetch(url, options);
-    const parsedResponse = await parseResponse(response);
-    console.log('[api-client] Received response:', { status: parsedResponse.status, ok: parsedResponse.ok });
-    return parsedResponse;
+    const requestOptions = { ...options };
+    delete requestOptions.retryOnNetworkError;
+    delete requestOptions.maxRetries;
+    delete requestOptions.retryDelayMs;
+    delete requestOptions.onRetry;
+
+    let attempt = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        console.log('[api-client] Sending request:', {
+          url,
+          method,
+          headers: requestOptions.headers,
+          attempt,
+        });
+        const response = await fetch(url, requestOptions);
+        const parsedResponse = await parseResponse(response);
+        console.log('[api-client] Received response:', { status: parsedResponse.status, ok: parsedResponse.ok });
+        return parsedResponse;
+      } catch (error) {
+        const canRetry =
+          retryOnNetworkError
+          && shouldRetryNetworkError(error)
+          && attempt < maxRetries;
+
+        if (!canRetry) {
+          throw error;
+        }
+
+        attempt += 1;
+        if (onRetry) {
+          onRetry({ attempt, error, url, method });
+        }
+        await sleep(retryDelayMs);
+      }
+    }
   };
 
   return {

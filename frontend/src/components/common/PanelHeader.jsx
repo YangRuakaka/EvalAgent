@@ -7,14 +7,26 @@ import './PanelHeader.css';
  * PanelHeader renders a consistent heading element for primary layout panels.
  * NOTE: Use ActionButton component separately for action buttons to avoid style pollution.
  */
-const PanelHeader = ({ title, className, icon, variant, onGetCacheData, onManageCriteria, isCacheLoading, children }) => {
+const PanelHeader = ({
+  title,
+  className,
+  icon,
+  variant,
+  onGetCacheData,
+  onManageCriteria,
+  onCleanupServer,
+  isCacheLoading,
+  isCleanupLoading,
+  children,
+}) => {
   const variantClass = variant && variant !== 'panel' ? `panel__header--${variant}` : null;
   const headerClassName = ['panel__header', variantClass, className]
     .filter(Boolean)
     .join(' ');
   const canRequestCache = typeof onGetCacheData === 'function';
   const canManageCriteria = typeof onManageCriteria === 'function';
-  const hasRightContent = Boolean(children) || canRequestCache || canManageCriteria;
+  const canCleanupServer = typeof onCleanupServer === 'function';
+  const hasRightContent = Boolean(children) || canRequestCache || canManageCriteria || canCleanupServer;
 
   return (
     <header className={headerClassName}>
@@ -34,6 +46,16 @@ const PanelHeader = ({ title, className, icon, variant, onGetCacheData, onManage
               onClick={onManageCriteria}
             >
               Manage Criteria
+            </button>
+          )}
+          {canCleanupServer && (
+            <button
+              type="button"
+              className="panel__action"
+              onClick={onCleanupServer}
+              disabled={isCleanupLoading}
+            >
+              {isCleanupLoading ? 'Cleaning…' : 'Cleanup Server Files'}
             </button>
           )}
           {canRequestCache && (
@@ -59,7 +81,9 @@ PanelHeader.propTypes = {
   variant: PropTypes.oneOf(['page', 'panel']),
   onGetCacheData: PropTypes.func,
   onManageCriteria: PropTypes.func,
+  onCleanupServer: PropTypes.func,
   isCacheLoading: PropTypes.bool,
+  isCleanupLoading: PropTypes.bool,
   children: PropTypes.node,
 };
 
@@ -69,7 +93,9 @@ PanelHeader.defaultProps = {
   variant: 'panel',
   onGetCacheData: undefined,
   onManageCriteria: undefined,
+  onCleanupServer: undefined,
   isCacheLoading: false,
+  isCleanupLoading: false,
   children: null,
 };
 

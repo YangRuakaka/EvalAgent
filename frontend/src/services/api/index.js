@@ -11,12 +11,13 @@ export const generatePersona = (demographic, model, client = defaultClient) => {
 	});
 };
 
-export const generatePersonaVariation = (personaContent, values, client = defaultClient) => {
+export const generatePersonaVariation = (personaContent, values, model, client = defaultClient) => {
 	const payload = {
 		persona: personaContent,
 		values,
+		model,
 	};
-	console.log('[API] generatePersonaVariation - Request:', { personaContent, values });
+	console.log('[API] generatePersonaVariation - Request:', { personaContent, values, model });
 	return client.post(API_ENDPOINTS.personaVariation.generate, payload).then(response => {
 		console.log('[API] generatePersonaVariation - Response:', response);
 		return response;
@@ -31,10 +32,36 @@ export const fetchHistoryLogs = (client = defaultClient) => {
 	});
 };
 
-export const runBrowserAgent = (payload, client = defaultClient) => {
+export const runBrowserAgent = (payload, optionsOrClient, maybeClient) => {
+	let requestOptions = {};
+	let client = defaultClient;
+
+	if (optionsOrClient && typeof optionsOrClient.post === 'function') {
+		client = optionsOrClient;
+	} else {
+		requestOptions = optionsOrClient || {};
+		if (maybeClient && typeof maybeClient.post === 'function') {
+			client = maybeClient;
+		}
+	}
+
 	console.log('[API] runBrowserAgent - Request:', payload);
-	return client.post(API_ENDPOINTS.browserAgent.run, payload).then(response => {
+	return client.post(API_ENDPOINTS.browserAgent.run, payload, {
+		retryOnNetworkError:	requestOptions.retryOnNetworkError ?? true,
+		maxRetries:		requestOptions.maxRetries ?? Infinity,
+		retryDelayMs:	requestOptions.retryDelayMs ?? 1500,
+		onRetry:		requestOptions.onRetry,
+		...(requestOptions.headers ? { headers: requestOptions.headers } : {}),
+	}).then(response => {
 		console.log('[API] runBrowserAgent - Response:', response);
+		return response;
+	});
+};
+
+export const cleanupServerFiles = (client = defaultClient) => {
+	console.log('[API] cleanupServerFiles - Request');
+	return client.post(API_ENDPOINTS.maintenance.cleanupFiles, {}).then(response => {
+		console.log('[API] cleanupServerFiles - Response:', response);
 		return response;
 	});
 };

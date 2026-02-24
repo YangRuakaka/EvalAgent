@@ -5,7 +5,7 @@ import PanelHeader from './components/common/PanelHeader';
 import ConfigurationView from './components/views/ConfigurationView';
 import VisualizationView from './components/views/VisualizationView';
 import VerticalTabs from './components/common/VerticalTabs';
-import { fetchHistoryLogs } from './services/api';
+import { cleanupServerFiles, fetchHistoryLogs } from './services/api';
 import { PersonaIcon, EnvironmentIcon } from './components/common/icons';
 import { processVisualizationData } from './components/views/utils/visualizationDataProcessor';
 import { useData } from './context/DataContext';
@@ -55,6 +55,7 @@ const App = () => {
 	// const [historyEntries, setHistoryEntries] = useState([]); // Removed local state
 	const [activeRunId, setActiveRunId] = useState(null);
 	const [isFetchingCache, setIsFetchingCache] = useState(false);
+	const [isCleaningServerFiles, setIsCleaningServerFiles] = useState(false);
 	const [cacheError, setCacheError] = useState(null);
 	const [activeConfigTab, setActiveConfigTab] = useState('persona');
 	const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
@@ -139,6 +140,34 @@ const App = () => {
 		}
 	}, [addExperiment]);
 
+	const handleCleanupServerFiles = useCallback(async () => {
+		const confirmed = window.confirm(
+			'This will clean extra files in backend/history_logs, and only keep buy_milk* items (including screenshots/buy_milk*). Continue?',
+		);
+		if (!confirmed) {
+			return;
+		}
+
+		setIsCleaningServerFiles(true);
+		try {
+			const response = await cleanupServerFiles();
+			if (!response.ok || !response.data?.ok) {
+				const detail = typeof response.data === 'string'
+					? response.data
+					: (response.data?.detail || `HTTP ${response.status}`);
+				throw new Error(detail);
+			}
+
+			const deletedCount = Array.isArray(response.data.deleted) ? response.data.deleted.length : 0;
+			const failedCount = Array.isArray(response.data.failed) ? response.data.failed.length : 0;
+			alert(`History logs cleanup completed. Deleted: ${deletedCount}, Failed: ${failedCount}`);
+		} catch (error) {
+			alert(`Cleanup failed: ${error?.message || 'unknown error'}`);
+		} finally {
+			setIsCleaningServerFiles(false);
+		}
+	}, []);
+
 	useEffect(() => {
 		if (cacheError) {
 		}
@@ -211,8 +240,10 @@ const App = () => {
 						title="Eval Agent"
 						variant="page"
 						onManageCriteria={() => setIsCriteriaManagerOpen(true)}
+						onCleanupServer={handleCleanupServerFiles}
 						onGetCacheData={handleGetCacheData}
 						isCacheLoading={isFetchingCache}
+						isCleanupLoading={isCleaningServerFiles}
 					/>
 				</div>
 			</header>

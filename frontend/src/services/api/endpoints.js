@@ -13,6 +13,7 @@ export const API_ENDPOINTS = {
   browserAgent: {
     run: '/browser-agent/run',
     status: '/browser-agent/status',
+    events: '/browser-agent/events',
     stop: '/browser-agent/stop',
   },
   criteria: {

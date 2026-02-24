@@ -84,8 +84,55 @@ class BrowserAgentService:
         self._active_runs_lock = asyncio.Lock()
         # Background run management
         self._run_store: Dict[str, dict] = {}
-        self._current_run_task: Optional[asyncio.Task] = None
-        self._current_run_id: Optional[str] = None
+        self._background_run_tasks: Dict[str, asyncio.Task[None]] = {}
+
+    @property
+    def current_run_task(self) -> Optional[asyncio.Task]:
+        for task in self._background_run_tasks.values():
+            if not task.done():
+                return task
+        return None
+
+    def get_active_run_id(self) -> Optional[str]:
+        for run_id, payload in self._run_store.items():
+            if payload.get("status") in {"queued", "running"}:
+                return run_id
+        return None
+
+    def get_active_run_ids(self) -> List[str]:
+        return [
+            run_id
+            for run_id, payload in self._run_store.items()
+            if payload.get("status") in {"queued", "running"}
+        ]
+
+    def register_queued_run(self, run_id: str, total_tasks: int) -> None:
+        self._run_store[run_id] = {
+            "run_id": run_id,
+            "status": "queued",
+            "total_tasks": total_tasks,
+            "results": None,
+            "error": None,
+        }
+
+    def mark_run_running(self, run_id: str, total_tasks: int = 0) -> None:
+        self._run_store[run_id] = {
+            "run_id": run_id,
+            "status": "running",
+            "total_tasks": total_tasks,
+            "results": None,
+            "error": None,
+        }
+
+    def mark_run_failed(self, run_id: str, error: str) -> None:
+        previous = self._run_store.get(run_id, {})
+        self._run_store[run_id] = {
+            "run_id": run_id,
+            "status": "failed",
+            "total_tasks": previous.get("total_tasks", 0),
+            "results": previous.get("results"),
+            "error": error,
+        }
 
     async def run(self, request: BrowserAgentRunRequest, run_id: Optional[str] = None) -> List[BrowserAgentRunResult]:
         """Execute the browser agent across all persona/model combinations."""
@@ -143,15 +190,18 @@ class BrowserAgentService:
                 cancelled_any = True
 
         # Cancel the background wrapper task
-        if self._current_run_id == normalized_run_id and self._current_run_task and not self._current_run_task.done():
-            self._current_run_task.cancel()
+        background_task = self._background_run_tasks.get(normalized_run_id)
+        if background_task is not None and not background_task.done():
+            background_task.cancel()
             cancelled_any = True
 
         # Update run store
         if normalized_run_id in self._run_store:
+            previous = self._run_store.get(normalized_run_id, {})
             self._run_store[normalized_run_id] = {
                 "run_id": normalized_run_id,
                 "status": "cancelled",
+                "total_tasks": previous.get("total_tasks", 0),
                 "results": None,
                 "error": "Run was cancelled by user",
             }
@@ -178,48 +228,80 @@ class BrowserAgentService:
 
         Raises BrowserAgentBusyError if another run is already active.
         """
-        if self._current_run_task is not None and not self._current_run_task.done():
+        existing_task = self._background_run_tasks.get(run_id)
+        if existing_task is not None and not existing_task.done():
             raise BrowserAgentBusyError(
-                f"Another browser agent run is already in progress (run_id={self._current_run_id}). "
+                f"Run is already in progress for run_id={run_id}. "
                 "Stop it first or wait for it to finish."
             )
 
-        self._current_run_id = run_id
+        previous = self._run_store.get(run_id, {})
         self._run_store[run_id] = {
             "run_id": run_id,
             "status": "running",
+            "total_tasks": previous.get("total_tasks", 0),
             "results": None,
             "error": None,
         }
 
-        self._current_run_task = asyncio.create_task(
+        self._background_run_tasks[run_id] = asyncio.create_task(
             self._execute_run_background(request, run_id)
         )
         logger.info("Browser-agent background run started | run_id=%s", run_id)
         return self._run_store[run_id]
 
+    def get_background_run_task(self, run_id: str) -> Optional[asyncio.Task[None]]:
+        return self._background_run_tasks.get(run_id)
+
     async def _execute_run_background(self, request: BrowserAgentRunRequest, run_id: str) -> None:
         """Background task: execute agent, post-process results, store in _run_store."""
+        timeout = getattr(self._settings, "BROWSER_AGENT_RUN_TIMEOUT", 0)
         try:
-            timeout = getattr(self._settings, "BROWSER_AGENT_RUN_TIMEOUT", 300)
-            results = await asyncio.wait_for(
-                self.run(request, run_id=run_id),
-                timeout=timeout,
-            )
+            if timeout and timeout > 0:
+                results = await asyncio.wait_for(
+                    self.run(request, run_id=run_id),
+                    timeout=timeout,
+                )
+            else:
+                results = await self.run(request, run_id=run_id)
 
             processed = self._post_process_results(request, results)
-            self._run_store[run_id] = {
-                "run_id": run_id,
-                "status": "completed",
-                "results": processed,
-                "error": None,
-            }
-            logger.info("Background run completed | run_id=%s results=%d", run_id, len(processed))
+            has_errors = any(
+                bool(item.get("has_errors")) or not bool(item.get("is_successful"))
+                for item in processed
+            )
+
+            if has_errors:
+                previous = self._run_store.get(run_id, {})
+                self._run_store[run_id] = {
+                    "run_id": run_id,
+                    "status": "failed",
+                    "total_tasks": previous.get("total_tasks", 0),
+                    "results": processed,
+                    "error": "One or more browser-agent runs failed.",
+                }
+                logger.warning(
+                    "Background run finished with errors | run_id=%s results=%d",
+                    run_id,
+                    len(processed),
+                )
+            else:
+                previous = self._run_store.get(run_id, {})
+                self._run_store[run_id] = {
+                    "run_id": run_id,
+                    "status": "completed",
+                    "total_tasks": previous.get("total_tasks", 0),
+                    "results": processed,
+                    "error": None,
+                }
+                logger.info("Background run completed | run_id=%s results=%d", run_id, len(processed))
 
         except asyncio.TimeoutError:
+            previous = self._run_store.get(run_id, {})
             self._run_store[run_id] = {
                 "run_id": run_id,
                 "status": "failed",
+                "total_tasks": previous.get("total_tasks", 0),
                 "results": None,
                 "error": f"Run timed out after {timeout} seconds",
             }
@@ -227,26 +309,29 @@ class BrowserAgentService:
 
         except asyncio.CancelledError:
             if self._run_store.get(run_id, {}).get("status") != "cancelled":
+                previous = self._run_store.get(run_id, {})
                 self._run_store[run_id] = {
                     "run_id": run_id,
                     "status": "cancelled",
+                    "total_tasks": previous.get("total_tasks", 0),
                     "results": None,
                     "error": "Run was cancelled",
                 }
             logger.info("Background run cancelled | run_id=%s", run_id)
 
         except Exception as exc:
+            previous = self._run_store.get(run_id, {})
             self._run_store[run_id] = {
                 "run_id": run_id,
                 "status": "failed",
+                "total_tasks": previous.get("total_tasks", 0),
                 "results": None,
                 "error": str(exc),
             }
             logger.exception("Background run failed | run_id=%s", run_id)
 
         finally:
-            self._current_run_id = None
-            self._current_run_task = None
+            self._background_run_tasks.pop(run_id, None)
 
     def get_run_status(self, run_id: str) -> Optional[dict]:
         """Return the current status dict for a run, or None if not found."""
@@ -347,6 +432,55 @@ class BrowserAgentService:
         ]
         return any(indicator in error_str for indicator in api_error_indicators)
 
+    @staticmethod
+    def _find_chrome_executable() -> Optional[str]:
+        """Detect available Chrome / Chromium binary.
+
+        Checks (in order):
+        1. CHROME_PATH / CHROMIUM_PATH env vars
+        2. Common Linux system paths
+        3. Playwright-installed Chromium
+        4. ``shutil.which`` fallback
+        """
+        import shutil
+
+        # 1. Environment variables
+        for env_var in ("CHROME_PATH", "CHROMIUM_PATH", "BROWSER_PATH"):
+            path = os.environ.get(env_var)
+            if path and os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+
+        # 2. Common system paths (linux Docker images)
+        system_paths = [
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/lib/chromium/chromium",
+        ]
+        for p in system_paths:
+            if os.path.isfile(p) and os.access(p, os.X_OK):
+                return p
+
+        # 3. Playwright-managed Chromium
+        try:
+            from pathlib import Path as _Path
+            pw_cache = _Path.home() / ".cache" / "ms-playwright"
+            if pw_cache.exists():
+                for chrome_dir in sorted(pw_cache.glob("chromium-*/chrome-linux/chrome"), reverse=True):
+                    if chrome_dir.is_file() and os.access(str(chrome_dir), os.X_OK):
+                        return str(chrome_dir)
+        except Exception:
+            pass
+
+        # 4. which fallback
+        for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
+            found = shutil.which(name)
+            if found:
+                return found
+
+        return None
+
     def _get_fallback_llm(self, original_model: str):
         """Get fallback Ollama LLM when primary LLM fails."""
         try:
@@ -369,6 +503,9 @@ class BrowserAgentService:
         run_index: int,
     ) -> BrowserAgentRunResult:
         """Execute a single browser agent run and persist its artifacts."""
+        tmp_profile = None
+        agent = None
+        browser_session = None
         try:
             combined_task = self._compose_agent_task(
                 task=request.task,
@@ -378,36 +515,66 @@ class BrowserAgentService:
             # Use the explicitly selected model from the UI
             llm = get_browser_use_llm(model=model_name)
 
-            # Set timeout for BrowserStartEvent to avoid server timeouts (default is 30s)
-            os.environ["TIMEOUT_BrowserStartEvent"] = "60"
+            # Set timeout for BrowserStartEvent to avoid server timeouts
+            browser_start_timeout = getattr(
+                self._settings, "BROWSER_AGENT_BROWSER_START_TIMEOUT", 120
+            )
+            os.environ["TIMEOUT_BrowserStartEvent"] = str(browser_start_timeout)
+            browser_launch_timeout = getattr(
+                self._settings, "BROWSER_AGENT_BROWSER_LAUNCH_TIMEOUT", 120
+            )
+            os.environ["TIMEOUT_BrowserLaunchEvent"] = str(browser_launch_timeout)
 
             from browser_use import Agent, BrowserSession
             import tempfile
 
             # Create a temporary profile directory for this run
             tmp_profile = tempfile.mkdtemp(prefix="bu_profile_")
-            
-            # Explicitly configure browser session to avoid CDP connection issues
-            # We use extra args for server environments
-            browser_session = BrowserSession(
+
+            # Detect the Chromium / Chrome executable path
+            # Priority: env var > common system paths
+            chrome_executable = self._find_chrome_executable()
+            if chrome_executable:
+                logger.info(f"Using browser executable: {chrome_executable}")
+            else:
+                logger.warning(
+                    "No explicit Chrome/Chromium binary found; "
+                    "browser_use will try to auto-detect."
+                )
+
+            # Build BrowserSession kwargs
+            browser_kwargs: dict = dict(
                 headless=True,
                 user_data_dir=tmp_profile,
                 storage_state=None,
                 keep_alive=False,
+                is_local=True,
+                use_cloud=False,
+                cloud_browser=False,
                 args=[
-                    "--no-sandbox", 
-                    "--disable-dev-shm-usage", 
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
                     "--disable-gpu",
                     "--disable-setuid-sandbox",
                     "--no-zygote",
                     "--disable-software-rasterizer",
+                    "--disable-extensions",
+                    "--disable-background-networking",
+                    "--disable-default-apps",
+                    "--disable-sync",
+                    "--no-first-run",
                 ],
             )
-            
+            if chrome_executable:
+                browser_kwargs["executable_path"] = chrome_executable
+
+            browser_session = BrowserSession(**browser_kwargs)
+
             agent = Agent(
                 browser_session=browser_session,
                 task=combined_task,
                 llm=llm,
+                use_vision=True,
                 generate_gif=False,
             )
 
@@ -502,6 +669,33 @@ class BrowserAgentService:
                 run_index,
             )
             raise
+        except TimeoutError as exc:
+            import traceback
+            error_msg = (
+                f"Browser failed to start within {browser_start_timeout}s. "
+                f"Chrome binary: {chrome_executable or 'auto-detect'}. "
+                f"This usually means Chromium is not installed or cannot run in this environment. "
+                f"Original error: {exc}"
+            )
+            logger.error(f"[BROWSER_START_TIMEOUT] {error_msg}\n{traceback.format_exc()}")
+            return BrowserAgentRunResult(
+                model=model_name,
+                run_index=run_index,
+                is_done=False,
+                is_successful=False,
+                has_errors=True,
+                number_of_steps=0,
+                total_duration_seconds=0.0,
+                final_result=error_msg,
+                history_path="",
+                history_payload={},
+                screenshot_paths=[],
+                screenshots=[],
+                metadata={
+                    "value": persona.value,
+                    "persona": persona.content
+                }
+            )
         except Exception as exc:
             import traceback
             print(f"[ERROR] Exception in _run_single: {exc}\n{traceback.format_exc()}")
@@ -513,7 +707,7 @@ class BrowserAgentService:
                 has_errors=True,
                 number_of_steps=0,
                 total_duration_seconds=0.0,
-                final_result=None,
+                final_result=str(exc),
                 history_path="",
                 history_payload={},
                 screenshot_paths=[],
@@ -523,6 +717,50 @@ class BrowserAgentService:
                     "persona": persona.content
                 }
             )
+        finally:
+            # Close browser-use resources AFTER history/screenshot extraction.
+            await self._close_agent_resources(agent)
+
+            # Clean up temporary profile directory
+            if tmp_profile and os.path.isdir(tmp_profile):
+                try:
+                    import shutil
+                    shutil.rmtree(tmp_profile, ignore_errors=True)
+                except Exception:
+                    pass
+
+    async def _close_agent_resources(self, agent: Any) -> None:
+        """Best-effort close for agent and underlying browser session."""
+        if agent is None:
+            return
+
+        for method_name in ("close", "aclose", "shutdown", "stop", "__aexit__"):
+            if hasattr(agent, method_name):
+                try:
+                    close_result = getattr(agent, method_name)()
+                    if asyncio.iscoroutine(close_result):
+                        await close_result
+                except RuntimeError as e:
+                    if "Event loop is closed" not in str(e):
+                        print(f"[WARN] Exception when closing agent ({method_name}): {e}")
+                except Exception as e:
+                    print(f"[WARN] Exception when closing agent ({method_name}): {e}")
+                break
+
+        browser_session = getattr(agent, "browser_session", None)
+        if browser_session is not None:
+            for method_name in ("close", "aclose", "shutdown", "stop", "__aexit__"):
+                if hasattr(browser_session, method_name):
+                    try:
+                        close_result = getattr(browser_session, method_name)()
+                        if asyncio.iscoroutine(close_result):
+                            await close_result
+                    except RuntimeError as e:
+                        if "Event loop is closed" not in str(e):
+                            print(f"[WARN] Exception when closing browser_session ({method_name}): {e}")
+                    except Exception as e:
+                        print(f"[WARN] Exception when closing browser_session ({method_name}): {e}")
+                    break
 
     def _prepare_run_context(
         self,
@@ -558,75 +796,42 @@ class BrowserAgentService:
     async def _run_agent_with_compatible_loop(self, agent: Any, *, max_steps: int) -> Any:
         """
         Execute the agent ensuring Windows selectors don't block subprocess support.
-        Ensures all browser/agent resources are closed after run.
         """
-        try:
-            if sys.platform.startswith("win"):
-                proactor_cls = getattr(asyncio, "ProactorEventLoop", None)
-                selector_cls = getattr(asyncio, "SelectorEventLoop", None)
+        if sys.platform.startswith("win"):
+            proactor_cls = getattr(asyncio, "ProactorEventLoop", None)
+            selector_cls = getattr(asyncio, "SelectorEventLoop", None)
 
-                try:
-                    running_loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    running_loop = None
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
 
-                should_offload = False
-                if running_loop is not None:
-                    if proactor_cls and isinstance(running_loop, proactor_cls):
-                        should_offload = False
-                    elif selector_cls and isinstance(running_loop, selector_cls):
+            should_offload = False
+            if running_loop is not None:
+                if proactor_cls and isinstance(running_loop, proactor_cls):
+                    should_offload = False
+                elif selector_cls and isinstance(running_loop, selector_cls):
+                    should_offload = True
+                else:
+                    qualified_name = f"{running_loop.__class__.__module__}.{running_loop.__class__.__name__}"
+                    if "selector" in qualified_name.lower():
                         should_offload = True
-                    else:
-                        qualified_name = f"{running_loop.__class__.__module__}.{running_loop.__class__.__name__}"
-                        if "selector" in qualified_name.lower():
-                            should_offload = True
 
-                if should_offload:
-                    return await asyncio.to_thread(
-                        self._run_agent_in_proactor_loop,
-                        agent,
-                        max_steps,
-                    )
+            if should_offload:
+                return await asyncio.to_thread(
+                    self._run_agent_in_proactor_loop,
+                    agent,
+                    max_steps,
+                )
 
-                try:
-                    return await agent.run(max_steps=max_steps)
-                except NotImplementedError:
-                    raise BrowserAgentExecutionError(
-                        "Browser agent execution failed due to event-loop incompatibility; no retry has been attempted."
-                    )
+            try:
+                return await agent.run(max_steps=max_steps)
+            except NotImplementedError:
+                raise BrowserAgentExecutionError(
+                    "Browser agent execution failed due to event-loop incompatibility; no retry has been attempted."
+                )
 
-            return await agent.run(max_steps=max_steps)
-        finally:
-            # Ensure all agent and browser resources are closed after run
-            # Try to close the agent itself (supports close/aclose/shutdown/stop)
-            for method_name in ("close", "aclose", "shutdown", "stop", "__aexit__"):
-                if hasattr(agent, method_name):
-                    try:
-                        close_result = getattr(agent, method_name)()
-                        if asyncio.iscoroutine(close_result):
-                            await close_result
-                    except RuntimeError as e:
-                        if "Event loop is closed" not in str(e):
-                            print(f"[WARN] Exception when closing agent ({method_name}): {e}")
-                    except Exception as e:
-                        print(f"[WARN] Exception when closing agent ({method_name}): {e}")
-                    break
-
-            # Try to close the underlying browser session if present
-            browser_session = getattr(agent, "browser_session", None)
-            if browser_session is not None:
-                for method_name in ("close", "aclose", "shutdown", "stop", "__aexit__"):
-                    if hasattr(browser_session, method_name):
-                        try:
-                            close_result = getattr(browser_session, method_name)()
-                            if asyncio.iscoroutine(close_result):
-                                await close_result
-                        except RuntimeError as e:
-                            if "Event loop is closed" not in str(e):
-                                print(f"[WARN] Exception when closing browser_session ({method_name}): {e}")
-                        except Exception as e:
-                            print(f"[WARN] Exception when closing browser_session ({method_name}): {e}")
-                        break
+        return await agent.run(max_steps=max_steps)
 
     def _run_agent_in_proactor_loop(self, agent: Any, max_steps: int) -> Any:
         """Run the async agent in a dedicated Proactor event loop (Windows-only)."""
@@ -651,6 +856,50 @@ class BrowserAgentService:
             return []
 
         artifacts: List[_ScreenshotArtifact] = []
+
+        # Preferred source: browser-use persisted screenshot paths per step.
+        screenshot_paths_attr = getattr(history, "screenshot_paths", None)
+        if callable(screenshot_paths_attr):
+            try:
+                path_items = screenshot_paths_attr(return_none_if_not_screenshot=False)
+            except TypeError:
+                path_items = screenshot_paths_attr()
+            except Exception as exc:
+                logger.debug(f"Failed to call history.screenshot_paths(): {exc}")
+                path_items = None
+
+            if path_items:
+                cleaned_paths = [Path(str(p)) for p in path_items if p]
+                if self._max_screenshots > 0:
+                    cleaned_paths = cleaned_paths[: self._max_screenshots]
+
+                for index, source_path in enumerate(cleaned_paths, start=1):
+                    try:
+                        if not source_path.exists():
+                            continue
+                        image_bytes = source_path.read_bytes()
+                    except Exception:
+                        continue
+
+                    extension = source_path.suffix.lower() if source_path.suffix else ".png"
+                    target_path = context.screenshots_dir / f"screenshot_{index:03d}{extension}"
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    target_path.write_bytes(image_bytes)
+                    artifacts.append(
+                        _ScreenshotArtifact(
+                            path=str(target_path),
+                            base64_content=(
+                                base64.b64encode(image_bytes).decode("utf-8")
+                                if self._include_screenshots_in_run_response
+                                else None
+                            ),
+                        )
+                    )
+
+                if artifacts:
+                    logger.info(f"Saved {len(artifacts)} screenshots from history.screenshot_paths()")
+                    return artifacts
+
         screenshots_attr = getattr(history, "screenshots", None)
 
         if callable(screenshots_attr):
@@ -1124,11 +1373,21 @@ class BrowserAgentService:
         else:
             task_prompt = f"{task_instruction}. Complete this task on the current website."
 
+        visual_trace_instruction = (
+            "Visual trace requirement: after each meaningful browser interaction step, "
+            "use the `screenshot` tool once so the next browser state is captured for analysis. "
+            "Keep screenshots focused on task progress and do not skip steps."
+        )
+
         # Add persona context if available
         if persona:
-            return f"Persona: {persona}\n\nTask: {task_prompt}"
+            return (
+                f"Persona: {persona}\n\n"
+                f"Task: {task_prompt}\n\n"
+                f"{visual_trace_instruction}"
+            )
         else:
-            return task_prompt
+            return f"Task: {task_prompt}\n\n{visual_trace_instruction}"
 
     def _extract_base64_data(self, screenshot_data: Any) -> str:
         """Best-effort extraction of base64 payload from screenshot blobs."""

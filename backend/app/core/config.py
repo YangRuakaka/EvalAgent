@@ -27,13 +27,18 @@ class Settings(BaseSettings):
     PERSONA_VARIATION_LLM_TEMPERATURE: float = 0
     BROWSER_AGENT_OUTPUT_DIR: str = "history_logs"
     BROWSER_AGENT_MAX_STEPS: int = 30
-    BROWSER_AGENT_MAX_CONCURRENT: int = 1  # Only one browser agent at a time
-    BROWSER_AGENT_RUN_TIMEOUT: int = 300  # Max seconds for entire run (5 min)
+    BROWSER_AGENT_MAX_CONCURRENT: int = 1  # Max concurrent browser agents per run
+    BROWSER_AGENT_MAX_PARALLEL_RUNS: int = 1  # Max concurrent run_id jobs in the API queue
+    BROWSER_AGENT_RUN_TIMEOUT: int = 0  # Max seconds for entire run; <=0 disables timeout
+    BROWSER_AGENT_BROWSER_START_TIMEOUT: int = 120  # Max seconds to wait for browser to start
+    BROWSER_AGENT_BROWSER_LAUNCH_TIMEOUT: int = 120  # Timeout for BrowserLaunchEvent (browser_use internal)
+    BROWSER_AGENT_BROWSER_LAUNCH_RETRIES: int = 2
+    BROWSER_AGENT_BROWSER_RETRY_BACKOFF_SECONDS: float = 2.0
     BROWSER_AGENT_ENABLE_SCREENSHOTS: bool = True
     BROWSER_AGENT_ENABLE_SCREENSHOT_PROCESSING: bool = False
-    BROWSER_AGENT_MAX_SCREENSHOTS: int = 3
+    BROWSER_AGENT_MAX_SCREENSHOTS: int = 0  # 0 means no limit: persist all available screenshots
     BROWSER_AGENT_INCLUDE_SCREENSHOTS_IN_RUN_RESPONSE: bool = False
-    BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD: bool = False
+    BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD: bool = True
     
     # Persona Generation Settings
     MAX_KEYWORDS_PER_REQUEST: int = 10

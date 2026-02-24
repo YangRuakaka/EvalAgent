@@ -12,14 +12,33 @@ import './StepTimeline.css';
  */
 const getScreenshotDataUri = (base64Data) => {
 	if (!base64Data) return null;
+	if (typeof base64Data !== 'string') return null;
+	const trimmed = base64Data.trim();
+	if (!trimmed) return null;
 	
 	// If it's already a data URI, return as is
-	if (base64Data.startsWith('data:')) {
-		return base64Data;
+	if (trimmed.startsWith('data:')) {
+		return trimmed;
+	}
+
+	// Allow direct URL/path values (for compatibility with older cached logs)
+	if (/^(https?:)?\/\//i.test(trimmed) || trimmed.startsWith('/')) {
+		return trimmed;
+	}
+
+	// If it looks like file path, do not convert to data URI
+	if (/[\\/]/.test(trimmed) || /\.(png|jpg|jpeg|webp)$/i.test(trimmed)) {
+		return null;
+	}
+
+	// Validate base64 characters before constructing data URI
+	const normalized = trimmed.replace(/\s+/g, '').replace(/^data:[^,]+,/, '');
+	if (!/^[A-Za-z0-9+/=]+$/.test(normalized)) {
+		return null;
 	}
 	
 	// Otherwise, assume it's PNG base64 and convert to data URI
-	return `data:image/png;base64,${base64Data}`;
+	return `data:image/png;base64,${normalized}`;
 };
 
 const StepTimeline = ({ 

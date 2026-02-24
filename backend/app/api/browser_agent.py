@@ -1,11 +1,15 @@
 """API routes for executing browser-use agent tasks."""
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
+from ..core.config import get_settings
 from ..schemas.browser_agent import (
     BrowserAgentRunRequest,
     BrowserAgentRunStartResponse,
@@ -18,9 +22,67 @@ from ..services.browser_agent_runner import (
 )
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 router = APIRouter(prefix="/browser-agent", tags=["browser-agent"])
 _service = BrowserAgentService()
+_worker_queue: asyncio.Queue[tuple[str, BrowserAgentRunRequest, int]] | None = None
+_worker_tasks: list[asyncio.Task] = []
+_worker_lock: asyncio.Lock | None = None
+
+
+async def _worker_loop(worker_name: str) -> None:
+    """Consume queued browser-agent runs and execute them with bounded worker concurrency."""
+    global _worker_queue
+
+    if _worker_queue is None:
+        return
+
+    while True:
+        run_id, request, total_tasks = await _worker_queue.get()
+        try:
+            status = _service.get_run_status(run_id)
+            if status and status.get("status") == "cancelled":
+                continue
+
+            _service.mark_run_running(run_id=run_id, total_tasks=total_tasks)
+            _service.start_run(request, run_id=run_id)
+
+            current_task = _service.get_background_run_task(run_id)
+            if current_task is not None:
+                await current_task
+        except BrowserAgentBusyError:
+            logger.warning("Worker %s skipped duplicate running run_id=%s", worker_name, run_id)
+            _service.mark_run_failed(run_id=run_id, error="This run_id is already in progress.")
+        except asyncio.CancelledError:
+            logger.info("Browser-agent worker loop cancelled | worker=%s", worker_name)
+            raise
+        except Exception as exc:
+            logger.exception("Worker failed to execute run | worker=%s run_id=%s", worker_name, run_id)
+            _service.mark_run_failed(run_id=run_id, error=str(exc))
+        finally:
+            _worker_queue.task_done()
+
+
+async def _ensure_worker_started() -> None:
+    """Start the in-process worker task once per process."""
+    global _worker_queue, _worker_tasks, _worker_lock
+
+    if _worker_lock is None:
+        _worker_lock = asyncio.Lock()
+
+    async with _worker_lock:
+        if _worker_queue is None:
+            _worker_queue = asyncio.Queue()
+
+        max_parallel_runs = max(1, int(getattr(settings, "BROWSER_AGENT_MAX_PARALLEL_RUNS", 1)))
+        alive_workers = [task for task in _worker_tasks if not task.done()]
+
+        if len(alive_workers) < max_parallel_runs:
+            for worker_index in range(len(alive_workers), max_parallel_runs):
+                worker_name = f"browser-agent-worker-{worker_index + 1}"
+                alive_workers.append(asyncio.create_task(_worker_loop(worker_name)))
+            _worker_tasks = alive_workers
 
 
 @router.post(
@@ -47,14 +109,17 @@ async def run_browser_agent(request: BrowserAgentRunRequest) -> BrowserAgentRunS
         total_tasks,
     )
 
-    try:
-        _service.start_run(request, run_id=run_id)
-    except BrowserAgentBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await _ensure_worker_started()
+
+    if _worker_queue is None:
+        raise HTTPException(status_code=500, detail="Worker queue is not initialized")
+
+    _service.register_queued_run(run_id=run_id, total_tasks=total_tasks)
+    await _worker_queue.put((run_id, request, total_tasks))
 
     return BrowserAgentRunStartResponse(
         run_id=run_id,
-        status="running",
+        status="queued",
         total_tasks=total_tasks,
     )
 
@@ -72,6 +137,51 @@ async def get_run_status(run_id: str):
     if status is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return status
+
+
+@router.get(
+    "/events/{run_id}",
+    summary="Stream browser agent status updates via SSE",
+)
+async def stream_run_events(run_id: str, request: Request):
+    """Stream status updates for a browser-agent run using Server-Sent Events."""
+    status = _service.get_run_status(run_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    async def event_generator():
+        last_payload = None
+        while True:
+            if await request.is_disconnected():
+                break
+
+            current_status = _service.get_run_status(run_id)
+            if current_status is None:
+                yield "event: error\ndata: {\"error\": \"Run not found\"}\n\n"
+                break
+
+            payload = json.dumps(current_status, ensure_ascii=False)
+            if payload != last_payload:
+                yield f"event: status\ndata: {payload}\n\n"
+                last_payload = payload
+            else:
+                yield "event: ping\ndata: {}\n\n"
+
+            if current_status.get("status") in {"completed", "failed", "cancelled"}:
+                yield f"event: end\ndata: {payload}\n\n"
+                break
+
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post(

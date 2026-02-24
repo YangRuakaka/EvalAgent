@@ -3,7 +3,13 @@ import PropTypes from 'prop-types';
 
 import PanelHeader from '../common/PanelHeader';
 import { ConfigIcon } from '../common/icons';
-import { generatePersona, generatePersonaVariation, runBrowserAgent, stopBrowserAgentRun, getBrowserAgentStatus } from '../../services/api';
+import {
+	generatePersona,
+	generatePersonaVariation,
+	runBrowserAgent,
+	stopBrowserAgentRun,
+	streamBrowserAgentEvents,
+} from '../../services/api';
 import EnvironmentSetting from '../configuration/EnvironmentSetting';
 import PersonaConfiguration from '../configuration/PersonaConfiguration';
 import TestAutoBuy from '../common/TestAutoBuy';
@@ -1015,46 +1021,86 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				return;
 			}
 
-			// Step 2: Poll for status until completed/failed/cancelled
-			const POLL_INTERVAL_MS = 3000;
-			let pollActive = true;
+			await new Promise((resolve, reject) => {
+				let settled = false;
 
-			while (pollActive && !abortController.signal.aborted) {
-				await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-				if (abortController.signal.aborted) break;
+				const stream = streamBrowserAgentEvents(runId, {
+					onStatus: (data) => {
+						console.info('[browser-agent/events] Status:', data?.status);
 
-				try {
-					const statusResponse = await getBrowserAgentStatus(runId);
-					if (!statusResponse.ok) {
-						console.warn('[browser-agent/status] Poll error:', statusResponse);
-						continue;
-					}
+						if (data?.status === 'completed') {
+							const runResults = Array.isArray(data.results) ? data.results : [];
+							if (!runResults.length) {
+								setEnvironmentRunError('The browser agent did not return any results.');
+								setEnvironmentRunResult([]);
+							} else {
+								setEnvironmentRunResult(runResults);
+								if (typeof onAddRun === 'function') {
+									onAddRun({ results: runResults });
+								}
+							}
 
-					const data = statusResponse.data;
-					console.info('[browser-agent/status] Poll:', data?.status);
+							if (!settled) {
+								settled = true;
+								stream.close();
+								resolve();
+							}
+							return;
+						}
 
-					if (data.status === 'completed') {
-						pollActive = false;
-						const runResults = Array.isArray(data.results) ? data.results : [];
-						if (!runResults.length) {
-							setEnvironmentRunError('The browser agent did not return any results.');
-							setEnvironmentRunResult([]);
-						} else {
-							setEnvironmentRunResult(runResults);
-							if (typeof onAddRun === 'function') {
-								onAddRun({ results: runResults });
+						if (data?.status === 'failed' || data?.status === 'cancelled') {
+							setEnvironmentRunError(data?.error || 'Browser agent run failed.');
+							if (!settled) {
+								settled = true;
+								stream.close();
+								resolve();
 							}
 						}
-					} else if (data.status === 'failed' || data.status === 'cancelled') {
-						pollActive = false;
-						setEnvironmentRunError(data.error || 'Browser agent run failed.');
-					}
-					// status === 'running' → continue polling
-				} catch (pollError) {
-					if (pollError?.name === 'AbortError') break;
-					console.warn('[browser-agent/status] Poll exception:', pollError);
-				}
-			}
+					},
+					onEnd: (data) => {
+						if (settled) {
+							return;
+						}
+
+						if (data?.status === 'failed' || data?.status === 'cancelled') {
+							setEnvironmentRunError(data?.error || 'Browser agent run failed.');
+						}
+
+						settled = true;
+						stream.close();
+						resolve();
+					},
+					onError: (streamError) => {
+						if (settled) {
+							return;
+						}
+
+						if (abortController.signal.aborted) {
+							settled = true;
+							stream.close();
+							resolve();
+							return;
+						}
+
+						settled = true;
+						stream.close();
+						reject(streamError);
+					},
+				});
+
+				abortController.signal.addEventListener(
+					'abort',
+					() => {
+						if (settled) {
+							return;
+						}
+						settled = true;
+						stream.close();
+						resolve();
+					},
+					{ once: true },
+				);
+			});
 		} catch (error) {
 			if (error?.name === 'AbortError') {
 				setEnvironmentRunError('Browser agent run was stopped.');

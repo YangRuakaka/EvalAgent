@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 
 import PanelHeader from '../common/PanelHeader';
-import { ConfigIcon, PersonaIcon, VariationIcon } from '../common/icons';
-import { generatePersona, generatePersonaVariation, runBrowserAgent } from '../../services/api';
+import { ConfigIcon } from '../common/icons';
+import { generatePersona, generatePersonaVariation, runBrowserAgent, stopBrowserAgentRun, getBrowserAgentStatus } from '../../services/api';
 import EnvironmentSetting from '../configuration/EnvironmentSetting';
 import PersonaConfiguration from '../configuration/PersonaConfiguration';
 import TestAutoBuy from '../common/TestAutoBuy';
@@ -107,6 +107,13 @@ const formatVariationContent = (content, highlightColor) => {
 		.join('</span>');
 };
 
+const createBrowserAgentRunId = () => {
+	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+		return crypto.randomUUID();
+	}
+	return `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
 const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange: externalOnTabChange, onGetCacheData, isCacheLoading }) => {
 	const [activeTab] = useState('persona'); // 'persona' | 'environment'
 	// setActiveTab is reserved for future internal tab switching if external control is not provided
@@ -142,6 +149,9 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 	const [environmentWaitSeconds, setEnvironmentWaitSeconds] = useState(0);
 	const [regeneratingVariationKey, setRegeneratingVariationKey] = useState(null);
 	const dropdownRef = useRef(null);
+	const environmentWaitTimerRef = useRef(null);
+	const activeEnvironmentRunIdRef = useRef(null);
+	const activeEnvironmentAbortRef = useRef(null);
 
 	const selectedPersona = useMemo(
 		() => personaGallery.find((persona) => persona.id === selectedPersonaId) || null,
@@ -216,6 +226,26 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 			setEnvironmentVariationIds((prev) => prev.filter((value) => validKeys.includes(value)));
 		}
 	}, [environmentPersonaId, environmentVariationIds, variationStateByPersona]);
+
+	useEffect(() => () => {
+		if (environmentWaitTimerRef.current) {
+			window.clearInterval(environmentWaitTimerRef.current);
+			environmentWaitTimerRef.current = null;
+		}
+
+		if (activeEnvironmentAbortRef.current) {
+			activeEnvironmentAbortRef.current.abort();
+			activeEnvironmentAbortRef.current = null;
+		}
+
+		const activeRunId = activeEnvironmentRunIdRef.current;
+		if (activeRunId) {
+			stopBrowserAgentRun(activeRunId).catch((error) => {
+				console.warn('[browser-agent/stop] Cleanup stop request failed:', error);
+			});
+			activeEnvironmentRunIdRef.current = null;
+		}
+	}, []);
 
 	const extractErrorMessage = (data, fallbackMessage = 'Failed to generate persona. Please try again.') => {
 		if (!data) {
@@ -866,7 +896,34 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 	};
 
 	const handleEnvironmentRun = async () => {
-		if (isRunningEnvironment || isCacheLoading) {
+		if (isCacheLoading) {
+			return;
+		}
+
+		if (isRunningEnvironment) {
+			const activeRunId = activeEnvironmentRunIdRef.current;
+
+			if (environmentWaitTimerRef.current) {
+				window.clearInterval(environmentWaitTimerRef.current);
+				environmentWaitTimerRef.current = null;
+			}
+
+			if (activeEnvironmentAbortRef.current) {
+				activeEnvironmentAbortRef.current.abort();
+				activeEnvironmentAbortRef.current = null;
+			}
+
+			if (activeRunId) {
+				try {
+					await stopBrowserAgentRun(activeRunId);
+				} catch (error) {
+					console.warn('[browser-agent/stop] stop request failed:', error);
+				}
+			}
+
+			activeEnvironmentRunIdRef.current = null;
+			setIsRunningEnvironment(false);
+			setEnvironmentRunError('Browser agent run was stopped.');
 			return;
 		}
 
@@ -902,7 +959,15 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		setEnvironmentRunResult(null);
 		setIsRunningEnvironment(true);
 		setEnvironmentWaitSeconds(0);
-		const waitTimer = window.setInterval(() => {
+		const runId = createBrowserAgentRunId();
+		const abortController = new AbortController();
+		activeEnvironmentRunIdRef.current = runId;
+		activeEnvironmentAbortRef.current = abortController;
+
+		if (environmentWaitTimerRef.current) {
+			window.clearInterval(environmentWaitTimerRef.current);
+		}
+		environmentWaitTimerRef.current = window.setInterval(() => {
 			setEnvironmentWaitSeconds((prev) => prev + 1);
 		}, 1000);
 		try {
@@ -918,7 +983,6 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 			}));
 			const modelPayload = environmentModels;
 
-			// Run single task with Persona × Model combinations
 			const requestBody = {
 				task: {
 					name: environmentTaskName.trim(),
@@ -927,37 +991,85 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				persona: personaPayload,
 				model: modelPayload,
 				run_times: parsedRunTimes,
+				run_id: runId,
 			};
+
+			// Step 1: Start the run (returns immediately)
 			const response = await runBrowserAgent(requestBody, {
 				retryOnNetworkError: false,
+				signal: abortController.signal,
+				headers: {
+					'X-Browser-Agent-Run-Id': runId,
+				},
 			});
-			console.info('[browser-agent/run] Raw response payload:', response.data);
+			console.info('[browser-agent/run] Start response:', response.data);
+
 			if (!response.ok) {
-				const message = extractErrorMessage(
-					response.data,
-					`Failed to run the browser agent for task "${environmentTaskName}". Please review your inputs and try again.`,
-				);
+				const message = response.status === 409
+					? 'Another browser agent run is already in progress. Please wait or stop it first.'
+					: extractErrorMessage(
+						response.data,
+						`Failed to start the browser agent for task "${environmentTaskName}".`,
+					);
 				setEnvironmentRunError(message);
 				return;
 			}
-			const runResults = Array.isArray(response.data?.results) ? response.data.results : [];
 
-			console.info('[browser-agent/run] Normalized results:', runResults);
-			if (!runResults.length) {
-				setEnvironmentRunError('The browser agent did not return any results.');
-				setEnvironmentRunResult([]);
-				return;
-			}
-			setEnvironmentRunResult(runResults);
-			if (typeof onAddRun === 'function') {
-				onAddRun({ results: runResults });
+			// Step 2: Poll for status until completed/failed/cancelled
+			const POLL_INTERVAL_MS = 3000;
+			let pollActive = true;
+
+			while (pollActive && !abortController.signal.aborted) {
+				await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+				if (abortController.signal.aborted) break;
+
+				try {
+					const statusResponse = await getBrowserAgentStatus(runId);
+					if (!statusResponse.ok) {
+						console.warn('[browser-agent/status] Poll error:', statusResponse);
+						continue;
+					}
+
+					const data = statusResponse.data;
+					console.info('[browser-agent/status] Poll:', data?.status);
+
+					if (data.status === 'completed') {
+						pollActive = false;
+						const runResults = Array.isArray(data.results) ? data.results : [];
+						if (!runResults.length) {
+							setEnvironmentRunError('The browser agent did not return any results.');
+							setEnvironmentRunResult([]);
+						} else {
+							setEnvironmentRunResult(runResults);
+							if (typeof onAddRun === 'function') {
+								onAddRun({ results: runResults });
+							}
+						}
+					} else if (data.status === 'failed' || data.status === 'cancelled') {
+						pollActive = false;
+						setEnvironmentRunError(data.error || 'Browser agent run failed.');
+					}
+					// status === 'running' → continue polling
+				} catch (pollError) {
+					if (pollError?.name === 'AbortError') break;
+					console.warn('[browser-agent/status] Poll exception:', pollError);
+				}
 			}
 		} catch (error) {
+			if (error?.name === 'AbortError') {
+				setEnvironmentRunError('Browser agent run was stopped.');
+				return;
+			}
 			setEnvironmentRunError(
 				error?.message || 'Failed to run the browser agent. Please try again later.',
 			);
 		} finally {
-			window.clearInterval(waitTimer);
+			if (environmentWaitTimerRef.current) {
+				window.clearInterval(environmentWaitTimerRef.current);
+				environmentWaitTimerRef.current = null;
+			}
+			activeEnvironmentAbortRef.current = null;
+			activeEnvironmentRunIdRef.current = null;
 			setIsRunningEnvironment(false);
 		}
 	};
@@ -969,10 +1081,10 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				type="button"
 				className="config-section__action panel__action"
 				onClick={handleEnvironmentRun}
-				disabled={isRunningEnvironment || isCacheLoading}
+				disabled={isCacheLoading}
 			>
 				{isRunningEnvironment
-					? `Waiting ${environmentWaitSeconds}s`
+					? `Stop (${environmentWaitSeconds}s)`
 					: (isCacheLoading ? 'Running...' : 'Run')}
 			</button>
 		);

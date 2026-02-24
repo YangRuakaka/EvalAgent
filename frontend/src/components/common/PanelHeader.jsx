@@ -15,8 +15,10 @@ const PanelHeader = ({
   onGetCacheData,
   onManageCriteria,
   onCleanupServer,
+  onRestartBackend,
   isCacheLoading,
   isCleanupLoading,
+  isRestartLoading,
   children,
 }) => {
   const variantClass = variant && variant !== 'panel' ? `panel__header--${variant}` : null;
@@ -26,7 +28,8 @@ const PanelHeader = ({
   const canRequestCache = typeof onGetCacheData === 'function';
   const canManageCriteria = typeof onManageCriteria === 'function';
   const canCleanupServer = typeof onCleanupServer === 'function';
-  const hasRightContent = Boolean(children) || canRequestCache || canManageCriteria || canCleanupServer;
+  const canRestartBackend = typeof onRestartBackend === 'function';
+  const hasRightContent = Boolean(children) || canRequestCache || canManageCriteria || canCleanupServer || canRestartBackend;
 
   return (
     <header className={headerClassName}>
@@ -58,6 +61,16 @@ const PanelHeader = ({
               {isCleanupLoading ? 'Cleaning…' : 'Cleanup Server Files'}
             </button>
           )}
+          {canRestartBackend && (
+            <button
+              type="button"
+              className="panel__action"
+              onClick={onRestartBackend}
+              disabled={isRestartLoading}
+            >
+              {isRestartLoading ? 'Restarting…' : 'Restart Backend'}
+            </button>
+          )}
           {canRequestCache && (
             <button
               type="button"
@@ -82,8 +95,10 @@ PanelHeader.propTypes = {
   onGetCacheData: PropTypes.func,
   onManageCriteria: PropTypes.func,
   onCleanupServer: PropTypes.func,
+  onRestartBackend: PropTypes.func,
   isCacheLoading: PropTypes.bool,
   isCleanupLoading: PropTypes.bool,
+  isRestartLoading: PropTypes.bool,
   children: PropTypes.node,
 };
 
@@ -94,8 +109,10 @@ PanelHeader.defaultProps = {
   onGetCacheData: undefined,
   onManageCriteria: undefined,
   onCleanupServer: undefined,
+  onRestartBackend: undefined,
   isCacheLoading: false,
   isCleanupLoading: false,
+  isRestartLoading: false,
   children: null,
 };
 

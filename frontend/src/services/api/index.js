@@ -49,9 +49,30 @@ export const runBrowserAgent = (payload, optionsOrClient, maybeClient) => {
 	return client.post(API_ENDPOINTS.browserAgent.run, payload, {
 		retryOnNetworkError:	false,
 		maxRetries:		0,
+		signal: requestOptions.signal,
 		...(requestOptions.headers ? { headers: requestOptions.headers } : {}),
 	}).then(response => {
 		console.log('[API] runBrowserAgent - Response:', response);
+		return response;
+	});
+};
+
+export const stopBrowserAgentRun = (runId, client = defaultClient) => {
+	console.log('[API] stopBrowserAgentRun - Request:', { runId });
+	return client.post(API_ENDPOINTS.browserAgent.stop, { run_id: runId }, {
+		retryOnNetworkError: false,
+		maxRetries: 0,
+	}).then(response => {
+		console.log('[API] stopBrowserAgentRun - Response:', response);
+		return response;
+	});
+};
+
+export const getBrowserAgentStatus = (runId, client = defaultClient) => {
+	return client.get(`${API_ENDPOINTS.browserAgent.status}/${runId}`, {
+		retryOnNetworkError: false,
+		maxRetries: 0,
+	}).then(response => {
 		return response;
 	});
 };
@@ -60,6 +81,14 @@ export const cleanupServerFiles = (client = defaultClient) => {
 	console.log('[API] cleanupServerFiles - Request');
 	return client.post(API_ENDPOINTS.maintenance.cleanupFiles, {}).then(response => {
 		console.log('[API] cleanupServerFiles - Response:', response);
+		return response;
+	});
+};
+
+export const restartBackendService = (client = defaultClient) => {
+	console.log('[API] restartBackendService - Request');
+	return client.post(API_ENDPOINTS.maintenance.restartService, {}).then(response => {
+		console.log('[API] restartBackendService - Response:', response);
 		return response;
 	});
 };

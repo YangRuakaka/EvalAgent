@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import importlib
+import inspect
 from enum import Enum
 from typing import Any, Optional
 
@@ -91,6 +92,21 @@ class ChatLLMFactory:
             return self._create_browser_use_chat(config)
 
         raise LLMConfigurationError(f"Unsupported LLM target: {target}")
+
+    @staticmethod
+    def _set_if_supported(target_cls: Any, kwargs: dict[str, Any], key: str, value: Any) -> None:
+        """Set constructor kwarg only when the target class accepts it."""
+        try:
+            signature = inspect.signature(target_cls)
+        except (TypeError, ValueError):
+            return
+
+        params = signature.parameters
+        if key in params or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in params.values()
+        ):
+            kwargs[key] = value
     
     def get_langchain_llm(
         self,
@@ -243,13 +259,15 @@ class ChatLLMFactory:
         provider = config.provider
 
         if provider in (LLMProvider.OPENAI, LLMProvider.DEEPSEEK):
-            return ChatOpenAI(
-                api_key=config.api_key,
-                base_url=config.base_url,
-                model=config.model,
-                max_tokens=config.max_tokens,
-                temperature=config.temperature,
-            )
+            chat_kwargs: dict[str, Any] = {
+                "api_key": config.api_key,
+                "base_url": config.base_url,
+                "model": config.model,
+                "max_tokens": config.max_tokens,
+                "temperature": config.temperature,
+                "max_retries": 0,
+            }
+            return ChatOpenAI(**chat_kwargs)
 
         if provider is LLMProvider.ANTHROPIC:
             try:
@@ -265,6 +283,7 @@ class ChatLLMFactory:
                 model=config.model,
                 temperature=config.temperature,
                 max_tokens_to_sample=config.max_tokens,
+                max_retries=0,
             )
 
         if provider is LLMProvider.GEMINI:
@@ -281,6 +300,7 @@ class ChatLLMFactory:
                 model=config.model,
                 temperature=config.temperature,
                 max_output_tokens=config.max_tokens,
+                max_retries=0,
             )
 
         if provider is LLMProvider.OLLAMA:
@@ -346,6 +366,8 @@ class ChatLLMFactory:
             #     chat_kwargs["max_tokens"] = config.max_tokens
             if config.temperature is not None:
                 chat_kwargs["temperature"] = config.temperature
+
+            self._set_if_supported(BrowserChat, chat_kwargs, "max_retries", 0)
 
         return BrowserChat(**chat_kwargs)
 

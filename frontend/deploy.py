@@ -2,6 +2,14 @@ import os
 import subprocess
 import sys
 
+
+def _is_known_post_success_error(line):
+    text = (line or '').strip().lower()
+    return text in {
+        'error: an unexpected error has occurred.',
+        'error: an unexpected error has occurred',
+    }
+
 def main():
     print("Initializing deployment script...")
 
@@ -49,14 +57,22 @@ def main():
             )
 
             completed_successfully = False
+            saw_known_post_success_error = False
             while True:
                 line = process.stdout.readline()
                 if not line and process.poll() is not None:
                     break
                 if line:
-                    print(line, end='')
                     if "Deploy complete!" in line:
                         completed_successfully = True
+                        print(line, end='')
+                        continue
+
+                    if completed_successfully and _is_known_post_success_error(line):
+                        saw_known_post_success_error = True
+                        continue
+
+                    print(line, end='')
 
             return_code = process.poll()
 
@@ -64,7 +80,10 @@ def main():
                 print("\nDeployment completed successfully.")
                 break # Exit loop on success
             elif completed_successfully:
-                print("\nDeployment completed successfully (despite minor errors).")
+                if saw_known_post_success_error:
+                    print("\nDeployment completed successfully (Firebase CLI returned a known post-success generic error line).")
+                else:
+                    print("\nDeployment completed successfully (despite minor errors).")
                 break # Exit loop on success
             else:
                 print(f"\nDeployment failed with exit code {return_code}.")

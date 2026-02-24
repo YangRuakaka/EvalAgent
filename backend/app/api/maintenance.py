@@ -1,5 +1,8 @@
 import logging
+import os
 import shutil
+import threading
+import time
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -7,6 +10,26 @@ from fastapi import APIRouter
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
+
+
+def _terminate_process_after_delay(delay_seconds: float = 1.0) -> None:
+    def _terminate() -> None:
+        time.sleep(delay_seconds)
+        os._exit(0)
+
+    threading.Thread(target=_terminate, daemon=True).start()
+
+
+@router.post(
+    "/restart-service",
+    summary="Restart backend service process",
+)
+async def restart_backend_service():
+    _terminate_process_after_delay(1.0)
+    return {
+        "ok": True,
+        "message": "Backend restart requested. The process will exit shortly.",
+    }
 
 
 @router.post(

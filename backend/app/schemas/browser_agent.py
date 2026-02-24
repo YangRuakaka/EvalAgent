@@ -1,7 +1,7 @@
 """Schema definitions for browser agent execution endpoints."""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -46,6 +46,10 @@ class BrowserAgentRunRequest(BaseModel):
         ge=1,
         le=10,
         description="Number of sequential iterations per persona/model combination.",
+    )
+    run_id: Optional[str] = Field(
+        default=None,
+        description="Client-generated run identifier used for cooperative cancellation.",
     )
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -138,3 +142,42 @@ class BrowserAgentRunResponse(BaseModel):
             }
         }
     )
+
+
+class BrowserAgentRunStartResponse(BaseModel):
+    """Immediate response when a browser agent run is initiated (non-blocking)."""
+
+    run_id: str = Field(..., description="Unique run identifier for polling status.")
+    status: str = Field(default="running", description="Initial status, always 'running'.")
+    total_tasks: int = Field(default=0, description="Total agent tasks (personas × models × run_times).")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BrowserAgentStatusResponse(BaseModel):
+    """Polling response for browser agent run status."""
+
+    run_id: str
+    status: str = Field(..., description="running | completed | failed | cancelled")
+    results: Optional[List[Dict[str, Any]]] = Field(default=None, description="Results when completed.")
+    error: Optional[str] = Field(default=None, description="Error message when failed.")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BrowserAgentStopRequest(BaseModel):
+    """Request payload to stop an in-flight browser agent run."""
+
+    run_id: str = Field(..., description="Run identifier returned/generated when calling /browser-agent/run.")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BrowserAgentStopResponse(BaseModel):
+    """Response payload after attempting to stop an in-flight run."""
+
+    run_id: str
+    stopped: bool
+    message: str
+
+    model_config = ConfigDict(extra="forbid")

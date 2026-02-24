@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     PERSONA_VARIATION_LLM_TEMPERATURE: float = 0
     BROWSER_AGENT_OUTPUT_DIR: str = "history_logs"
     BROWSER_AGENT_MAX_STEPS: int = 30
-    BROWSER_AGENT_MAX_CONCURRENT: int = 2  # Max concurrent browser agent runs
+    BROWSER_AGENT_MAX_CONCURRENT: int = 1  # Only one browser agent at a time
+    BROWSER_AGENT_RUN_TIMEOUT: int = 300  # Max seconds for entire run (5 min)
     BROWSER_AGENT_ENABLE_SCREENSHOTS: bool = True
     BROWSER_AGENT_ENABLE_SCREENSHOT_PROCESSING: bool = False
     BROWSER_AGENT_MAX_SCREENSHOTS: int = 3

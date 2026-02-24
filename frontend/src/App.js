@@ -5,7 +5,7 @@ import PanelHeader from './components/common/PanelHeader';
 import ConfigurationView from './components/views/ConfigurationView';
 import VisualizationView from './components/views/VisualizationView';
 import VerticalTabs from './components/common/VerticalTabs';
-import { cleanupServerFiles, fetchHistoryLogs } from './services/api';
+import { cleanupServerFiles, fetchHistoryLogs, restartBackendService } from './services/api';
 import { PersonaIcon, EnvironmentIcon } from './components/common/icons';
 import { processVisualizationData } from './components/views/utils/visualizationDataProcessor';
 import { useData } from './context/DataContext';
@@ -56,6 +56,7 @@ const App = () => {
 	const [activeRunId, setActiveRunId] = useState(null);
 	const [isFetchingCache, setIsFetchingCache] = useState(false);
 	const [isCleaningServerFiles, setIsCleaningServerFiles] = useState(false);
+	const [isRestartingBackend, setIsRestartingBackend] = useState(false);
 	const [cacheError, setCacheError] = useState(null);
 	const [activeConfigTab, setActiveConfigTab] = useState('persona');
 	const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
@@ -168,6 +169,32 @@ const App = () => {
 		}
 	}, []);
 
+	const handleRestartBackend = useCallback(async () => {
+		const confirmed = window.confirm(
+			'This will restart the backend service. Ongoing backend tasks may stop temporarily. Continue?',
+		);
+		if (!confirmed) {
+			return;
+		}
+
+		setIsRestartingBackend(true);
+		try {
+			const response = await restartBackendService();
+			if (!response.ok || !response.data?.ok) {
+				const detail = typeof response.data === 'string'
+					? response.data
+					: (response.data?.detail || `HTTP ${response.status}`);
+				throw new Error(detail);
+			}
+
+			alert('Backend restart requested. Please wait a few seconds before next operation.');
+		} catch (error) {
+			alert(`Restart failed: ${error?.message || 'unknown error'}`);
+		} finally {
+			setIsRestartingBackend(false);
+		}
+	}, []);
+
 	useEffect(() => {
 		if (cacheError) {
 		}
@@ -241,9 +268,11 @@ const App = () => {
 						variant="page"
 						onManageCriteria={() => setIsCriteriaManagerOpen(true)}
 						onCleanupServer={handleCleanupServerFiles}
+						onRestartBackend={handleRestartBackend}
 						onGetCacheData={handleGetCacheData}
 						isCacheLoading={isFetchingCache}
 						isCleanupLoading={isCleaningServerFiles}
+						isRestartLoading={isRestartingBackend}
 					/>
 				</div>
 			</header>

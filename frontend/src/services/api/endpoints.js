@@ -12,6 +12,8 @@ export const API_ENDPOINTS = {
   },
   browserAgent: {
     run: '/browser-agent/run',
+    status: '/browser-agent/status',
+    stop: '/browser-agent/stop',
   },
   criteria: {
     root: '/criteria',
@@ -27,6 +29,7 @@ export const API_ENDPOINTS = {
   },
   maintenance: {
     cleanupFiles: '/maintenance/cleanup-files',
+    restartService: '/maintenance/restart-service',
   },
 };
 

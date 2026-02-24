@@ -1,12 +1,48 @@
 import React, { useRef, useState } from 'react';
-import { runBrowserAgent } from '../../services/api';
+import { runBrowserAgent, stopBrowserAgentRun, getBrowserAgentStatus } from '../../services/api';
+
+const createBrowserAgentRunId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
 
 const TestAutoBuy = ({ onAddRun }) => {
     const timerRef = useRef(null);
+    const runIdRef = useRef(null);
+    const abortRef = useRef(null);
     const [isWaiting, setIsWaiting] = useState(false);
     const [waitSeconds, setWaitSeconds] = useState(0);
 
     const handleTest = async () => {
+        if (isWaiting) {
+            const activeRunId = runIdRef.current;
+            if (timerRef.current) {
+                window.clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+            if (abortRef.current) {
+                abortRef.current.abort();
+                abortRef.current = null;
+            }
+            if (activeRunId) {
+                try {
+                    await stopBrowserAgentRun(activeRunId);
+                } catch (error) {
+                    console.warn('TestAutoBuy stop request failed:', error);
+                }
+            }
+            runIdRef.current = null;
+            setIsWaiting(false);
+            return;
+        }
+
+        const runId = createBrowserAgentRunId();
+        const abortController = new AbortController();
+        runIdRef.current = runId;
+        abortRef.current = abortController;
+
         const payload = {
             task: {
                 name: 'Find me a ticket from New York to San Francisco next week(you don\'t need to actually buy it, just find the best option and tell me the details)',
@@ -15,9 +51,9 @@ const TestAutoBuy = ({ onAddRun }) => {
             model: ['deepseek-chat'],
             persona: [
                 { value: 'frugal', content: 'Tell me in the most frugal way' },
-                { value: 'efficiency', content: 'Tell me in the most efficient way' },
             ],
-            run_times: 1
+            run_times: 1,
+            run_id: runId,
         };
 
         try {
@@ -28,17 +64,55 @@ const TestAutoBuy = ({ onAddRun }) => {
             }, 1000);
 
             console.log('TestAutoBuy sending payload:', payload);
-            const response = await runBrowserAgent(payload);
-            if (response.ok && response.data && response.data.results) {
-                if (onAddRun) {
-                    console.log('TestAutoBuy calling onAddRun with:', response.data.results);
-                    onAddRun({ results: response.data.results });
+            const response = await runBrowserAgent(payload, {
+                signal: abortController.signal,
+                headers: {
+                    'X-Browser-Agent-Run-Id': runId,
+                },
+            });
+
+            if (!response.ok) {
+                const detail = response.status === 409
+                    ? 'Another run is in progress.'
+                    : 'Failed to start run.';
+                console.error('TestAutoBuy start failed:', detail);
+                alert(detail);
+                return;
+            }
+
+            // Poll for results
+            const POLL_INTERVAL_MS = 3000;
+            let pollActive = true;
+
+            while (pollActive && !abortController.signal.aborted) {
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+                if (abortController.signal.aborted) break;
+
+                try {
+                    const statusResponse = await getBrowserAgentStatus(runId);
+                    if (!statusResponse.ok) continue;
+
+                    const data = statusResponse.data;
+                    if (data.status === 'completed') {
+                        pollActive = false;
+                        if (data.results && onAddRun) {
+                            console.log('TestAutoBuy calling onAddRun with:', data.results);
+                            onAddRun({ results: data.results });
+                        }
+                    } else if (data.status === 'failed' || data.status === 'cancelled') {
+                        pollActive = false;
+                        console.error('TestAutoBuy run ended:', data.error);
+                        alert(`Run ${data.status}: ${data.error || 'Unknown error'}`);
+                    }
+                } catch (pollError) {
+                    if (pollError?.name === 'AbortError') break;
+                    console.warn('TestAutoBuy poll error:', pollError);
                 }
-            } else {
-                console.error('TestAutoBuy failed:', response);
-                alert('TestAutoBuy failed. Check console.');
             }
         } catch (error) {
+            if (error?.name === 'AbortError') {
+                return;
+            }
             console.error('TestAutoBuy error:', error);
             alert('TestAutoBuy error. Check console.');
         } finally {
@@ -46,6 +120,8 @@ const TestAutoBuy = ({ onAddRun }) => {
                 window.clearInterval(timerRef.current);
                 timerRef.current = null;
             }
+            abortRef.current = null;
+            runIdRef.current = null;
             setIsWaiting(false);
         }
     };
@@ -62,7 +138,7 @@ const TestAutoBuy = ({ onAddRun }) => {
                 marginLeft: '8px'
             }}
         >
-            {isWaiting ? `Waiting Backend ${waitSeconds}s` : 'Test: Find Flight'}
+            {isWaiting ? `Stop Test (${waitSeconds}s)` : 'Test: Find Flight'}
         </button>
     );
 };

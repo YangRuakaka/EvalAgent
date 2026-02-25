@@ -17,6 +17,7 @@ const COLOR_PALETTE = schemeTableau10 || [
 
 const DEFAULT_CLUSTER_THRESHOLD = 12;
 const FIRST_CONDITION_HASH = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+const DEFAULT_HASH_CONCURRENCY = 8;
 
 const asArray = (value) => {
 	if (!value) {
@@ -45,6 +46,36 @@ const extractMimeType = (raw, metadata) => {
 };
 
 const sanitizeBase64 = (value) => value.replace(/\s+/g, '').replace(/^data:[^,]+,/, '');
+
+const runWithConcurrencyLimit = async (items, concurrency, worker) => {
+	if (!Array.isArray(items) || items.length === 0) {
+		return [];
+	}
+
+	const limit = Number.isFinite(concurrency) && concurrency > 0
+		? Math.max(1, Math.floor(concurrency))
+		: DEFAULT_HASH_CONCURRENCY;
+
+	const results = new Array(items.length);
+	let nextIndex = 0;
+
+	const runWorker = async () => {
+		while (true) {
+			const currentIndex = nextIndex;
+			nextIndex += 1;
+			if (currentIndex >= items.length) {
+				return;
+			}
+
+			results[currentIndex] = await worker(items[currentIndex], currentIndex);
+		}
+	};
+
+	const workerCount = Math.min(limit, items.length);
+	await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+
+	return results;
+};
 
 const isLikelyBase64Image = (value) => {
 	if (!value || typeof value !== 'string') {
@@ -356,69 +387,99 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const sequenceNodeIds = sequences.map(() => []);
 	const sequenceLinkPaths = sequences.map(() => []);
 	const sequenceColors = sequences.map((sequence, index) => sequence.color || COLOR_PALETTE[index % COLOR_PALETTE.length]);
+	const hashConcurrency = Number.isFinite(options.hashConcurrency) && options.hashConcurrency > 0
+		? Math.floor(options.hashConcurrency)
+		: DEFAULT_HASH_CONCURRENCY;
 
-	await Promise.all(
-		sequences.map(async (sequence, sequenceIndex) => {
-			const screenshots = sequence.screenshots;
+	const hashTasks = [];
+	sequences.forEach((sequence, sequenceIndex) => {
+		const screenshots = sequence.screenshots;
+		for (let position = 0; position < screenshots.length; position += 1) {
+			hashTasks.push({
+				sequenceIndex,
+				position,
+				screenshot: screenshots[position],
+				isConditionFirstScreenshot: position === 0,
+			});
+		}
+	});
 
-			for (let position = 0; position < screenshots.length; position += 1) {
-				const screenshot = screenshots[position];
-				const occurrenceId = `${sequenceIndex}-${position}`;
-				const isConditionFirstScreenshot = position === 0;
-				const hash = isConditionFirstScreenshot
-					? null
-					: await computeImageHash(screenshot.src, options.hash);
-				const nodeId = isConditionFirstScreenshot ? 'node-condition-first' : `node-${hash}`;
-
-				if (!nodeMap.has(nodeId)) {
-					nodeMap.set(nodeId, {
-						id: nodeId,
-						hash: isConditionFirstScreenshot ? FIRST_CONDITION_HASH : hash,
-						src: screenshot.src,
-						alt: screenshot.alt,
-						occurrences: [],
-						weight: 0,
-						isConditionFirst: isConditionFirstScreenshot,
-					});
-				}
-
-				const node = nodeMap.get(nodeId);
-				
-				// 从 conditionMap 获取模型和 persona 信息
-				const conditionInfo = conditionMap.get(sequenceIndex) || {};
-				
-				node.occurrences.push({
-					sequenceIndex,
-					sequenceLabel: sequence.label,
-					sequenceTask: sequence.task,
-					sequencePersona: sequence.persona,
-					screenshotPersona: screenshot.persona || null,
-					position,
-					detailIndex: screenshot.detailIndex,
-					stepId: screenshot.stepId,
-					timestamp: screenshot.timestamp,
-					description: screenshot.description || null,
-					raw: screenshot.raw,
-					model_output: screenshot.model_output,
-					// 添加模型、persona 和 run_index 信息
-					agentModel: conditionInfo.model || sequence.modelValue || null,
-					agentValue: sequence.modelValue || null,
-					agentPersona: conditionInfo.persona || null,
-					agentRunIndex: conditionInfo.run_index !== undefined ? conditionInfo.run_index : (sequence.runIndex !== null ? sequence.runIndex : null),
-				});
-				node.weight += 1;
-
-				occurrences.push({
-					occurrenceId,
-					nodeId,
-					sequenceIndex,
-					position,
-				});
-
-				sequenceNodeIds[sequenceIndex][position] = nodeId;
+	const hashedTasks = await runWithConcurrencyLimit(
+		hashTasks,
+		hashConcurrency,
+		async (task) => {
+			if (task.isConditionFirstScreenshot) {
+				return { ...task, hash: null };
 			}
-		})
+
+			const hash = await computeImageHash(task.screenshot.src, options.hash);
+			return { ...task, hash };
+		},
 	);
+
+	const hashByOccurrence = new Map();
+	hashedTasks.forEach((task) => {
+		hashByOccurrence.set(`${task.sequenceIndex}-${task.position}`, task.hash);
+	});
+
+	sequences.forEach((sequence, sequenceIndex) => {
+		const screenshots = sequence.screenshots;
+
+		for (let position = 0; position < screenshots.length; position += 1) {
+			const screenshot = screenshots[position];
+			const occurrenceId = `${sequenceIndex}-${position}`;
+			const isConditionFirstScreenshot = position === 0;
+			const hash = hashByOccurrence.get(`${sequenceIndex}-${position}`) || null;
+			const nodeId = isConditionFirstScreenshot ? 'node-condition-first' : `node-${hash}`;
+
+			if (!nodeMap.has(nodeId)) {
+				nodeMap.set(nodeId, {
+					id: nodeId,
+					hash: isConditionFirstScreenshot ? FIRST_CONDITION_HASH : hash,
+					src: screenshot.src,
+					alt: screenshot.alt,
+					occurrences: [],
+					weight: 0,
+					isConditionFirst: isConditionFirstScreenshot,
+				});
+			}
+
+			const node = nodeMap.get(nodeId);
+
+			// 从 conditionMap 获取模型和 persona 信息
+			const conditionInfo = conditionMap.get(sequenceIndex) || {};
+
+			node.occurrences.push({
+				sequenceIndex,
+				sequenceLabel: sequence.label,
+				sequenceTask: sequence.task,
+				sequencePersona: sequence.persona,
+				screenshotPersona: screenshot.persona || null,
+				position,
+				detailIndex: screenshot.detailIndex,
+				stepId: screenshot.stepId,
+				timestamp: screenshot.timestamp,
+				description: screenshot.description || null,
+				raw: screenshot.raw,
+				model_output: screenshot.model_output,
+				// 添加模型、persona 和 run_index 信息
+				agentModel: conditionInfo.model || sequence.modelValue || null,
+				agentValue: sequence.modelValue || null,
+				agentPersona: conditionInfo.persona || null,
+				agentRunIndex: conditionInfo.run_index !== undefined ? conditionInfo.run_index : (sequence.runIndex !== null ? sequence.runIndex : null),
+			});
+			node.weight += 1;
+
+			occurrences.push({
+				occurrenceId,
+				nodeId,
+				sequenceIndex,
+				position,
+			});
+
+			sequenceNodeIds[sequenceIndex][position] = nodeId;
+		}
+	});
 
 	const nodes = Array.from(nodeMap.values());
 

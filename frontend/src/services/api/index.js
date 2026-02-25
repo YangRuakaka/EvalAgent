@@ -169,7 +169,7 @@ export const generateCriteria = (taskName, taskUrl, personas, models, client = d
 	});
 };
 
-export const evaluateExperiment = (conditionIds, criteria, client = defaultClient) => {
+export const evaluateExperiment = (conditionIds, criteria, judgeModel = null, client = defaultClient) => {
 	const payload = {
 		conditions: conditionIds.map(c => {
 			const conditionId = typeof c === 'object' ? (c.id || c.conditionID) : c;
@@ -182,7 +182,11 @@ export const evaluateExperiment = (conditionIds, criteria, client = defaultClien
 		})),
 	};
 
-	console.log('[API] evaluateExperiment - Request:', { payload });
+	if (judgeModel) {
+		payload.judge_model = judgeModel;
+	}
+
+	console.log('[API] evaluateExperiment - Request:', { payload, judgeModel });
 	return client.post(API_ENDPOINTS.judge.evaluateExperiment, payload).then(response => {
 		console.log('[API] evaluateExperiment - Response:', response);
 		return response;

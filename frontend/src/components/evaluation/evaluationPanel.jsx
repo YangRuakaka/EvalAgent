@@ -13,6 +13,9 @@ const EvaluationPanel = ({
 	conditions = [],
 	selectedCriteriaIds = [],
 	selectedConditionIds = [],
+	evaluateModel = 'gpt-4o-mini',
+	modelOptions = [],
+	onEvaluateModelChange = () => {},
 	onCriteriaSelectionChange = () => {},
 	onConditionSelectionChange = () => {},
 	onEvaluate = () => {},
@@ -211,17 +214,27 @@ const EvaluationPanel = ({
 				conditionIds: selectedConditionIds,
 				conditions: selectedConditionData,
 				criteria: selectedCriteriaData,
+				evaluateModel,
 			});
 		} finally {
 			setIsEvaluating(false);
 		}
-	}, [selectedCriteriaIds, selectedConditionIds, filteredConditions, criteriaList, onEvaluate]);
+	}, [selectedCriteriaIds, selectedConditionIds, filteredConditions, criteriaList, onEvaluate, evaluateModel]);
 
 	const hasSelections = selectedCriteriaIds.length > 0 && selectedConditionIds.length > 0;
 
 	return (
 		<div className="evaluation-panel">
 			<PanelHeader title="Evaluation">
+				<select
+					className="evaluation-panel__model-select"
+					value={evaluateModel}
+					onChange={(event) => onEvaluateModelChange(event.target.value)}
+				>
+					{modelOptions.map((option) => (
+						<option key={option.value} value={option.value}>{option.label}</option>
+					))}
+				</select>
 				<ActionButton
 					label={isEvaluating ? 'Evaluating...' : 'Evaluate'}
 					onClick={handleEvaluate}
@@ -445,6 +458,12 @@ EvaluationPanel.propTypes = {
 	conditions: PropTypes.array,
 	selectedCriteriaIds: PropTypes.array,
 	selectedConditionIds: PropTypes.array,
+	evaluateModel: PropTypes.string,
+	modelOptions: PropTypes.arrayOf(PropTypes.shape({
+		value: PropTypes.string.isRequired,
+		label: PropTypes.string.isRequired,
+	})),
+	onEvaluateModelChange: PropTypes.func,
 	onCriteriaSelectionChange: PropTypes.func,
 	onConditionSelectionChange: PropTypes.func,
 	onEvaluate: PropTypes.func,
@@ -455,6 +474,9 @@ EvaluationPanel.defaultProps = {
 	conditions: [],
 	selectedCriteriaIds: [],
 	selectedConditionIds: [],
+	evaluateModel: 'gpt-4o-mini',
+	modelOptions: [],
+	onEvaluateModelChange: () => {},
 	onCriteriaSelectionChange: () => {},
 	onConditionSelectionChange: () => {},
 	onEvaluate: () => {},

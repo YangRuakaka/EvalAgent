@@ -11,9 +11,18 @@ import { useData } from '../../context/DataContext';
 import { evaluateExperiment } from '../../services/api';
 import './VisualizationView.css';
 
+const EVALUATION_MODEL_OPTIONS = [
+	{ value: 'gpt-4o-mini', label: 'OpenAI GPT-4o mini' },
+	{ value: 'gpt-4o', label: 'OpenAI GPT-4o' },
+	{ value: 'deepseek-chat', label: 'DeepSeek Chat' },
+	{ value: 'claude-3-5-sonnet-20240620', label: 'Claude 3.5 Sonnet' },
+	{ value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+];
+
 const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun, onCloseRun }) => {
 	const { state: { mappings, criterias, evaluationResponses }, updateEvaluationResponse } = useData();
 	const [activeTab, setActiveTab] = useState('trajectory');
+	const [evaluateModel, setEvaluateModel] = useState('gpt-4o-mini');
 	
 	// Store state for each experiment (runId = experimentId): { [experimentId]: { selectedCriteriaIds, selectedConditionIds } }
 	const [experimentStates, setExperimentStates] = useState({});
@@ -206,11 +215,15 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 								conditions={experimentsData?.conditions || []}
 								selectedCriteriaIds={selectedCriteriaIds}
 								selectedConditionIds={selectedConditionIds}
+								evaluateModel={evaluateModel}
+								modelOptions={EVALUATION_MODEL_OPTIONS}
+								onEvaluateModelChange={setEvaluateModel}
 								onCriteriaSelectionChange={setSelectedCriteriaIds}
 								onConditionSelectionChange={setSelectedConditionIds}
 								evaluationResponse={evaluationResponse}
 								onEvaluate={async (config) => {
-							const { criteriaIds, conditionIds } = config;								try {
+									const { criteriaIds, conditionIds, evaluateModel: selectedEvaluateModel } = config;
+									try {
 									// Get selected conditions data
 									const selectedConditions = experimentsData?.conditions
 										?.filter(cond => conditionIds.includes(cond.id))
@@ -229,30 +242,31 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 										// timestamp is usually 13 digits (Date.now())
 										// suffix is usually 9 chars (Math.random().toString(36).substr(2, 9))
 										const match = activeRunId.match(/^(.*)-(\d{13})-([a-z0-9]{9})$/);
-									if (match) {
-										experimentIdToUse = match[1];
-									} else {
+										if (match) {
+											experimentIdToUse = match[1];
+										} else {
 											experimentIdToUse = activeRunId;
 										}
-								}
+									}
 
-								// Call API to evaluate experiment
+									// Call API to evaluate experiment
 									const response = await evaluateExperiment(
 										selectedConditions,
-										selectedCriteria
+										selectedCriteria,
+										selectedEvaluateModel || evaluateModel,
 									);
 									
-								if (response.ok) {
+									if (response.ok) {
 									// response.data 已经是评估结果对象，包含 { run_id, conditions: [...] }
 									handleEvaluationResponse(response.data);
 									alert(`Evaluation completed for ${selectedConditions.length} conditions with ${selectedCriteria.length} criteria.`);
-								} else {
+									} else {
 									alert(`Evaluation failed: ${response.status}`);
+									}
+								} catch (error) {
+									alert(`Evaluation error: ${error.message}`);
 								}
-							} catch (error) {
-								alert(`Evaluation error: ${error.message}`);
-							}
-							}}
+								}}
 							/>
 						</section>
 					)}

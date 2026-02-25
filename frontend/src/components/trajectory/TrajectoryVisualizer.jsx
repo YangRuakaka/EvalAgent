@@ -127,6 +127,7 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 
 		buildTrajectoryGraph(trajectory, {
 			hash: { hashSize: 16 },
+			hashConcurrency: 8,
 			clusterThreshold,
 			conditions: conditions || [],
 		})
@@ -201,7 +202,7 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 			const personaValue = item.value || item.metadata?.value || item.persona?.value || '';
 			const taskName = item.task?.name || item.metadata?.task?.name || '';
 			const runIndex = item.run_index !== undefined ? item.run_index : index;
-			const label = `#${runIndex} ${model}${personaValue ? ' (' + personaValue + ')' : ''}${taskName ? ' - ' + taskName : ''}`;
+			const label = `#${runIndex} ${model}${personaValue ? ' (' + personaValue + ')' : ''}`;
 			const color = colorMap.get(index) || '#1e3a8a';
 			const nodePath = (nodePathMap.get(index) || []).slice().sort((a, b) => a.position - b.position);
 			let linkPath = [];

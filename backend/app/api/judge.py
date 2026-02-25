@@ -6,11 +6,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Any
 
 from fastapi import APIRouter, HTTPException, Depends
 from langchain_core.messages import HumanMessage
+from pydantic import ValidationError
 
 from ..schemas.judge import (
     GranularityAnalysisRequest,
@@ -37,6 +39,7 @@ from ..schemas.judge import (
 )
 from ..schemas.browser_agent import BrowserAgentTask
 from ..api.deps import get_judge_services, JudgeServices
+from ..core.config import settings
 from ..services.history_logs_reader import HistoryLogsReader
 from ..services.llm_factory import get_chat_llm
 
@@ -223,7 +226,8 @@ async def _generate_overall_assessment(
     models: List[str],
     eval_result,
     involved_steps: List[StepEvaluationDetail],
-    services: JudgeServices
+    services: JudgeServices,
+    judge_model: Optional[str] = None,
 ) -> tuple:
     """Generate overall assessment for a criterion using LLM.
     
@@ -282,8 +286,8 @@ async def _generate_overall_assessment(
             "involved_steps_summary": involved_steps_summary
         }
         
-        # Get LLM and create chain - use gpt-4o-mini for faster overall assessment generation
-        llm = services.llm_factory.get_langchain_llm("gpt-4o-mini")
+        selected_model = judge_model or "gpt-4o-mini"
+        llm = services.llm_factory.get_langchain_llm(selected_model)
         chain = prompt_template | llm
         
         # Log the prompt
@@ -296,7 +300,7 @@ async def _generate_overall_assessment(
         print("="*80)
         
         # Invoke LLM
-        response = chain.invoke(input_dict)
+        response = await asyncio.to_thread(chain.invoke, input_dict)
         response_text = response.content if hasattr(response, 'content') else str(response)
         
         logger.info(f"Overall assessment response:\n{response_text}")
@@ -345,7 +349,8 @@ async def _process_single_criterion(
     all_steps: List[dict],
     personas: List[str],
     models: List[str],
-    services: JudgeServices
+    services: JudgeServices,
+    judge_model: Optional[str] = None,
 ) -> Optional[ExperimentCriterionResult]:
     """Process a single criterion evaluation asynchronously."""
     logger.info(f"Evaluating criterion: {crit.title}")
@@ -353,11 +358,13 @@ async def _process_single_criterion(
     # 2. Analyze granularity
     try:
         # Allow STEP_LEVEL, PHASE_LEVEL, and GLOBAL_SUMMARY
-        granularity_req = services.granularity_analyzer.analyze_criterion_granularity(
+        granularity_req = await asyncio.to_thread(
+            services.granularity_analyzer.analyze_criterion_granularity,
             criterion_name=crit.title,
             criterion_assertion=crit.assertion,
             task_name=task.name,
-            allowed_granularities=[Granularity.STEP_LEVEL, Granularity.PHASE_LEVEL, Granularity.GLOBAL_SUMMARY]
+            model_name=judge_model or "gpt-4o-mini",
+            allowed_granularities=[Granularity.STEP_LEVEL, Granularity.PHASE_LEVEL, Granularity.GLOBAL_SUMMARY],
         )
         target_granularity = granularity_req.required_granularity
         logger.info(f"Determined granularity for criterion '{crit.title}': {target_granularity}")
@@ -370,11 +377,13 @@ async def _process_single_criterion(
     # Only decompose if PHASE_LEVEL granularity is required
     if target_granularity == Granularity.PHASE_LEVEL:
         try:
-            decomposition = services.task_decomposer.decompose_for_phase_evaluation(
+            decomposition = await asyncio.to_thread(
+                services.task_decomposer.decompose_for_phase_evaluation,
                 task=task,
                 all_steps=all_steps,
                 criterion_title=crit.title,
-                criterion_assertion=crit.assertion
+                criterion_assertion=crit.assertion,
+                model_name=judge_model or "gpt-4o-mini",
             )
             if decomposition is None:
                 logger.warning("Phase decomposition returned None, falling back to STEP_LEVEL")
@@ -386,11 +395,13 @@ async def _process_single_criterion(
     # 4. Aggregate steps
     try:
         logger.info(f"Starting step aggregation. All steps count: {len(all_steps)}, Granularity: {target_granularity}")
-        aggregated_steps = services.step_aggregator.aggregate_steps(
+        aggregated_steps = await asyncio.to_thread(
+            services.step_aggregator.aggregate_steps,
             all_steps=all_steps,
             granularity=target_granularity,
             task_decomposition=decomposition,
-            task_name=task.name
+            task_name=task.name,
+            model_name=judge_model or "deepseek-chat",
         )
         logger.info(f"Step aggregation successful. Aggregated steps type: {type(aggregated_steps)}")
     except Exception as e:
@@ -408,6 +419,7 @@ async def _process_single_criterion(
             personas=personas,
             models=models,
             all_steps=all_steps,
+            model_name=judge_model,
             criterion_description=crit.description
         )
         logger.info(f"Evaluation result: verdict={eval_result.verdict}, reasoning length={len(eval_result.reasoning) if eval_result.reasoning else 0}")
@@ -497,7 +509,8 @@ async def _process_single_criterion(
             models=models,
             eval_result=eval_result,
             involved_steps=involved_steps_list,
-            services=services
+            services=services,
+            judge_model=judge_model,
         )
         
         return ExperimentCriterionResult(
@@ -556,15 +569,15 @@ async def _load_condition_run_data(
         )
     
     # Extract persona and model from metadata
-    persona = metadata.get("persona", "")
+    persona = _normalize_to_string(metadata.get("persona", ""), "")
     personas = [persona] if persona else []
     
-    value = metadata.get("value", "")
+    value = _normalize_to_string(metadata.get("value", ""), "")
     
-    model = metadata.get("model", "")
+    model = _normalize_to_string(metadata.get("model", ""), "")
     models = [model] if model else []
     
-    run_index = metadata.get("run_index", 1)
+    run_index = _normalize_run_index(metadata.get("run_index", 1), condition.conditionID)
 
     logger.info(f"Loaded condition data: persona={persona}, value={value}, model={model}, run_index={run_index}, steps={len(all_steps)}")
 
@@ -583,7 +596,8 @@ async def _load_condition_run_data(
 async def _evaluate_condition_criterion_pair(
     context: Dict,
     criterion: ExperimentCriterion,
-    services: JudgeServices
+    services: JudgeServices,
+    judge_model: Optional[str] = None,
 ) -> Tuple[str, Optional[ExperimentCriterionResult]]:
     """Evaluate a single criterion for a loaded condition context."""
     result = await _process_single_criterion(
@@ -592,9 +606,76 @@ async def _evaluate_condition_criterion_pair(
         all_steps=context["all_steps"],
         personas=context["personas"],
         models=context["models"],
-        services=services
+        services=services,
+        judge_model=judge_model,
     )
     return context["conditionID"], result
+
+
+def _normalize_to_string(value: Any, fallback: str = "") -> str:
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, dict):
+        for key in ("value", "name", "label", "id"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, list):
+        return ", ".join([_normalize_to_string(v) for v in value if v is not None])
+    return str(value)
+
+
+def _normalize_run_index(raw_run_index: Any, condition_id: str) -> int:
+    if isinstance(raw_run_index, int):
+        return raw_run_index
+
+    if isinstance(raw_run_index, float):
+        return int(raw_run_index)
+
+    if isinstance(raw_run_index, str):
+        digits = re.findall(r"\d+", raw_run_index)
+        if digits:
+            return int(digits[-1])
+
+    match = re.search(r"run(\d+)", condition_id, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    return 1
+
+
+def _safe_condition_result(ctx: Dict[str, Any], criteria_results: List[ExperimentCriterionResult]) -> Optional[ConditionResult]:
+    try:
+        return ConditionResult(
+            conditionID=_normalize_to_string(ctx.get("conditionID"), ""),
+            persona=_normalize_to_string(ctx.get("persona_str"), ""),
+            value=_normalize_to_string(ctx.get("value_str"), "") or None,
+            model=_normalize_to_string(ctx.get("model_str"), ""),
+            run_index=_normalize_run_index(ctx.get("run_index"), _normalize_to_string(ctx.get("conditionID"), "")),
+            criteria=criteria_results,
+        )
+    except ValidationError as exc:
+        logger.error("ConditionResult validation failed for condition %s: %s", ctx.get("conditionID"), exc)
+        return None
+
+
+async def _gather_with_limit(
+    coroutines: List[asyncio.Future],
+    max_concurrency: int,
+) -> List[Any]:
+    limit = max(1, int(max_concurrency or 1))
+    semaphore = asyncio.Semaphore(limit)
+
+    async def _run(coroutine: asyncio.Future) -> Any:
+        async with semaphore:
+            return await coroutine
+
+    return await asyncio.gather(*[_run(coroutine) for coroutine in coroutines])
 
 
 from ..services.llm_factory import get_chat_llm
@@ -876,7 +957,14 @@ async def evaluate_experiment(
     4. Aggregate results by condition.
     5. Evaluate multi-condition assessment if applicable.
     """
-    logger.info(f"Received experiment evaluation request with {len(request.conditions)} conditions and {len(request.criteria)} criteria")
+    max_concurrency = max(1, settings.JUDGE_EVALUATION_MAX_CONCURRENCY)
+    logger.info(
+        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, max_concurrency=%d)",
+        len(request.conditions),
+        len(request.criteria),
+        request.judge_model,
+        max_concurrency,
+    )
     
     history_logs_dir = Path(__file__).parent.parent.parent / "history_logs"
     
@@ -885,7 +973,7 @@ async def evaluate_experiment(
     for condition in request.conditions:
         load_tasks.append(_load_condition_run_data(condition, history_logs_dir))
     
-    loaded_contexts_raw = await asyncio.gather(*load_tasks)
+    loaded_contexts_raw = await _gather_with_limit(load_tasks, max_concurrency=max_concurrency)
     loaded_contexts = [ctx for ctx in loaded_contexts_raw if ctx is not None]
     
     if not loaded_contexts:
@@ -897,13 +985,18 @@ async def evaluate_experiment(
     for ctx in loaded_contexts:
         for crit in request.criteria:
             evaluation_tasks.append(
-                _evaluate_condition_criterion_pair(ctx, crit, services)
+                _evaluate_condition_criterion_pair(
+                    ctx,
+                    crit,
+                    services,
+                    judge_model=request.judge_model,
+                )
             )
             
-    logger.info(f"Starting {len(evaluation_tasks)} concurrent evaluation tasks")
+    logger.info("Starting %d evaluation tasks with bounded concurrency=%d", len(evaluation_tasks), max_concurrency)
     
     # 3. Execute all evaluations concurrently
-    flat_results = await asyncio.gather(*evaluation_tasks)
+    flat_results = await _gather_with_limit(evaluation_tasks, max_concurrency=max_concurrency)
     
     # 4. Group results by condition
     # Map: conditionID -> List[ExperimentCriterionResult]
@@ -927,15 +1020,11 @@ async def evaluate_experiment(
             if req_crit.title in crit_map:
                 sorted_results.append(crit_map[req_crit.title])
         
-        cr = ConditionResult(
-            conditionID=cond_id,
-            persona=ctx["persona_str"],
-            value=ctx["value_str"],
-            model=ctx["model_str"],
-            run_index=ctx["run_index"],
-            criteria=sorted_results
-        )
-        condition_results.append(cr)
+        cr = _safe_condition_result(ctx, sorted_results)
+        if cr is not None:
+            condition_results.append(cr)
+        else:
+            logger.warning("Skipping invalid condition result: %s", cond_id)
     
     # 6. Generate multi-condition assessment if there are 2+ conditions
     multi_condition_assessment = await _generate_multi_condition_assessment(condition_results, request.criteria)

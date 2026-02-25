@@ -59,12 +59,49 @@ class _ScreenshotArtifact:
     base64_content: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class _RunUnit:
+    persona: BrowserAgentPersona
+    persona_index: int
+    model_name: str
+    model_index: int
+    run_index: int
+
+    @property
+    def key(self) -> tuple[int, int, int]:
+        return (self.persona_index, self.model_index, self.run_index)
+
+
 class BrowserAgentService:
     """High-level service for orchestrating browser agent runs."""
 
     def __init__(self) -> None:
         self._settings = get_settings()
         self._output_dir = Path(self._settings.BROWSER_AGENT_OUTPUT_DIR).resolve()
+        self._status_dir = (self._output_dir / "run_status").resolve()
+        self._status_dir.mkdir(parents=True, exist_ok=True)
+        self._max_concurrent = max(
+            1,
+            int(getattr(self._settings, "BROWSER_AGENT_MAX_CONCURRENT", 4)),
+        )
+        self._max_concurrent_cap = max(
+            1,
+            int(getattr(self._settings, "BROWSER_AGENT_MAX_CONCURRENT_CAP", 4)),
+        )
+        self._force_threaded_run_on_windows = bool(
+            getattr(self._settings, "BROWSER_AGENT_FORCE_THREADED_RUN_ON_WINDOWS", True)
+        )
+        self._enable_concurrency_fallback = bool(
+            getattr(self._settings, "BROWSER_AGENT_CONCURRENCY_FALLBACK_ENABLED", True)
+        )
+        self._concurrency_fallback_max_retries = max(
+            0,
+            int(getattr(self._settings, "BROWSER_AGENT_CONCURRENCY_FALLBACK_MAX_RETRIES", 2)),
+        )
+        self._concurrency_fallback_min = max(
+            1,
+            int(getattr(self._settings, "BROWSER_AGENT_CONCURRENCY_FALLBACK_MIN", 1)),
+        )
         self._enable_screenshots = getattr(self._settings, "BROWSER_AGENT_ENABLE_SCREENSHOTS", True)
         self._enable_screenshot_processing = getattr(
             self._settings,
@@ -85,6 +122,32 @@ class BrowserAgentService:
         # Background run management
         self._run_store: Dict[str, dict] = {}
         self._background_run_tasks: Dict[str, asyncio.Task[None]] = {}
+        self._run_runtime_stats: Dict[str, dict] = {}
+
+    def _status_file_path(self, run_id: str) -> Path:
+        return self._status_dir / f"{run_id}.json"
+
+    def _write_run_status(self, run_id: str, payload: dict) -> None:
+        self._run_store[run_id] = payload
+        try:
+            status_file = self._status_file_path(run_id)
+            status_file.parent.mkdir(parents=True, exist_ok=True)
+            status_file.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist run status | run_id=%s error=%s", run_id, exc)
+
+    def _read_run_status(self, run_id: str) -> Optional[dict]:
+        status_file = self._status_file_path(run_id)
+        if not status_file.exists():
+            return None
+        try:
+            return json.loads(status_file.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to read persisted run status | run_id=%s error=%s", run_id, exc)
+            return None
 
     @property
     def current_run_task(self) -> Optional[asyncio.Task]:
@@ -107,70 +170,205 @@ class BrowserAgentService:
         ]
 
     def register_queued_run(self, run_id: str, total_tasks: int) -> None:
-        self._run_store[run_id] = {
+        self._write_run_status(run_id, {
             "run_id": run_id,
             "status": "queued",
             "total_tasks": total_tasks,
             "results": None,
             "error": None,
-        }
+        })
 
     def mark_run_running(self, run_id: str, total_tasks: int = 0) -> None:
-        self._run_store[run_id] = {
+        self._write_run_status(run_id, {
             "run_id": run_id,
             "status": "running",
             "total_tasks": total_tasks,
             "results": None,
             "error": None,
-        }
+        })
 
     def mark_run_failed(self, run_id: str, error: str) -> None:
-        previous = self._run_store.get(run_id, {})
-        self._run_store[run_id] = {
+        previous = self.get_run_status(run_id) or {}
+        self._write_run_status(run_id, {
             "run_id": run_id,
             "status": "failed",
             "total_tasks": previous.get("total_tasks", 0),
             "results": previous.get("results"),
             "error": error,
-        }
+        })
+
+    def _set_run_runtime_stats(self, run_id: str, payload: dict) -> None:
+        if not run_id:
+            return
+        self._run_runtime_stats[run_id] = payload
+
+    def _get_run_runtime_stats(self, run_id: str) -> Optional[dict]:
+        if not run_id:
+            return None
+        return self._run_runtime_stats.get(run_id)
+
+    def _clear_run_runtime_stats(self, run_id: str) -> None:
+        if not run_id:
+            return
+        self._run_runtime_stats.pop(run_id, None)
 
     async def run(self, request: BrowserAgentRunRequest, run_id: Optional[str] = None) -> List[BrowserAgentRunResult]:
         """Execute the browser agent across all persona/model combinations."""
-        max_concurrent = getattr(self._settings, "BROWSER_AGENT_MAX_CONCURRENT", 2)
-        semaphore = asyncio.Semaphore(max_concurrent)
         effective_run_id = (run_id or request.run_id or str(uuid.uuid4())).strip()
-        tasks: List[asyncio.Task[BrowserAgentRunResult]] = []
+        run_units: List[_RunUnit] = []
+
         for persona_index, persona in enumerate(request.personas, start=1):
             for model_index, model_name in enumerate(request.models, start=1):
                 for run_index in range(1, request.run_times + 1):
-                    tasks.append(
-                        asyncio.create_task(
-                            self._run_with_semaphore(
-                            semaphore,
-                            self._run_single(
-                                request=request,
-                                persona=persona,
-                                persona_index=persona_index,
-                                model_name=model_name,
-                                model_index=model_index,
-                                run_index=run_index,
-                            ),
-                            )
+                    run_units.append(
+                        _RunUnit(
+                            persona=persona,
+                            persona_index=persona_index,
+                            model_name=model_name,
+                            model_index=model_index,
+                            run_index=run_index,
                         )
                     )
 
-        if not tasks:
+        if not run_units:
             return []
 
-        await self._register_active_run(effective_run_id, tasks)
+        requested_max_concurrent = min(self._max_concurrent, self._max_concurrent_cap)
+        concurrency_stages = self._build_concurrency_stages(requested_max_concurrent)
+        result_map: Dict[tuple[int, int, int], BrowserAgentRunResult] = {}
+        pending_units = list(run_units)
+        fallback_events: List[dict] = []
+
+        logger.info(
+            "Browser-agent run scheduling | run_id=%s total=%d max_concurrent=%d cap=%d stages=%s",
+            effective_run_id,
+            len(run_units),
+            requested_max_concurrent,
+            self._max_concurrent_cap,
+            concurrency_stages,
+        )
+
         try:
-            results = await asyncio.gather(*tasks, return_exceptions=False)
-            return list(results)
+            for stage_index, stage_concurrency in enumerate(concurrency_stages, start=1):
+                if not pending_units:
+                    break
+
+                stage_semaphore = asyncio.Semaphore(stage_concurrency)
+
+                stage_tasks = [
+                    asyncio.create_task(
+                        self._run_with_semaphore(
+                            stage_semaphore,
+                            self._run_single(
+                                request=request,
+                                persona=unit.persona,
+                                persona_index=unit.persona_index,
+                                model_name=unit.model_name,
+                                model_index=unit.model_index,
+                                run_index=unit.run_index,
+                            ),
+                        )
+                    )
+                    for unit in pending_units
+                ]
+
+                await self._register_active_run(effective_run_id, stage_tasks)
+                try:
+                    stage_results = await asyncio.gather(*stage_tasks, return_exceptions=False)
+                finally:
+                    await self._unregister_active_run(effective_run_id)
+
+                retry_units: List[_RunUnit] = []
+                has_next_stage = stage_index < len(concurrency_stages)
+
+                for unit, result in zip(pending_units, stage_results):
+                    if has_next_stage and self._result_needs_lower_concurrency(result):
+                        retry_units.append(unit)
+                        continue
+                    result_map[unit.key] = result
+
+                if not retry_units:
+                    pending_units = []
+                    continue
+
+                next_concurrency = concurrency_stages[stage_index]
+                fallback_events.append(
+                    {
+                        "stage": stage_index,
+                        "from": stage_concurrency,
+                        "to": next_concurrency,
+                        "retry_count": len(retry_units),
+                    }
+                )
+                logger.warning(
+                    "Browser-agent concurrency fallback triggered | run_id=%s stage=%d from=%d to=%d retry_tasks=%d",
+                    effective_run_id,
+                    stage_index,
+                    stage_concurrency,
+                    next_concurrency,
+                    len(retry_units),
+                )
+                pending_units = retry_units
+
+            ordered_results = [
+                result_map[unit.key]
+                for unit in run_units
+                if unit.key in result_map
+            ]
+
+            self._set_run_runtime_stats(
+                effective_run_id,
+                {
+                    "requested_max_concurrent": requested_max_concurrent,
+                    "effective_stages": concurrency_stages,
+                    "fallback_enabled": self._enable_concurrency_fallback,
+                    "fallback_events": fallback_events,
+                },
+            )
+            return ordered_results
         except asyncio.CancelledError:
             logger.info("Browser-agent run cancelled | run_id=%s", effective_run_id)
             raise
-        finally:
-            await self._unregister_active_run(effective_run_id)
+
+    def _build_concurrency_stages(self, requested_max_concurrent: int) -> List[int]:
+        base = max(1, min(requested_max_concurrent, self._max_concurrent_cap))
+        if not self._enable_concurrency_fallback or self._concurrency_fallback_max_retries <= 0:
+            return [base]
+
+        min_concurrency = max(1, min(self._concurrency_fallback_min, base))
+        stages = [base]
+        current = base
+
+        for _ in range(self._concurrency_fallback_max_retries):
+            if current <= min_concurrency:
+                break
+            current = max(min_concurrency, current // 2)
+            if current in stages:
+                break
+            stages.append(current)
+
+        if stages[-1] != min_concurrency:
+            stages.append(min_concurrency)
+
+        return stages
+
+    def _result_needs_lower_concurrency(self, result: BrowserAgentRunResult) -> bool:
+        if not result.has_errors:
+            return False
+
+        message = str(result.final_result or "").lower()
+        retryable_indicators = [
+            "browser failed to start",
+            "timeout",
+            "target closed",
+            "browser has been closed",
+            "too many open files",
+            "resource temporarily unavailable",
+            "out of memory",
+            "cannot allocate memory",
+            "net::err_insufficient_resources",
+        ]
+        return any(indicator in message for indicator in retryable_indicators)
 
     async def stop_run(self, run_id: str) -> bool:
         """Cancel all active tasks for a run_id."""
@@ -196,18 +394,18 @@ class BrowserAgentService:
             cancelled_any = True
 
         # Update run store
-        if normalized_run_id in self._run_store:
-            previous = self._run_store.get(normalized_run_id, {})
-            self._run_store[normalized_run_id] = {
+        previous = self.get_run_status(normalized_run_id) or {}
+        if previous:
+            self._write_run_status(normalized_run_id, {
                 "run_id": normalized_run_id,
                 "status": "cancelled",
                 "total_tasks": previous.get("total_tasks", 0),
                 "results": None,
                 "error": "Run was cancelled by user",
-            }
+            })
 
         logger.info("Browser-agent stop requested | run_id=%s cancelled=%s", normalized_run_id, cancelled_any)
-        return cancelled_any or normalized_run_id in self._run_store
+        return cancelled_any or bool(previous)
 
     async def _register_active_run(
         self,
@@ -236,19 +434,20 @@ class BrowserAgentService:
             )
 
         previous = self._run_store.get(run_id, {})
-        self._run_store[run_id] = {
+        payload = {
             "run_id": run_id,
             "status": "running",
             "total_tasks": previous.get("total_tasks", 0),
             "results": None,
             "error": None,
         }
+        self._write_run_status(run_id, payload)
 
         self._background_run_tasks[run_id] = asyncio.create_task(
             self._execute_run_background(request, run_id)
         )
         logger.info("Browser-agent background run started | run_id=%s", run_id)
-        return self._run_store[run_id]
+        return payload
 
     def get_background_run_task(self, run_id: str) -> Optional[asyncio.Task[None]]:
         return self._background_run_tasks.get(run_id)
@@ -273,13 +472,15 @@ class BrowserAgentService:
 
             if has_errors:
                 previous = self._run_store.get(run_id, {})
-                self._run_store[run_id] = {
+                runtime_stats = self._get_run_runtime_stats(run_id)
+                self._write_run_status(run_id, {
                     "run_id": run_id,
                     "status": "failed",
                     "total_tasks": previous.get("total_tasks", 0),
                     "results": processed,
                     "error": "One or more browser-agent runs failed.",
-                }
+                    "runtime": runtime_stats,
+                })
                 logger.warning(
                     "Background run finished with errors | run_id=%s results=%d",
                     run_id,
@@ -287,55 +488,67 @@ class BrowserAgentService:
                 )
             else:
                 previous = self._run_store.get(run_id, {})
-                self._run_store[run_id] = {
+                runtime_stats = self._get_run_runtime_stats(run_id)
+                self._write_run_status(run_id, {
                     "run_id": run_id,
                     "status": "completed",
                     "total_tasks": previous.get("total_tasks", 0),
                     "results": processed,
                     "error": None,
-                }
+                    "runtime": runtime_stats,
+                })
                 logger.info("Background run completed | run_id=%s results=%d", run_id, len(processed))
 
         except asyncio.TimeoutError:
             previous = self._run_store.get(run_id, {})
-            self._run_store[run_id] = {
+            runtime_stats = self._get_run_runtime_stats(run_id)
+            self._write_run_status(run_id, {
                 "run_id": run_id,
                 "status": "failed",
                 "total_tasks": previous.get("total_tasks", 0),
                 "results": None,
                 "error": f"Run timed out after {timeout} seconds",
-            }
+                "runtime": runtime_stats,
+            })
             logger.warning("Background run timed out | run_id=%s timeout=%ds", run_id, timeout)
 
         except asyncio.CancelledError:
             if self._run_store.get(run_id, {}).get("status") != "cancelled":
                 previous = self._run_store.get(run_id, {})
-                self._run_store[run_id] = {
+                runtime_stats = self._get_run_runtime_stats(run_id)
+                self._write_run_status(run_id, {
                     "run_id": run_id,
                     "status": "cancelled",
                     "total_tasks": previous.get("total_tasks", 0),
                     "results": None,
                     "error": "Run was cancelled",
-                }
+                    "runtime": runtime_stats,
+                })
             logger.info("Background run cancelled | run_id=%s", run_id)
 
         except Exception as exc:
             previous = self._run_store.get(run_id, {})
-            self._run_store[run_id] = {
+            runtime_stats = self._get_run_runtime_stats(run_id)
+            self._write_run_status(run_id, {
                 "run_id": run_id,
                 "status": "failed",
                 "total_tasks": previous.get("total_tasks", 0),
                 "results": None,
                 "error": str(exc),
-            }
+                "runtime": runtime_stats,
+            })
             logger.exception("Background run failed | run_id=%s", run_id)
 
         finally:
             self._background_run_tasks.pop(run_id, None)
+            self._clear_run_runtime_stats(run_id)
 
     def get_run_status(self, run_id: str) -> Optional[dict]:
         """Return the current status dict for a run, or None if not found."""
-        return self._run_store.get(run_id)
+        status = self._run_store.get(run_id)
+        if status is not None:
+            return status
+        return self._read_run_status(run_id)
 
     def _post_process_results(
         self, request: BrowserAgentRunRequest, results: List[BrowserAgentRunResult]
@@ -570,14 +783,6 @@ class BrowserAgentService:
 
             browser_session = BrowserSession(**browser_kwargs)
 
-            agent = Agent(
-                browser_session=browser_session,
-                task=combined_task,
-                llm=llm,
-                use_vision=True,
-                generate_gif=False,
-            )
-
             context = self._prepare_run_context(
                 task_name=request.task.name,
                 value=persona.value,
@@ -585,6 +790,16 @@ class BrowserAgentService:
                 model_name=model_name,  # Use the explicitly selected model
                 model_index=model_index,
                 run_index=run_index,
+            )
+
+            agent = Agent(
+                browser_session=browser_session,
+                task=combined_task,
+                llm=llm,
+                use_vision=True,
+                save_conversation_path=str(context.screenshots_dir),
+                use_judge=False,
+                generate_gif=False,
             )
 
             max_steps = self._settings.BROWSER_AGENT_MAX_STEPS
@@ -798,6 +1013,13 @@ class BrowserAgentService:
         Execute the agent ensuring Windows selectors don't block subprocess support.
         """
         if sys.platform.startswith("win"):
+            if self._force_threaded_run_on_windows:
+                return await asyncio.to_thread(
+                    self._run_agent_in_proactor_loop,
+                    agent,
+                    max_steps,
+                )
+
             proactor_cls = getattr(asyncio, "ProactorEventLoop", None)
             selector_cls = getattr(asyncio, "SelectorEventLoop", None)
 
@@ -1373,21 +1595,14 @@ class BrowserAgentService:
         else:
             task_prompt = f"{task_instruction}. Complete this task on the current website."
 
-        visual_trace_instruction = (
-            "Visual trace requirement: after each meaningful browser interaction step, "
-            "use the `screenshot` tool once so the next browser state is captured for analysis. "
-            "Keep screenshots focused on task progress and do not skip steps."
-        )
-
         # Add persona context if available
         if persona:
             return (
                 f"Persona: {persona}\n\n"
-                f"Task: {task_prompt}\n\n"
-                f"{visual_trace_instruction}"
+                f"Task: {task_prompt}"
             )
         else:
-            return f"Task: {task_prompt}\n\n{visual_trace_instruction}"
+            return f"Task: {task_prompt}"
 
     def _extract_base64_data(self, screenshot_data: Any) -> str:
         """Best-effort extraction of base64 payload from screenshot blobs."""

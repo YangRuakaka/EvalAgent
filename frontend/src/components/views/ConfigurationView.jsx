@@ -12,7 +12,6 @@ import {
 } from '../../services/api';
 import EnvironmentSetting from '../configuration/EnvironmentSetting';
 import PersonaConfiguration from '../configuration/PersonaConfiguration';
-import TestAutoBuy from '../common/TestAutoBuy';
 
 import './ConfigurationView.css';
 
@@ -1140,7 +1139,6 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		<div className="configuration-panel">
 			<PanelHeader title="Configuration" icon={<ConfigIcon />}>
 				{actionButton}
-				<TestAutoBuy onAddRun={onAddRun} />
 			</PanelHeader>
 			<div className="config-container">
 				{/* Content area */}

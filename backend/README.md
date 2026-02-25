@@ -37,12 +37,17 @@ GEMINI_BASE_URL=https://generativelanguage.googleapis.com
 Browser-agent performance related overrides:
 ```
 BROWSER_AGENT_MAX_STEPS=30
-BROWSER_AGENT_MAX_CONCURRENT=2
+BROWSER_AGENT_MAX_CONCURRENT=4
+BROWSER_AGENT_MAX_CONCURRENT_CAP=4
+BROWSER_AGENT_CONCURRENCY_FALLBACK_ENABLED=true
+BROWSER_AGENT_CONCURRENCY_FALLBACK_MAX_RETRIES=2
+BROWSER_AGENT_CONCURRENCY_FALLBACK_MIN=1
 BROWSER_AGENT_MAX_PARALLEL_RUNS=1
 BROWSER_AGENT_RUN_TIMEOUT=0
 BROWSER_AGENT_BROWSER_START_TIMEOUT=180
 BROWSER_AGENT_BROWSER_LAUNCH_RETRIES=3
 BROWSER_AGENT_BROWSER_RETRY_BACKOFF_SECONDS=2
+BROWSER_AGENT_FORCE_THREADED_RUN_ON_WINDOWS=true
 BROWSER_AGENT_ENABLE_SCREENSHOTS=true
 BROWSER_AGENT_ENABLE_SCREENSHOT_PROCESSING=false
 BROWSER_AGENT_MAX_SCREENSHOTS=3
@@ -53,7 +58,12 @@ BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD=false
 Notes:
 - `BROWSER_AGENT_RUN_TIMEOUT`: seconds for each submitted run batch; set `0` (or any `<=0`) to disable timeout.
 - `BROWSER_AGENT_MAX_CONCURRENT`: max browser agents running concurrently *inside one run_id*.
+- `BROWSER_AGENT_MAX_CONCURRENT_CAP`: hard safety cap for per-run browser concurrency.
+- `BROWSER_AGENT_CONCURRENCY_FALLBACK_ENABLED`: automatically roll back to lower concurrency when browser startup/resource pressure errors are detected.
+- `BROWSER_AGENT_CONCURRENCY_FALLBACK_MAX_RETRIES`: number of fallback stages to try (default supports `4 -> 2 -> 1`).
+- `BROWSER_AGENT_CONCURRENCY_FALLBACK_MIN`: minimum per-run concurrency floor used by rollback.
 - `BROWSER_AGENT_MAX_PARALLEL_RUNS`: max run_id jobs processed concurrently by the API worker pool.
+- `BROWSER_AGENT_FORCE_THREADED_RUN_ON_WINDOWS`: runs each browser-use execution in a dedicated Proactor loop thread on Windows for better stability under concurrency.
 
 
 ## 4) Run the Server

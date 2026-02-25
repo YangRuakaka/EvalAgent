@@ -145,20 +145,25 @@ async def get_run_status(run_id: str):
 )
 async def stream_run_events(run_id: str, request: Request):
     """Stream status updates for a browser-agent run using Server-Sent Events."""
-    status = _service.get_run_status(run_id)
-    if status is None:
-        raise HTTPException(status_code=404, detail="Run not found")
-
     async def event_generator():
         last_payload = None
+        missing_count = 0
+        max_missing_before_error = 120
         while True:
             if await request.is_disconnected():
                 break
 
             current_status = _service.get_run_status(run_id)
             if current_status is None:
-                yield "event: error\ndata: {\"error\": \"Run not found\"}\n\n"
-                break
+                missing_count += 1
+                if missing_count >= max_missing_before_error:
+                    yield "event: error\ndata: {\"error\": \"Run not found\"}\n\n"
+                    break
+                yield "event: ping\ndata: {}\n\n"
+                await asyncio.sleep(1)
+                continue
+
+            missing_count = 0
 
             payload = json.dumps(current_status, ensure_ascii=False)
             if payload != last_payload:

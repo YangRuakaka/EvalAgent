@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
+import mimetypes
 from pathlib import Path
 from typing import Any, Iterable, List, Optional
+
+from PIL import Image
 
 from ..schemas.history_logs import HistoryLogDetails, HistoryLogPayload
 
@@ -57,7 +61,7 @@ class HistoryLogsService:
 
             try:
                 image_bytes = resolved_path.read_bytes()
-                encoded_screenshots.append(base64.b64encode(image_bytes).decode("utf-8"))
+                encoded_screenshots.append(self._encode_screenshot_data_uri(image_bytes, resolved_path))
             except Exception as exc:  # pragma: no cover - IO failure edge case
                 missing_screenshots.append(str(path_str))
                 encoded_screenshots.append(None)
@@ -100,6 +104,34 @@ class HistoryLogsService:
         if isinstance(value, (list, tuple)):
             return value
         return [value]
+
+    @staticmethod
+    def _guess_mime_type(path: Optional[Path]) -> str:
+        if path is None:
+            return "application/octet-stream"
+        guessed, _ = mimetypes.guess_type(str(path))
+        return guessed or "application/octet-stream"
+
+    @classmethod
+    def _encode_raw_data_uri(cls, image_bytes: bytes, path: Optional[Path]) -> str:
+        mime_type = cls._guess_mime_type(path)
+        payload = base64.b64encode(image_bytes).decode("utf-8")
+        return f"data:{mime_type};base64,{payload}"
+
+    @classmethod
+    def _encode_screenshot_data_uri(cls, image_bytes: bytes, path: Optional[Path]) -> str:
+        try:
+            with Image.open(io.BytesIO(image_bytes)) as image:
+                if image.mode not in {"RGB", "RGBA"}:
+                    image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+
+                output = io.BytesIO()
+                image.save(output, format="WEBP", quality=75, method=6)
+                webp_bytes = output.getvalue()
+                webp_payload = base64.b64encode(webp_bytes).decode("utf-8")
+                return f"data:image/webp;base64,{webp_payload}"
+        except Exception:
+            return cls._encode_raw_data_uri(image_bytes, path)
 
     def _resolve_screenshot_path(self, path_str: Any) -> Optional[Path]:
         if not path_str:

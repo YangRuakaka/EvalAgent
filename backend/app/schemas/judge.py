@@ -273,6 +273,7 @@ class ExperimentEvaluationRequest(BaseModel):
     """Request to evaluate an experiment consisting of multiple conditions."""
     conditions: List[ConditionRequest] = Field(..., description="List of condition IDs to evaluate")
     criteria: List[ExperimentCriterion] = Field(..., description="List of criteria to evaluate for all conditions")
+    judge_model: Optional[str] = Field(None, description="Optional model name used by AI judge pipeline")
 
 class RankingItem(BaseModel):
     """A single item in the condition ranking."""

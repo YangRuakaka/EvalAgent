@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, List
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Value Agent Backend"
@@ -27,8 +27,13 @@ class Settings(BaseSettings):
     PERSONA_VARIATION_LLM_TEMPERATURE: float = 0
     BROWSER_AGENT_OUTPUT_DIR: str = "history_logs"
     BROWSER_AGENT_MAX_STEPS: int = 30
-    BROWSER_AGENT_MAX_CONCURRENT: int = 1  # Max concurrent browser agents per run
+    BROWSER_AGENT_MAX_CONCURRENT: int = 4  # Max concurrent browser agents per run
+    BROWSER_AGENT_MAX_CONCURRENT_CAP: int = 4  # Safety cap to avoid too many concurrent browser sessions
+    BROWSER_AGENT_CONCURRENCY_FALLBACK_ENABLED: bool = True  # Auto rollback to lower concurrency on resource/startup pressure
+    BROWSER_AGENT_CONCURRENCY_FALLBACK_MAX_RETRIES: int = 2  # Max fallback stages (e.g. 4 -> 2 -> 1)
+    BROWSER_AGENT_CONCURRENCY_FALLBACK_MIN: int = 1  # Minimum concurrency floor when rollback is triggered
     BROWSER_AGENT_MAX_PARALLEL_RUNS: int = 1  # Max concurrent run_id jobs in the API queue
+    BROWSER_AGENT_FORCE_THREADED_RUN_ON_WINDOWS: bool = True  # Run each agent in dedicated Proactor loop thread on Windows
     BROWSER_AGENT_RUN_TIMEOUT: int = 0  # Max seconds for entire run; <=0 disables timeout
     BROWSER_AGENT_BROWSER_START_TIMEOUT: int = 120  # Max seconds to wait for browser to start
     BROWSER_AGENT_BROWSER_LAUNCH_TIMEOUT: int = 120  # Timeout for BrowserLaunchEvent (browser_use internal)
@@ -44,6 +49,17 @@ class Settings(BaseSettings):
     MAX_KEYWORDS_PER_REQUEST: int = 10
     MIN_KEYWORD_LENGTH: int = 2
     DEFAULT_PERSONA_TYPE: str = "consumer"
+    CORS_ALLOW_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "https://evalagent-67802.web.app",
+        "https://evalagent-67802.firebaseapp.com",
+    ]
+    CORS_ALLOW_ORIGIN_REGEX: str = r"https://evalagent-67802(--[a-zA-Z0-9-]+)?\.web\.app"
+    CORS_ALLOW_LOCALHOST_REGEX: str = r"http://(localhost|127\.0\.0\.1):\d+"
+    JUDGE_EVALUATION_MAX_CONCURRENCY: int = 8
 
     class Config:
         env_file = ".env"

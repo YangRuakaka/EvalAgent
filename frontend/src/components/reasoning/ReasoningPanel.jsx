@@ -27,8 +27,22 @@ const getScreenshotDataUri = (base64Data) => {
 		return trimmed;
 	}
 
+	const normalized = trimmed.replace(/\s+/g, '').replace(/^data:[^,]+,/, '');
+	const looksLikeBase64 =
+		normalized.length >= 16
+		&& normalized.length % 4 === 0
+		&& /^[A-Za-z0-9+/=]+$/.test(normalized);
+
+	if (looksLikeBase64) {
+		return `data:image/png;base64,${normalized}`;
+	}
+
 	// Allow direct URL/path values (for compatibility with older cached logs)
-	if (/^(https?:)?\/\//i.test(trimmed) || trimmed.startsWith('/')) {
+	if (/^(https?:)?\/\//i.test(trimmed)) {
+		return trimmed;
+	}
+
+	if (/^\/.*\.(png|jpg|jpeg|webp|gif|bmp|svg)(\?.*)?$/i.test(trimmed)) {
 		return trimmed;
 	}
 
@@ -37,14 +51,7 @@ const getScreenshotDataUri = (base64Data) => {
 		return null;
 	}
 
-	// Validate base64 characters before constructing data URI
-	const normalized = trimmed.replace(/\s+/g, '').replace(/^data:[^,]+,/, '');
-	if (!/^[A-Za-z0-9+/=]+$/.test(normalized)) {
-		return null;
-	}
-	
-	// Otherwise, assume it's PNG base64 and convert to data URI
-	return `data:image/png;base64,${normalized}`;
+	return null;
 };
 
 /**

@@ -20,6 +20,7 @@ const EvaluationPanel = ({
 	onConditionSelectionChange = () => {},
 	onEvaluate = () => {},
 	evaluationResponse = null,
+	isEvaluating = false,
 }) => {
 	const [showCriteriaModal, setShowCriteriaModal] = useState(false);
 	const [selectedCriteriaIdForModal, setSelectedCriteriaIdForModal] = useState(null);
@@ -27,7 +28,6 @@ const EvaluationPanel = ({
 	const [selectedConditionIdForModal, setSelectedConditionIdForModal] = useState(null);
 	const [criteriaFilterMeta] = useState({ personas: null, models: null });
 	const [draggedItem, setDraggedItem] = useState(null);
-	const [isEvaluating, setIsEvaluating] = useState(false);
 
 	const criteriaList = useMemo(() => {
 		return Object.values(criterias || {});
@@ -203,22 +203,17 @@ const EvaluationPanel = ({
 			alert('Please select at least one criteria and one condition before evaluating.');
 			return;
 		}
-		try {
-			setIsEvaluating(true);
-			// Get the actual condition data for selected conditions
-			const selectedConditionData = filteredConditions.filter(c => selectedConditionIds.includes(c.id));
-			const selectedCriteriaData = criteriaList.filter(c => selectedCriteriaIds.includes(c.id));
-			
-			await onEvaluate({
-				criteriaIds: selectedCriteriaIds,
-				conditionIds: selectedConditionIds,
-				conditions: selectedConditionData,
-				criteria: selectedCriteriaData,
-				evaluateModel,
-			});
-		} finally {
-			setIsEvaluating(false);
-		}
+		// Get the actual condition data for selected conditions
+		const selectedConditionData = filteredConditions.filter(c => selectedConditionIds.includes(c.id));
+		const selectedCriteriaData = criteriaList.filter(c => selectedCriteriaIds.includes(c.id));
+		
+		await onEvaluate({
+			criteriaIds: selectedCriteriaIds,
+			conditionIds: selectedConditionIds,
+			conditions: selectedConditionData,
+			criteria: selectedCriteriaData,
+			evaluateModel,
+		});
 	}, [selectedCriteriaIds, selectedConditionIds, filteredConditions, criteriaList, onEvaluate, evaluateModel]);
 
 	const hasSelections = selectedCriteriaIds.length > 0 && selectedConditionIds.length > 0;
@@ -467,6 +462,7 @@ EvaluationPanel.propTypes = {
 	onCriteriaSelectionChange: PropTypes.func,
 	onConditionSelectionChange: PropTypes.func,
 	onEvaluate: PropTypes.func,
+	isEvaluating: PropTypes.bool,
 };
 
 EvaluationPanel.defaultProps = {
@@ -480,6 +476,7 @@ EvaluationPanel.defaultProps = {
 	onCriteriaSelectionChange: () => {},
 	onConditionSelectionChange: () => {},
 	onEvaluate: () => {},
+	isEvaluating: false,
 };
 
 export default EvaluationPanel;

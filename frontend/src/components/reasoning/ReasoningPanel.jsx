@@ -721,10 +721,10 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
                 );
 
                 const cardStyle = cardHighlight ? {
-                    borderColor: cardHighlight.criteriaColor || cardHighlight.color,
-                    boxShadow: `0 0 0 2px ${cardHighlight.color}1A`, // Subtle glow
-                    backgroundColor: `${cardHighlight.color}0D`, // Very light tint (approx 5% opacity)
-                    borderLeft: `4px solid ${cardHighlight.criteriaColor || cardHighlight.color}`, // Consistent with criteria cards
+					backgroundColor: cardHighlight.verdict && evaluateStatusMap[cardHighlight.verdict.toLowerCase()]
+						? evaluateStatusMap[cardHighlight.verdict.toLowerCase()].bg
+						: cardHighlight.color,
+					border: `1px solid ${cardHighlight.criteriaColor || cardHighlight.color}`,
                 } : {};
 
                 return (
@@ -833,6 +833,26 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 		return [];
 	}, [processedEvaluationData, selectedStepIndex, evaluatingCriteria, criteriaColorMap, criterias]);
 
+	const hasHighlightsForField = useCallback((fieldName) => {
+		if (!Array.isArray(currentHighlights) || currentHighlights.length === 0) {
+			return false;
+		}
+
+		const normalizedFieldName = String(fieldName || '').toLowerCase();
+
+		return currentHighlights.some((highlight) => {
+			const sourceField = typeof highlight?.sourceField === 'string'
+				? highlight.sourceField.toLowerCase()
+				: null;
+
+			if (!sourceField) {
+				return true;
+			}
+
+			return sourceField === normalizedFieldName;
+		});
+	}, [currentHighlights]);
+
 	if (!reasoningDetails) {
 		return (
 			<div className="reasoning-panel">
@@ -894,7 +914,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 						{/* Thinking Process - Middle column, spans both rows */}
 						<div className="reasoning-info-block" data-position="middle">
 							<h4 className="reasoning-info-label">Thinking Process</h4>
-							<div className="reasoning-info-text">
+							<div className={`reasoning-info-text${hasHighlightsForField('Thinking Process') ? ' reasoning-info-text--has-highlight' : ''}`}>
 								{currentStep?.modelOutput?.thinking ? (
 									<HighlightText text={currentStep.modelOutput.thinking} highlights={currentHighlights} sourceField="Thinking Process" />
 								) : (
@@ -904,7 +924,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 						</div>							{/* Next Goal - Right column, top */}
 							<div className="reasoning-info-block" data-position="right-top">
 								<h4 className="reasoning-info-label">Next Goal</h4>
-								<div className="reasoning-info-text">
+								<div className={`reasoning-info-text${hasHighlightsForField('Next Goal') ? ' reasoning-info-text--has-highlight' : ''}`}>
 									{currentStep?.modelOutput?.next_goal ? (
 										<HighlightText text={currentStep.modelOutput.next_goal} highlights={currentHighlights} sourceField="Next Goal" />
 									) : (
@@ -917,7 +937,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 							{currentStep?.modelOutput?.evaluation_previous_goal && (
 								<div className="reasoning-info-block" data-position="left-top">
 									<h4 className="reasoning-info-label">Evaluation</h4>
-									<div className="reasoning-info-text">
+									<div className={`reasoning-info-text${hasHighlightsForField('Evaluation') ? ' reasoning-info-text--has-highlight' : ''}`}>
 										<HighlightText text={currentStep.modelOutput.evaluation_previous_goal} highlights={currentHighlights} sourceField="Evaluation" />
 									</div>
 								</div>
@@ -927,7 +947,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 							{currentStep?.modelOutput?.memory && (
 								<div className="reasoning-info-block" data-position="left-bottom">
 									<h4 className="reasoning-info-label">Memory</h4>
-									<div className="reasoning-info-text">
+									<div className={`reasoning-info-text${hasHighlightsForField('Memory') ? ' reasoning-info-text--has-highlight' : ''}`}>
 										<HighlightText text={currentStep.modelOutput.memory} highlights={currentHighlights} sourceField="Memory" />
 									</div>
 								</div>
@@ -937,7 +957,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 							{currentStep?.modelOutput?.action && currentStep.modelOutput.action.length > 0 && (
 								<div className="reasoning-info-block" data-position="right-bottom">
 									<h4 className="reasoning-info-label">Action</h4>
-									<div className="reasoning-info-text">
+									<div className={`reasoning-info-text${hasHighlightsForField('Action') ? ' reasoning-info-text--has-highlight' : ''}`}>
 										<ActionVisualizer 
 											action={currentStep.modelOutput.action} 
 											highlights={currentHighlights}

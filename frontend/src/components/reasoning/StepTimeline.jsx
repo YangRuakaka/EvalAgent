@@ -175,12 +175,12 @@ const StepTimeline = ({
 								backgroundColor: verdictConfig.border,
 								borderColor: criteriaColor,
 								color: '#ffffff',
-								borderWidth: '2px',
+								borderWidth: '3px',
 								borderStyle: 'solid',
 							}}
 							title={`${evaluation.criterion_name}\nStatus: ${status.toUpperCase()}\nConfidence: ${confidencePercent}%`}
 						>
-							<IconComponent width={10} height={10} strokeWidth={3} />
+							<IconComponent width={11} height={11} strokeWidth={3.6} />
 						</div>
 					);
 				})}

@@ -288,6 +288,11 @@
 	-ms-overflow-style: none;
 }
 
+.reasoning-info-text--has-highlight {
+	border-color: rgba(59, 130, 246, 0.55);
+	box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.25);
+}
+
 .reasoning-info-text::-webkit-scrollbar {
 	display: none;
 }
@@ -810,12 +815,15 @@
 .action-param-label {
     color: #64748b;
     font-weight: 500;
-    min-width: 60px;
+	min-width: 44px;
+	width: 44px;
     flex-shrink: 0;
 }
 
 .action-param-value {
     color: #1e293b;
+	flex: 1;
+	min-width: 0;
     word-break: break-word;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }

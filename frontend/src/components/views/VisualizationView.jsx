@@ -23,6 +23,7 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 	const { state: { mappings, criterias, evaluationResponses }, updateEvaluationResponse } = useData();
 	const [activeTab, setActiveTab] = useState('trajectory');
 	const [evaluateModel, setEvaluateModel] = useState('gpt-4o-mini');
+	const [evaluationLoadingByRunId, setEvaluationLoadingByRunId] = useState({});
 	
 	// Store state for each experiment (runId = experimentId): { [experimentId]: { selectedCriteriaIds, selectedConditionIds } }
 	const [experimentStates, setExperimentStates] = useState({});
@@ -34,6 +35,12 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 	}, [experimentStates, activeRunId]);
 
 	const { selectedCriteriaIds, selectedConditionIds } = currentExperimentState;
+	const isEvaluatingCurrentRun = useMemo(() => {
+		if (!activeRunId) {
+			return false;
+		}
+		return Boolean(evaluationLoadingByRunId[activeRunId]);
+	}, [activeRunId, evaluationLoadingByRunId]);
 
 	// State updaters for current experiment
 	const setSelectedCriteriaIds = useCallback((ids) => {
@@ -141,6 +148,16 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 		setEvaluationResponse(response);
 	}, [activeRunId, updateEvaluationResponse]);
 
+	const setRunEvaluationLoading = useCallback((runId, isLoading) => {
+		if (!runId) {
+			return;
+		}
+		setEvaluationLoadingByRunId(prev => ({
+			...prev,
+			[runId]: isLoading,
+		}));
+	}, []);
+
 	const visibleHistoryEntries = useMemo(() => {
 		const counts = {};
 		return historyEntries.map(entry => {
@@ -221,8 +238,11 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 								onCriteriaSelectionChange={setSelectedCriteriaIds}
 								onConditionSelectionChange={setSelectedConditionIds}
 								evaluationResponse={evaluationResponse}
+								isEvaluating={isEvaluatingCurrentRun}
 								onEvaluate={async (config) => {
 									const { criteriaIds, conditionIds, evaluateModel: selectedEvaluateModel } = config;
+									const runIdForRequest = activeRunId;
+									setRunEvaluationLoading(runIdForRequest, true);
 									try {
 									// Get selected conditions data
 									const selectedConditions = experimentsData?.conditions
@@ -265,6 +285,8 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 									}
 								} catch (error) {
 									alert(`Evaluation error: ${error.message}`);
+								} finally {
+									setRunEvaluationLoading(runIdForRequest, false);
 								}
 								}}
 							/>

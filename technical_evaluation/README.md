@@ -18,9 +18,32 @@ Optional parameters:
 powershell -ExecutionPolicy Bypass -File .\technical_evaluation\run_technical_evaluation.ps1 -Pattern "*.txt" -FailFast
 ```
 
+Run with explicit evaluation modes (for baseline comparison):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\technical_evaluation\run_technical_evaluation.ps1 -Modes agentic,step_level,global_summary
+```
+
+- `agentic`: original adaptive granularity (criterion-by-criterion auto analysis)
+- `step_level`: force all criteria to step-level evaluation baseline
+- `global_summary`: force all criteria to global-summary evaluation baseline
+
+Results are written to separate subfolders:
+- `results/agentic/`
+- `results/step_level/`
+- `results/global_summary/`
+
 ## Run Directly with Python
 ```powershell
 python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results
+```
+
+Baseline mode examples:
+
+```powershell
+python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results\step_level --forced-granularity step_level --run-tag step_level
+
+python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results\global_summary --forced-granularity global_summary --run-tag global_summary
 ```
 
 ## Supported Content in `dataset/*.txt`

@@ -57,6 +57,7 @@ const StepTimeline = ({
 	onStepClick,                // step被点击时的callback
 	onClusterClick,             // cluster被点击时的callback
 	conditionId = null,         // 当前condition的ID，用于过滤evaluation结果
+	showEvidenceHighlights = true,
 }) => {
 
 	if (!steps || steps.length === 0) {
@@ -120,6 +121,10 @@ const StepTimeline = ({
 	 * 渲染单个step的evaluation指示器
 	 */
 	const renderEvaluationIndicators = (step, stepIndex) => {
+		if (!showEvidenceHighlights) {
+			return null;
+		}
+
 		const enrichedStep = enrichedSteps[stepIndex];
 		
 		if (!enrichedStep?.relatedEvaluations) {
@@ -266,6 +271,7 @@ StepTimeline.propTypes = {
 	onStepClick: PropTypes.func,
 	onClusterClick: PropTypes.func,
 	conditionId: PropTypes.string,
+	showEvidenceHighlights: PropTypes.bool,
 };
 
 StepTimeline.defaultProps = {
@@ -274,6 +280,7 @@ StepTimeline.defaultProps = {
 	onStepClick: null,
 	onClusterClick: null,
 	conditionId: null,
+	showEvidenceHighlights: true,
 };
 
 export default StepTimeline;

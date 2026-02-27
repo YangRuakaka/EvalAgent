@@ -351,26 +351,35 @@ async def _process_single_criterion(
     models: List[str],
     services: JudgeServices,
     judge_model: Optional[str] = None,
+    forced_granularity: Optional[Granularity] = None,
 ) -> Optional[ExperimentCriterionResult]:
     """Process a single criterion evaluation asynchronously."""
     logger.info(f"Evaluating criterion: {crit.title}")
     
-    # 2. Analyze granularity
-    try:
-        # Allow STEP_LEVEL, PHASE_LEVEL, and GLOBAL_SUMMARY
-        granularity_req = await asyncio.to_thread(
-            services.granularity_analyzer.analyze_criterion_granularity,
-            criterion_name=crit.title,
-            criterion_assertion=crit.assertion,
-            task_name=task.name,
-            model_name=judge_model or "gpt-4o-mini",
-            allowed_granularities=[Granularity.STEP_LEVEL, Granularity.PHASE_LEVEL, Granularity.GLOBAL_SUMMARY],
+    # 2. Determine granularity (forced baseline mode has higher priority)
+    if forced_granularity is not None:
+        target_granularity = forced_granularity
+        logger.info(
+            "Using forced granularity for criterion '%s': %s",
+            crit.title,
+            target_granularity,
         )
-        target_granularity = granularity_req.required_granularity
-        logger.info(f"Determined granularity for criterion '{crit.title}': {target_granularity}")
-    except Exception as e:
-        logger.error(f"Granularity analysis failed: {e}")
-        target_granularity = Granularity.GLOBAL_SUMMARY # Fallback
+    else:
+        try:
+            # Allow STEP_LEVEL, PHASE_LEVEL, and GLOBAL_SUMMARY
+            granularity_req = await asyncio.to_thread(
+                services.granularity_analyzer.analyze_criterion_granularity,
+                criterion_name=crit.title,
+                criterion_assertion=crit.assertion,
+                task_name=task.name,
+                model_name=judge_model or "gpt-4o-mini",
+                allowed_granularities=[Granularity.STEP_LEVEL, Granularity.PHASE_LEVEL, Granularity.GLOBAL_SUMMARY],
+            )
+            target_granularity = granularity_req.required_granularity
+            logger.info(f"Determined granularity for criterion '{crit.title}': {target_granularity}")
+        except Exception as e:
+            logger.error(f"Granularity analysis failed: {e}")
+            target_granularity = Granularity.GLOBAL_SUMMARY # Fallback
     
     # 3. Decompose task (if needed)
     decomposition = None
@@ -598,6 +607,7 @@ async def _evaluate_condition_criterion_pair(
     criterion: ExperimentCriterion,
     services: JudgeServices,
     judge_model: Optional[str] = None,
+    forced_granularity: Optional[Granularity] = None,
 ) -> Tuple[str, Optional[ExperimentCriterionResult]]:
     """Evaluate a single criterion for a loaded condition context."""
     result = await _process_single_criterion(
@@ -608,6 +618,7 @@ async def _evaluate_condition_criterion_pair(
         models=context["models"],
         services=services,
         judge_model=judge_model,
+        forced_granularity=forced_granularity,
     )
     return context["conditionID"], result
 
@@ -959,10 +970,11 @@ async def evaluate_experiment(
     """
     max_concurrency = max(1, settings.JUDGE_EVALUATION_MAX_CONCURRENCY)
     logger.info(
-        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, max_concurrency=%d)",
+        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, forced_granularity=%s, max_concurrency=%d)",
         len(request.conditions),
         len(request.criteria),
         request.judge_model,
+        request.forced_granularity,
         max_concurrency,
     )
     
@@ -990,6 +1002,7 @@ async def evaluate_experiment(
                     crit,
                     services,
                     judge_model=request.judge_model,
+                    forced_granularity=request.forced_granularity,
                 )
             )
             

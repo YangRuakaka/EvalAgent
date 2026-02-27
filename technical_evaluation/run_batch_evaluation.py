@@ -119,6 +119,10 @@ def _coerce_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(judge_model, str) and judge_model.strip():
         normalized["judge_model"] = judge_model.strip()
 
+    forced_granularity = payload.get("forced_granularity")
+    if isinstance(forced_granularity, str) and forced_granularity.strip():
+        normalized["forced_granularity"] = forced_granularity.strip()
+
     return normalized
 
 
@@ -191,7 +195,14 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-async def run_batch(dataset_dir: Path, results_dir: Path, pattern: str, fail_fast: bool) -> int:
+async def run_batch(
+    dataset_dir: Path,
+    results_dir: Path,
+    pattern: str,
+    fail_fast: bool,
+    forced_granularity: str | None,
+    run_tag: str | None,
+) -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
 
     txt_files = sorted(dataset_dir.glob(pattern))
@@ -205,6 +216,8 @@ async def run_batch(dataset_dir: Path, results_dir: Path, pattern: str, fail_fas
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "dataset_dir": str(dataset_dir),
         "results_dir": str(results_dir),
+        "forced_granularity": forced_granularity,
+        "run_tag": run_tag,
         "files": [],
     }
 
@@ -228,7 +241,18 @@ async def run_batch(dataset_dir: Path, results_dir: Path, pattern: str, fail_fas
 
             for idx, payload in enumerate(parse_result.payloads, start=1):
                 total_requests += 1
-                output_name = f"{txt_file.stem}__req{idx:02d}__result.json"
+
+                if forced_granularity:
+                    payload["forced_granularity"] = forced_granularity
+
+                suffix_parts = []
+                if run_tag:
+                    suffix_parts.append(run_tag)
+                if forced_granularity:
+                    suffix_parts.append(forced_granularity)
+                suffix = "__" + "__".join(suffix_parts) if suffix_parts else ""
+
+                output_name = f"{txt_file.stem}__req{idx:02d}{suffix}__result.json"
                 output_path = results_dir / output_name
 
                 request_item = {
@@ -310,6 +334,17 @@ def main() -> int:
         action="store_true",
         help="Stop immediately on first error",
     )
+    parser.add_argument(
+        "--forced-granularity",
+        choices=["step_level", "phase_level", "global_summary"],
+        default=None,
+        help="Force all criteria to a single granularity baseline",
+    )
+    parser.add_argument(
+        "--run-tag",
+        default=None,
+        help="Optional tag appended to output file names for experiment tracking",
+    )
     args = parser.parse_args()
 
     dataset_dir = Path(args.dataset_dir).resolve()
@@ -325,6 +360,8 @@ def main() -> int:
             results_dir=results_dir,
             pattern=args.pattern,
             fail_fast=args.fail_fast,
+            forced_granularity=args.forced_granularity,
+            run_tag=args.run_tag,
         )
     )
 

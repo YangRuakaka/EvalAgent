@@ -174,6 +174,7 @@ const ReasoningPanel = ({
 	const [evaluatingCriteria, setEvaluatingCriteria] = useState([]);
 	const [selectedCriterion, setSelectedCriterion] = useState(null);
 	const [hoveredHighlight, setHoveredHighlight] = useState(null);
+	const [isEvidenceHighlightEnabled, setIsEvidenceHighlightEnabled] = useState(true);
 
 	// Get runId from reasoningDetails (will be computed in memoized value)
 	const [runId, setRunId] = useState(null);
@@ -468,6 +469,10 @@ const ReasoningPanel = ({
 
 	// Get current highlights based on enriched steps and criteria colors
 	const currentHighlights = useMemo(() => {
+		if (!isEvidenceHighlightEnabled) {
+			return [];
+		}
+
 		const currentAction = enrichedSteps?.[selectedStepIndex]?.modelOutput?.action;
 
 		if (processedEvaluationData) {
@@ -535,7 +540,15 @@ const ReasoningPanel = ({
 	});
 	
 	return highlights;
-}, [enrichedSteps, selectedStepIndex, processedEvaluationData]);	const handleHighlightHover = useCallback((data) => {
+}, [enrichedSteps, selectedStepIndex, processedEvaluationData, isEvidenceHighlightEnabled]);
+
+	useEffect(() => {
+		if (!isEvidenceHighlightEnabled) {
+			setHoveredHighlight(null);
+		}
+	}, [isEvidenceHighlightEnabled]);
+
+	const handleHighlightHover = useCallback((data) => {
 		if (!data) {
 			setHoveredHighlight(null);
 			return;
@@ -861,6 +874,15 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
                 >
                     📷 View Screenshot
                 </button>
+				<label className="reasoning-highlight-toggle" htmlFor="reasoning-highlight-toggle">
+					<input
+						type="checkbox"
+						id="reasoning-highlight-toggle"
+						checked={isEvidenceHighlightEnabled}
+						onChange={(e) => setIsEvidenceHighlightEnabled(Boolean(e?.target?.checked))}
+					/>
+					<span>Evidence Highlight</span>
+				</label>
 			</PanelHeader>
 			<div className="reasoning-panel__body">
 
@@ -1046,6 +1068,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
                         steps={steps}
                         enrichedSteps={enrichedSteps}
                         report={report}
+						showEvidenceHighlights={isEvidenceHighlightEnabled}
                         selectedStepIndex={selectedStepIndex}
                         onSelectStep={setSelectedStepIndex}
                         onStepClick={handleStepClick}

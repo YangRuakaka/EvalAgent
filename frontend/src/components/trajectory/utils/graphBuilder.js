@@ -356,6 +356,7 @@ const buildClusters = (nodes, { similarityThreshold = DEFAULT_CLUSTER_THRESHOLD 
 export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const sequences = extractScreenshotSequences(trajectory);
 	const conditions = Array.isArray(options.conditions) ? options.conditions : [];
+	const useImageHash = options.useImageHash !== false;
 	
 	// 构建条件数据映射：sequenceIndex -> {model, persona, run_index}
 	const conditionMap = new Map();
@@ -412,6 +413,10 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 				return { ...task, hash: null };
 			}
 
+			if (!useImageHash) {
+				return { ...task, hash: null };
+			}
+
 			const hash = await computeImageHash(task.screenshot.src, options.hash);
 			return { ...task, hash };
 		},
@@ -430,12 +435,16 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 			const occurrenceId = `${sequenceIndex}-${position}`;
 			const isConditionFirstScreenshot = position === 0;
 			const hash = hashByOccurrence.get(`${sequenceIndex}-${position}`) || null;
-			const nodeId = isConditionFirstScreenshot ? 'node-condition-first' : `node-${hash}`;
+			const nodeId = isConditionFirstScreenshot
+				? 'node-condition-first'
+				: (useImageHash && hash ? `node-${hash}` : `node-seq-${sequenceIndex}-pos-${position}`);
 
 			if (!nodeMap.has(nodeId)) {
 				nodeMap.set(nodeId, {
 					id: nodeId,
-					hash: isConditionFirstScreenshot ? FIRST_CONDITION_HASH : hash,
+					hash: isConditionFirstScreenshot
+						? FIRST_CONDITION_HASH
+						: (useImageHash ? hash : `NO_HASH_${sequenceIndex}_${position}`),
 					src: screenshot.src,
 					alt: screenshot.alt,
 					occurrences: [],

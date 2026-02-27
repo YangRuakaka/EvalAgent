@@ -1,6 +1,8 @@
 param(
     [string]$Pattern = "*.txt",
-    [switch]$FailFast
+    [switch]$FailFast,
+    [ValidateSet("agentic", "step_level", "global_summary")]
+    [string[]]$Modes = @("agentic")
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,16 +15,37 @@ if (-not (Test-Path $Runner)) {
     exit 1
 }
 
-$argsList = @(
-    $Runner,
-    "--dataset-dir", (Join-Path $ScriptDir "dataset"),
-    "--results-dir", (Join-Path $ScriptDir "results"),
-    "--pattern", $Pattern
-)
+$datasetDir = Join-Path $ScriptDir "dataset"
+$resultsRoot = Join-Path $ScriptDir "results"
 
-if ($FailFast) {
-    $argsList += "--fail-fast"
+foreach ($mode in $Modes) {
+    $resultsDir = Join-Path $resultsRoot $mode
+    if (-not (Test-Path $resultsDir)) {
+        New-Item -ItemType Directory -Path $resultsDir | Out-Null
+    }
+
+    $argsList = @(
+        $Runner,
+        "--dataset-dir", $datasetDir,
+        "--results-dir", $resultsDir,
+        "--pattern", $Pattern,
+        "--run-tag", $mode
+    )
+
+    if ($FailFast) {
+        $argsList += "--fail-fast"
+    }
+
+    if ($mode -eq "step_level" -or $mode -eq "global_summary") {
+        $argsList += "--forced-granularity"
+        $argsList += $mode
+    }
+
+    Write-Host "[RUN] mode=$mode pattern=$Pattern"
+    python @argsList
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
 }
 
-python @argsList
-exit $LASTEXITCODE
+exit 0

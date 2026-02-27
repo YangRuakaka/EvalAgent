@@ -88,6 +88,7 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [error, setError] = useState(null);
 	const [clusterThreshold, setClusterThreshold] = useState(DEFAULT_CLUSTER_THRESHOLD);
+	const [useImageHash, setUseImageHash] = useState(true);
 	const [filterType, setFilterType] = useState('all'); // 'all' | 'model' | 'persona' | 'task'
 	const [filterValue, setFilterValue] = useState(null);
 	const [activeLegendId, setActiveLegendId] = useState(null);
@@ -129,6 +130,7 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 			hash: { hashSize: 16 },
 			hashConcurrency: 8,
 			clusterThreshold,
+			useImageHash,
 			conditions: conditions || [],
 		})
 			.then((result) => {
@@ -152,7 +154,7 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 		return () => {
 			isMounted = false;
 		};
-	}, [clusterThreshold, hasTrajectory, trajectory, conditions]);
+	}, [clusterThreshold, hasTrajectory, trajectory, conditions, useImageHash]);
 
 	const handleClusterThresholdChange = (event) => {
 		const nextValue = Number(event?.target?.value);
@@ -470,6 +472,16 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 						))}
 					</select>
 				</div>
+
+				<label className="trajectory-toggle" htmlFor="trajectory-use-imagehash">
+					<input
+						type="checkbox"
+						id="trajectory-use-imagehash"
+						checked={useImageHash}
+						onChange={(e) => setUseImageHash(Boolean(e?.target?.checked))}
+					/>
+					<span>ImageHash</span>
+				</label>
 
 				<button
 					type="button"

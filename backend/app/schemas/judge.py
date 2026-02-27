@@ -274,6 +274,10 @@ class ExperimentEvaluationRequest(BaseModel):
     conditions: List[ConditionRequest] = Field(..., description="List of condition IDs to evaluate")
     criteria: List[ExperimentCriterion] = Field(..., description="List of criteria to evaluate for all conditions")
     judge_model: Optional[str] = Field(None, description="Optional model name used by AI judge pipeline")
+    forced_granularity: Optional[Granularity] = Field(
+        None,
+        description="Force all criteria to be evaluated at a fixed granularity (step_level/phase_level/global_summary). If omitted, agentic granularity analysis is used.",
+    )
 
 class RankingItem(BaseModel):
     """A single item in the condition ranking."""

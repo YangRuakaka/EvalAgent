@@ -31,8 +31,26 @@ const PARALLEL_LINK_SEPARATION = 128;
 const PARALLEL_LINK_OFFSET_MULTIPLIER = 0.6;
 const PARALLEL_LINK_CURVE_MULTIPLIER = 0.1;
 const PARALLEL_LINK_CONTROL_PULL = 0.4;
+const RENDER_FRAME_SKIP = 2;
 const ICON_PIN = 'M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z';
 const ICON_UNPIN = 'M2,5.27L3.28,4L20,20.72L18.73,22L12.8,16.07V22H11.2V16H6V14L8,12V11.27L2,5.27M16,12L18,14V16H17.82L8,6.18V4H7V2H17V4H16V12Z';
+const ACTION_ICON_MAP = {
+	click: '🖱',
+	scroll: '↕',
+	input: '⌨',
+	type: '⌨',
+	select_option: '☰',
+	select: '☰',
+	hover: '◎',
+	navigate: '⇢',
+	go_to_url: '⇢',
+	open_tab: '🗂',
+	switch_tab: '🗂',
+	close_tab: '✕',
+	wait: '⏱',
+	screenshot: '📸',
+	done: '✓',
+};
 
 
 const clampUnit = (value) => {
@@ -300,12 +318,18 @@ const computeLinkPath = (link) => {
 	return `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
 };
 
-const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highlightRequest, onNodeClick }) => {
+const getActionIcon = (actionType) => {
+	const normalized = typeof actionType === 'string' ? actionType.trim().toLowerCase() : '';
+	return ACTION_ICON_MAP[normalized] || '•';
+};
+
+const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highlightRequest, onNodeClick, onLinkClick }) => {
 	const containerRef = useRef(null);
 	const svgRef = useRef(null);
 	const rootLayerRef = useRef(null);
 	const clustersLayerRef = useRef(null);
 	const linksLayerRef = useRef(null);
+	const linkActionsLayerRef = useRef(null);
 	const nodesLayerRef = useRef(null);
 	const defsRef = useRef(null);
 	const simulationRef = useRef(null);
@@ -796,6 +820,7 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 
 		const rootLayer = select(rootLayerRef.current);
 		const linksLayer = select(linksLayerRef.current);
+		const linkActionsLayer = select(linkActionsLayerRef.current);
 		const nodesLayer = select(nodesLayerRef.current);
 		const clustersLayer = select(clustersLayerRef.current);
 
@@ -821,6 +846,77 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 			.style('stroke', (link) => link.color || DEFAULT_LINK_COLOR)
 			.style('stroke-opacity', (link) => (link.color ? 0.88 : 0.45))
 			.attr('marker-end', (link) => `url(#${markerIdForColor(link.color)})`);
+
+		linksMerged.on('click', (event, link) => {
+			event.stopPropagation();
+			if (onLinkClick) {
+				onLinkClick({ link, actionType: null });
+			}
+		});
+
+		const actionLinks = validLinks.filter((link) => Array.isArray(link.actionTypes) && link.actionTypes.length > 0);
+		const linkActionSelection = linkActionsLayer
+			.selectAll('g.trajectory-link-actions')
+			.data(actionLinks, (link) => link.__key || link.id);
+
+		linkActionSelection.exit().remove();
+
+		const linkActionEnter = linkActionSelection
+			.enter()
+			.append('g')
+			.attr('class', 'trajectory-link-actions');
+
+		const linkActionMerged = linkActionEnter.merge(linkActionSelection);
+
+		linkActionMerged.each(function (link) {
+			const actionTypes = Array.isArray(link.actionTypes) ? link.actionTypes : [];
+			const chipSelection = select(this)
+				.selectAll('g.trajectory-link-action-chip')
+				.data(actionTypes, (actionType) => actionType);
+
+			chipSelection.exit().remove();
+
+			const chipEnter = chipSelection
+				.enter()
+				.append('g')
+				.attr('class', 'trajectory-link-action-chip');
+
+			chipEnter.append('rect').attr('class', 'trajectory-link-action-chip__bg');
+			chipEnter.append('text').attr('class', 'trajectory-link-action-chip__icon');
+			chipEnter.append('text').attr('class', 'trajectory-link-action-chip__label');
+
+			const chipMerged = chipEnter.merge(chipSelection);
+
+			chipMerged
+				.attr('transform', (_, idx) => `translate(0, ${(idx - (actionTypes.length - 1) / 2) * 24})`)
+				.on('click', (event, actionType) => {
+					event.stopPropagation();
+					if (onLinkClick) {
+						onLinkClick({ link, actionType });
+					}
+				});
+
+			chipMerged
+				.select('.trajectory-link-action-chip__bg')
+				.attr('x', -52)
+				.attr('y', -9)
+				.attr('width', 104)
+				.attr('height', 18)
+				.attr('rx', 9)
+				.attr('ry', 9);
+
+			chipMerged
+				.select('.trajectory-link-action-chip__icon')
+				.attr('x', -42)
+				.attr('y', 4)
+				.text((actionType) => getActionIcon(actionType));
+
+			chipMerged
+				.select('.trajectory-link-action-chip__label')
+				.attr('x', -28)
+				.attr('y', 4)
+				.text((actionType) => actionType);
+		});
 
 		const nodeSelection = nodesLayer
 			.selectAll('g.trajectory-node')
@@ -1057,8 +1153,11 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 		}
 
 		simulationRef.current = simulation;
+		let tickCount = 0;
 
 		const tick = () => {
+			tickCount += 1;
+			const shouldRenderThisTick = tickCount % RENDER_FRAME_SKIP === 0;
 			let clusterShapes = computeClusterShapes();
 
 			clusterShapes.forEach((clusterShape) => {
@@ -1183,28 +1282,34 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 				});
 			}
 
-			linksMerged.attr('d', (link) => computeLinkPath(link));
-			nodesMerged.attr('transform', (node) => `translate(${node.x || 0}, ${node.y || 0})`);
+			if (shouldRenderThisTick) {
+				linksMerged.attr('d', (link) => computeLinkPath(link));
+
+				linkActionMerged.attr('transform', (link) => {
+					const source = link?.source;
+					const target = link?.target;
+
+					if (!source || !target) {
+						return 'translate(0, 0)';
+					}
+
+					if (source === target || source.id === target.id) {
+						const x = (source.x || 0) + (source.width || 48) / 2 + 28;
+						const y = (source.y || 0) - (source.height || 32) / 2 - 28;
+						return `translate(${x}, ${y})`;
+					}
+
+					const x = ((source.x || 0) + (target.x || 0)) / 2;
+					const y = ((source.y || 0) + (target.y || 0)) / 2;
+					return `translate(${x}, ${y})`;
+				});
+
+				nodesMerged.attr('transform', (node) => `translate(${node.x || 0}, ${node.y || 0})`);
+			}
 			
-			// Update step numbering during tick
-			nodesMerged.each(function (node) {
-				const nodeSelection = select(this);
-				const occurrences = Array.isArray(node.occurrences) ? node.occurrences : [];
-				
-				// Find primary occurrence for step number
-				const primaryOccurrence = node.__primaryOccurrence || (occurrences.length ? occurrences[0] : null);
-				const stepNumber = primaryOccurrence ? (primaryOccurrence.position + 1) : null;
-				
-				// Update step number text position
-				const stepNumberText = nodeSelection.select('.trajectory-node__step-number');
-				if (stepNumber !== null) {
-					stepNumberText
-						.attr('y', (node) => -node.height / 2 - 8)
-						.style('display', 'block');
-				} else {
-					stepNumberText.style('display', 'none');
-				}
-			});
+			if (!shouldRenderThisTick) {
+				return;
+			}
 
 			const clusterSelection = clustersLayer
 				.selectAll('g.trajectory-cluster')
@@ -1461,7 +1566,7 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 		return () => {
 			simulation.stop();
 		};
-	}, [data, width, height, onNodeClick]);
+	}, [data, width, height, onNodeClick, onLinkClick]);
 
 	useEffect(() => {
 		const highlight = highlightRequest;
@@ -1659,6 +1764,7 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 				<g ref={rootLayerRef} className="trajectory-graph__root">
 					<g ref={clustersLayerRef} className="trajectory-graph__clusters" />
 					<g ref={linksLayerRef} className="trajectory-graph__links" />
+					<g ref={linkActionsLayerRef} className="trajectory-graph__link-actions" />
 					<g ref={nodesLayerRef} className="trajectory-graph__nodes" />
 				</g>
 			</svg>
@@ -1724,6 +1830,7 @@ TrajectoryGraph.propTypes = {
 		nonce: PropTypes.number,
 		snapshotKey: PropTypes.string,
 	}),
+	onLinkClick: PropTypes.func,
 };
 
 TrajectoryGraph.defaultProps = {
@@ -1732,6 +1839,7 @@ TrajectoryGraph.defaultProps = {
 	emptyMessage: 'Select a run to explore its screenshot trajectory.',
 	containerSize: null,
 	highlightRequest: null,
+	onLinkClick: null,
 };
 
 export default TrajectoryGraph;

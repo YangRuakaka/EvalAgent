@@ -19,11 +19,25 @@ const EVALUATION_MODEL_OPTIONS = [
 	{ value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
 ];
 
+const TRAJECTORY_COLOR_PALETTE = [
+	'#1f77b4',
+	'#ff7f0e',
+	'#2ca02c',
+	'#d62728',
+	'#9467bd',
+	'#8c564b',
+	'#e377c2',
+	'#7f7f7f',
+	'#bcbd22',
+	'#17becf',
+];
+
 const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun, onCloseRun }) => {
 	const { state: { mappings, criterias, evaluationResponses }, updateEvaluationResponse } = useData();
 	const [activeTab, setActiveTab] = useState('trajectory');
 	const [evaluateModel, setEvaluateModel] = useState('gpt-4o-mini');
 	const [evaluationLoadingByRunId, setEvaluationLoadingByRunId] = useState({});
+	const [reasoningNavigationRequest, setReasoningNavigationRequest] = useState(null);
 	
 	// Store state for each experiment (runId = experimentId): { [experimentId]: { selectedCriteriaIds, selectedConditionIds } }
 	const [experimentStates, setExperimentStates] = useState({});
@@ -31,10 +45,17 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 	// Get current experiment state or default values
 	const currentExperimentState = useMemo(() => experimentStates[activeRunId] || {
 		selectedCriteriaIds: [],
-		selectedConditionIds: []
+		selectedConditionIds: [],
+		trajectoryUseImageHash: true,
+		reasoningEvidenceHighlight: true,
 	}, [experimentStates, activeRunId]);
 
-	const { selectedCriteriaIds, selectedConditionIds } = currentExperimentState;
+	const {
+		selectedCriteriaIds,
+		selectedConditionIds,
+		trajectoryUseImageHash,
+		reasoningEvidenceHighlight,
+	} = currentExperimentState;
 	const isEvaluatingCurrentRun = useMemo(() => {
 		if (!activeRunId) {
 			return false;
@@ -50,7 +71,12 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 		setExperimentStates(prev => ({
 			...prev,
 			[activeRunId]: {
-				...(prev[activeRunId] || { selectedConditionIds: [], selectedCriteriaIds: [] }),
+				...(prev[activeRunId] || {
+					selectedConditionIds: [],
+					selectedCriteriaIds: [],
+					trajectoryUseImageHash: true,
+					reasoningEvidenceHighlight: true,
+				}),
 				selectedCriteriaIds: ids
 			}
 		}));
@@ -61,11 +87,74 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 		setExperimentStates(prev => ({
 			...prev,
 			[activeRunId]: {
-				...(prev[activeRunId] || { selectedCriteriaIds: [], selectedConditionIds: [] }),
+				...(prev[activeRunId] || {
+					selectedCriteriaIds: [],
+					selectedConditionIds: [],
+					trajectoryUseImageHash: true,
+					reasoningEvidenceHighlight: true,
+				}),
 				selectedConditionIds: ids
 			}
 		}));
 	}, [activeRunId]);
+
+	const setTrajectoryUseImageHash = useCallback((enabled) => {
+		if (!activeRunId) {
+			return;
+		}
+
+		setExperimentStates((prev) => ({
+			...prev,
+			[activeRunId]: {
+				...(prev[activeRunId] || {
+					selectedCriteriaIds: [],
+					selectedConditionIds: [],
+					trajectoryUseImageHash: true,
+					reasoningEvidenceHighlight: true,
+				}),
+				trajectoryUseImageHash: Boolean(enabled),
+			},
+		}));
+	}, [activeRunId]);
+
+	const setReasoningEvidenceHighlight = useCallback((enabled) => {
+		if (!activeRunId) {
+			return;
+		}
+
+		setExperimentStates((prev) => ({
+			...prev,
+			[activeRunId]: {
+				...(prev[activeRunId] || {
+					selectedCriteriaIds: [],
+					selectedConditionIds: [],
+					trajectoryUseImageHash: true,
+					reasoningEvidenceHighlight: true,
+				}),
+				reasoningEvidenceHighlight: Boolean(enabled),
+			},
+		}));
+	}, [activeRunId]);
+
+	const handleTrajectoryNavigateToReasoning = useCallback((payload) => {
+		if (!payload) {
+			return;
+		}
+
+		const agentIndex = Number.isFinite(payload.agentIndex) ? payload.agentIndex : null;
+		const stepIndex = Number.isFinite(payload.stepIndex) ? payload.stepIndex : null;
+
+		if (agentIndex === null || stepIndex === null) {
+			return;
+		}
+
+		setReasoningNavigationRequest({
+			agentIndex,
+			stepIndex,
+			nonce: Date.now(),
+		});
+		setActiveTab('reasoning');
+	}, []);
 
 	const [evaluationResponse, setEvaluationResponse] = useState(null);
 
@@ -124,6 +213,11 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 				return condition;
 			});
 		}
+
+		conditionsWithEvaluation = conditionsWithEvaluation.map((condition, index) => ({
+			...condition,
+			trajectoryColor: condition.trajectoryColor || TRAJECTORY_COLOR_PALETTE[index % TRAJECTORY_COLOR_PALETTE.length],
+		}));
 		
 		return {
 			conditions: conditionsWithEvaluation,
@@ -195,38 +289,39 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 				</div>
 
 				<div className="visualization-view__content">
-					{activeTab === 'trajectory' && (
-						<section className="visualization-view__panel">
-							{trajectoryData ? (
-								<TrajectoryVisualizer 
-									trajectory={trajectoryData}
-									conditions={experimentsData?.conditions || []}
-								/>
-							) : (
-								<div style={{ padding: '20px', color: '#999' }}>
-									No trajectory data available
-								</div>
-							)}
-						</section>
-					)}
-					{activeTab === 'reasoning' && (
-						<section className="visualization-view__panel">
-							{criteriaData ? (
-								<ReasoningPanel 
-									data={criteriaData}
-									selectedExperimentId={activeRunId}
-									experimentsMap={experimentsMapByAgentId}
-									evaluationResponse={evaluationResponse}
-								/>
-							) : (
-								<div style={{ padding: '20px', color: '#999' }}>
-									No reasoning data available
-								</div>
-							)}
-						</section>
-					)}
-					{activeTab === 'evaluation' && (
-						<section className="visualization-view__panel">
+					<section className={`visualization-view__panel${activeTab !== 'trajectory' ? ' visualization-view__panel--hidden' : ''}`}>
+						{trajectoryData ? (
+							<TrajectoryVisualizer 
+								trajectory={trajectoryData}
+								conditions={experimentsData?.conditions || []}
+								useImageHashEnabled={trajectoryUseImageHash}
+								onUseImageHashChange={setTrajectoryUseImageHash}
+								onNavigateToReasoning={handleTrajectoryNavigateToReasoning}
+							/>
+						) : (
+							<div style={{ padding: '20px', color: '#999' }}>
+								No trajectory data available
+							</div>
+						)}
+					</section>
+					<section className={`visualization-view__panel${activeTab !== 'reasoning' ? ' visualization-view__panel--hidden' : ''}`}>
+						{criteriaData ? (
+							<ReasoningPanel 
+								data={criteriaData}
+								selectedExperimentId={activeRunId}
+								experimentsMap={experimentsMapByAgentId}
+								evaluationResponse={evaluationResponse}
+								evidenceHighlightEnabled={reasoningEvidenceHighlight}
+								onEvidenceHighlightChange={setReasoningEvidenceHighlight}
+								navigationRequest={reasoningNavigationRequest}
+							/>
+						) : (
+							<div style={{ padding: '20px', color: '#999' }}>
+								No reasoning data available
+							</div>
+						)}
+					</section>
+					<section className={`visualization-view__panel${activeTab !== 'evaluation' ? ' visualization-view__panel--hidden' : ''}`}>
 							<EvaluationPanel
 								criterias={criterias}
 								conditions={experimentsData?.conditions || []}
@@ -290,8 +385,7 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 								}
 								}}
 							/>
-						</section>
-					)}
+					</section>
 				</div>
 			</section>
 			<VerticalTabs

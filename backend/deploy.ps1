@@ -46,6 +46,9 @@ $BrowserAgentBrowserStartTimeout = "180"
 $BrowserAgentBrowserLaunchTimeout = "120"
 $BrowserAgentBrowserLaunchRetries = "3"
 $BrowserAgentBrowserRetryBackoffSeconds = "2"
+$JudgeEvaluationMaxConcurrency = "12"
+$JudgeEvaluationStepMaxConcurrency = "12"
+$JudgeEvaluationTaskTimeoutSeconds = "1800"
 
 # --- Pre-flight Checks ---
 
@@ -53,6 +56,32 @@ $BrowserAgentBrowserRetryBackoffSeconds = "2"
 if (-not (Get-Command "gcloud" -ErrorAction SilentlyContinue)) {
     Write-Error "Google Cloud CLI ('gcloud') is not installed or not in PATH. Please install it first."
     exit 1
+}
+
+# 1.1 Python syntax pre-check (fail fast before Cloud Run build/deploy)
+$PythonCommand = $null
+if (Get-Command "python" -ErrorAction SilentlyContinue) {
+    $PythonCommand = "python"
+} elseif (Get-Command "py" -ErrorAction SilentlyContinue) {
+    $PythonCommand = "py"
+}
+
+if ($PythonCommand) {
+    Write-Host "Running Python syntax check for app/ ..." -ForegroundColor Cyan
+    if ($PythonCommand -eq "py") {
+        & py -3 -m compileall -q "$PSScriptRoot\app"
+    } else {
+        & python -m compileall -q "$PSScriptRoot\app"
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Python syntax check failed. Fix syntax errors before deployment."
+        exit 1
+    }
+
+    Write-Host "Python syntax check passed." -ForegroundColor Green
+} else {
+    Write-Warning "Python executable not found in PATH. Skipping local syntax pre-check."
 }
 
 # 2. API Key Handling
@@ -137,7 +166,7 @@ $gcloudArgs = @(
     "--memory", $Memory,
     "--cpu", $Cpu,
     "--concurrency", "1",
-    "--timeout", "1800",
+    "--timeout", "3600",
     "--no-cpu-throttling",
     "--add-volume", "name=logs-storage,type=cloud-storage,bucket=$BucketName",
     "--add-volume-mount", "volume=logs-storage,mount-path=$MountPath"
@@ -158,6 +187,9 @@ $EnvVars = @(
     "BROWSER_AGENT_BROWSER_LAUNCH_TIMEOUT=$BrowserAgentBrowserLaunchTimeout",
     "BROWSER_AGENT_BROWSER_LAUNCH_RETRIES=$BrowserAgentBrowserLaunchRetries",
     "BROWSER_AGENT_BROWSER_RETRY_BACKOFF_SECONDS=$BrowserAgentBrowserRetryBackoffSeconds",
+    "JUDGE_EVALUATION_MAX_CONCURRENCY=$JudgeEvaluationMaxConcurrency",
+    "JUDGE_EVALUATION_STEP_MAX_CONCURRENCY=$JudgeEvaluationStepMaxConcurrency",
+    "JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS=$JudgeEvaluationTaskTimeoutSeconds",
     "BROWSER_AGENT_FORCE_THREADED_RUN_ON_WINDOWS=true",
     "BROWSER_AGENT_ENABLE_SCREENSHOT_PROCESSING=false",
     "BROWSER_AGENT_MAX_SCREENSHOTS=0",

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 
 import PanelHeader from '../common/PanelHeader';
@@ -83,17 +83,88 @@ const buildHighlightSnapshot = (entry, meta) => {
 	return `${entry?.id || 'sequence'}:${nodeCount}:${linkCount}:${totalScreens}:${totalNodes}:${totalLinks}`;
 };
 
-const TrajectoryVisualizer = ({ trajectory, conditions }) => {
+const LinkActionPopUp = ({ link, legendEntries, onClose }) => {
+	if (!link) return null;
+	const selectedActionType = typeof link.selectedActionType === 'string'
+		? link.selectedActionType.toLowerCase()
+		: null;
+
+	const allOccurrences = Array.isArray(link.occurrences)
+		? link.occurrences.slice().sort((a, b) => (a.position || 0) - (b.position || 0))
+		: [];
+	const occurrences = selectedActionType
+		? allOccurrences.filter((occ) => Array.isArray(occ.actionTypes) && occ.actionTypes.includes(selectedActionType))
+		: allOccurrences;
+
+	return (
+		<div className="trajectory-modal" onClick={onClose}>
+			<div className="trajectory-modal__content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '760px', maxHeight: '80vh', padding: '20px', overflowY: 'auto' }}>
+				<button
+					type="button"
+					className="trajectory-modal__close"
+					onClick={onClose}
+					aria-label="Close link action"
+				>
+					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<line x1="18" y1="6" x2="6" y2="18"></line>
+						<line x1="6" y1="6" x2="18" y2="18"></line>
+					</svg>
+				</button>
+				<h3 style={{ marginTop: 0, marginBottom: '12px', color: '#1e293b' }}>
+					Link Actions{selectedActionType ? ` · ${selectedActionType}` : ''}
+				</h3>
+				{occurrences.length === 0 && (
+					<p style={{ color: '#64748b', margin: 0 }}>No action metadata available for this transition.</p>
+				)}
+				{occurrences.map((occ, idx) => {
+					const sequenceEntry = legendEntries.find((entry) => entry.sequenceIndex === occ.sequenceIndex);
+					const actionPayload = occ.action || occ.modelOutput?.action || null;
+					const formattedAction = actionPayload
+						? (typeof actionPayload === 'string' ? actionPayload : JSON.stringify(actionPayload, null, 2))
+						: null;
+
+					return (
+						<div key={`${occ.sequenceIndex}-${occ.position}-${idx}`} className="trajectory-modal__memory-item" style={{ marginBottom: '10px', borderLeftColor: sequenceEntry?.color || '#6B7280' }}>
+							<div className="trajectory-modal__memory-header" style={{ borderBottomColor: sequenceEntry?.color || '#6B7280' }}>
+								<span className="trajectory-modal__memory-color-dot" style={{ backgroundColor: sequenceEntry?.color || '#6B7280' }} />
+								<strong>{sequenceEntry?.label || `Sequence ${occ.sequenceIndex}`}</strong>
+								<span style={{ marginLeft: '8px' }}>Step {Number.isFinite(occ.position) ? occ.position + 1 : '-'}</span>
+							</div>
+							{occ.actionSummary && (
+								<div className="trajectory-modal__memory-sub"><strong>Action:</strong> {occ.actionSummary}</div>
+							)}
+							{formattedAction && (
+								<div className="trajectory-modal__memory-block">
+									<div className="trajectory-modal__memory-title">Action Payload</div>
+									<div className="trajectory-modal__memory-content">{formattedAction}</div>
+								</div>
+							)}
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+};
+
+const TrajectoryVisualizer = ({
+	trajectory,
+	conditions,
+	useImageHashEnabled,
+	onUseImageHashChange,
+	onNavigateToReasoning,
+}) => {
 	const [graph, setGraph] = useState(EMPTY_GRAPH);
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [error, setError] = useState(null);
 	const [clusterThreshold, setClusterThreshold] = useState(DEFAULT_CLUSTER_THRESHOLD);
-	const [useImageHash, setUseImageHash] = useState(true);
+	const [internalUseImageHash, setInternalUseImageHash] = useState(true);
 	const [filterType, setFilterType] = useState('all'); // 'all' | 'model' | 'persona' | 'task'
 	const [filterValue, setFilterValue] = useState(null);
 	const [activeLegendId, setActiveLegendId] = useState(null);
 	const [highlightRequest, setHighlightRequest] = useState(null);
 	const [selectedNode, setSelectedNode] = useState(null);
+	const [selectedLink, setSelectedLink] = useState(null);
 	const [viewingPersonaEntry, setViewingPersonaEntry] = useState(null);
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const graphShellRef = useRef(null);
@@ -110,6 +181,17 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 	}, [shellWidth, shellHeight]);
 
 	const hasTrajectory = Boolean(trajectory?.details);
+	const useImageHash = typeof useImageHashEnabled === 'boolean' ? useImageHashEnabled : internalUseImageHash;
+
+	const handleUseImageHashChange = useCallback((nextValue) => {
+		const normalized = Boolean(nextValue);
+		if (typeof onUseImageHashChange === 'function') {
+			onUseImageHashChange(normalized);
+		}
+		if (typeof useImageHashEnabled !== 'boolean') {
+			setInternalUseImageHash(normalized);
+		}
+	}, [onUseImageHashChange, useImageHashEnabled]);
 
 	useEffect(() => {
 		let isMounted = true;
@@ -400,6 +482,24 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 		}
 	};
 
+	const handleLinkClick = (payload) => {
+		if (!payload) {
+			return;
+		}
+
+		if (payload.link) {
+			setSelectedLink({
+				...payload.link,
+				selectedActionType: payload.actionType || payload.link?.selectedActionType || null,
+			});
+			return;
+		}
+
+		if (payload.id || payload.source || payload.target) {
+			setSelectedLink(payload);
+		}
+	};
+
 	const toggleFullscreen = () => {
 		if (!containerRef.current) return;
 
@@ -478,7 +578,7 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 						type="checkbox"
 						id="trajectory-use-imagehash"
 						checked={useImageHash}
-						onChange={(e) => setUseImageHash(Boolean(e?.target?.checked))}
+						onChange={(e) => handleUseImageHashChange(e?.target?.checked)}
 					/>
 					<span>ImageHash</span>
 				</label>
@@ -571,6 +671,7 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 						emptyMessage={hasTrajectory ? 'Preparing visualization…' : 'Select a run to explore its screenshot trajectory.'}
 						highlightRequest={highlightRequest}
 						onNodeClick={handleNodeClick}
+						onLinkClick={handleLinkClick}
 					/>
 				</div>
 			</div>
@@ -578,7 +679,15 @@ const TrajectoryVisualizer = ({ trajectory, conditions }) => {
 				<ScreenshotPopUp
 					node={selectedNode}
 					legendEntries={legendEntries}
+					onNavigateToReasoning={onNavigateToReasoning}
 					onClose={() => setSelectedNode(null)}
+				/>
+			)}
+			{selectedLink && (
+				<LinkActionPopUp
+					link={selectedLink}
+					legendEntries={legendEntries}
+					onClose={() => setSelectedLink(null)}
 				/>
 			)}
 			<PersonaPopUp
@@ -611,11 +720,17 @@ TrajectoryVisualizer.propTypes = {
 			persona: PropTypes.string,
 		}),
 	),
+	useImageHashEnabled: PropTypes.bool,
+	onUseImageHashChange: PropTypes.func,
+	onNavigateToReasoning: PropTypes.func,
 };
 
 TrajectoryVisualizer.defaultProps = {
 	trajectory: undefined,
 	conditions: [],
+	useImageHashEnabled: undefined,
+	onUseImageHashChange: undefined,
+	onNavigateToReasoning: undefined,
 };
 
 export default TrajectoryVisualizer;

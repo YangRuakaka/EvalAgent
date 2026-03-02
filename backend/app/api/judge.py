@@ -343,6 +343,68 @@ async def _generate_overall_assessment(
         return EvaluateStatus.UNKNOWN, f"Assessment generation failed: {str(e)}", 0.0
 
 
+def _build_preliminary_analysis_summary(
+    criterion_title: str,
+    criterion_assertion: str,
+    relevant_step_indices: List[int],
+    phase_summaries: Dict[str, str],
+) -> str:
+    """Build a compact preliminary analysis summary for evaluator grounding."""
+    relevant_preview = ", ".join(str(i) for i in relevant_step_indices[:20])
+    if len(relevant_step_indices) > 20:
+        relevant_preview = f"{relevant_preview}, ..."
+
+    phase_summary_lines = []
+    for phase_id, summary in phase_summaries.items():
+        clean_summary = (summary or "").strip()
+        if clean_summary:
+            phase_summary_lines.append(f"- {phase_id}: {clean_summary}")
+
+    phases_block = "\n".join(phase_summary_lines) if phase_summary_lines else "- No phase summaries available"
+
+    return (
+        f"Criterion: {criterion_title}\n"
+        f"Assertion: {criterion_assertion}\n"
+        f"Relevant step count: {len(relevant_step_indices)}\n"
+        f"Relevant steps: [{relevant_preview}]\n"
+        f"Phase-level preliminary analysis:\n{phases_block}"
+    )
+
+
+def _inject_preliminary_context(
+    aggregated_steps: AggregatedSteps,
+    preliminary_analysis: str,
+    relevant_step_indices: List[int],
+) -> AggregatedSteps:
+    """Inject preliminary relevance analysis into aggregation context for downstream evaluator."""
+    metadata = dict(aggregated_steps.summary_metadata or {})
+    metadata["preliminary_analysis"] = preliminary_analysis
+    metadata["relevant_step_indices"] = relevant_step_indices
+    aggregated_steps.summary_metadata = metadata
+
+    header = (
+        "[PRELIMINARY_ANALYSIS]\n"
+        f"{preliminary_analysis}\n"
+        "[/PRELIMINARY_ANALYSIS]\n\n"
+        f"Relevant steps for evaluation: {relevant_step_indices}\n\n"
+    )
+
+    if "[PRELIMINARY_ANALYSIS]" not in (aggregated_steps.aggregated_content or ""):
+        aggregated_steps.aggregated_content = f"{header}{aggregated_steps.aggregated_content or ''}"
+
+    # For step-level evaluation, explicitly constrain target steps to relevant ones.
+    if aggregated_steps.granularity == Granularity.STEP_LEVEL and relevant_step_indices:
+        aggregated_steps.step_mapping = {"relevant_steps": relevant_step_indices}
+
+    # For phase/global evaluation, include relevant step mapping while preserving existing mappings.
+    elif relevant_step_indices:
+        step_mapping = dict(aggregated_steps.step_mapping or {})
+        step_mapping["relevant_steps"] = relevant_step_indices
+        aggregated_steps.step_mapping = step_mapping
+
+    return aggregated_steps
+
+
 async def _process_single_criterion(
     crit: ExperimentCriterion,
     task: BrowserAgentTask,
@@ -355,8 +417,41 @@ async def _process_single_criterion(
 ) -> Optional[ExperimentCriterionResult]:
     """Process a single criterion evaluation asynchronously."""
     logger.info(f"Evaluating criterion: {crit.title}")
+
+    # 1) Preliminary relevance analysis: identify criterion-relevant steps first.
+    criterion_phase_decomposition = None
+    relevant_step_indices = list(range(len(all_steps)))
+    phase_summaries: Dict[str, str] = {}
+    preliminary_analysis = "No preliminary analysis available."
+
+    try:
+        criterion_phase_decomposition = await asyncio.to_thread(
+            services.task_decomposer.decompose_for_phase_evaluation,
+            task=task,
+            all_steps=all_steps,
+            criterion_title=crit.title,
+            criterion_assertion=crit.assertion,
+            model_name=judge_model or "gpt-4o-mini",
+        )
+        if criterion_phase_decomposition is not None:
+            if criterion_phase_decomposition.relevant_step_indices:
+                relevant_step_indices = criterion_phase_decomposition.relevant_step_indices
+            phase_summaries = criterion_phase_decomposition.phase_summaries or {}
+    except Exception as e:
+        logger.warning(
+            "Preliminary relevance analysis failed for '%s': %s. Fallback to all steps.",
+            crit.title,
+            e,
+        )
+
+    preliminary_analysis = _build_preliminary_analysis_summary(
+        criterion_title=crit.title,
+        criterion_assertion=crit.assertion,
+        relevant_step_indices=relevant_step_indices,
+        phase_summaries=phase_summaries,
+    )
     
-    # 2. Determine granularity (forced baseline mode has higher priority)
+    # 2) Determine granularity (forced mode has higher priority)
     if forced_granularity is not None:
         target_granularity = forced_granularity
         logger.info(
@@ -366,6 +461,14 @@ async def _process_single_criterion(
         )
     else:
         try:
+            criterion_task_decomposition = None
+            if criterion_phase_decomposition is not None:
+                criterion_task_decomposition = TaskDecomposition(
+                    task_name=task.name,
+                    subtask_clusters=criterion_phase_decomposition.phase_clusters,
+                    total_steps=criterion_phase_decomposition.total_steps,
+                )
+
             # Allow STEP_LEVEL, PHASE_LEVEL, and GLOBAL_SUMMARY
             granularity_req = await asyncio.to_thread(
                 services.granularity_analyzer.analyze_criterion_granularity,
@@ -374,6 +477,7 @@ async def _process_single_criterion(
                 task_name=task.name,
                 model_name=judge_model or "gpt-4o-mini",
                 allowed_granularities=[Granularity.STEP_LEVEL, Granularity.PHASE_LEVEL, Granularity.GLOBAL_SUMMARY],
+                task_decomposition=criterion_task_decomposition,
             )
             target_granularity = granularity_req.required_granularity
             logger.info(f"Determined granularity for criterion '{crit.title}': {target_granularity}")
@@ -381,27 +485,15 @@ async def _process_single_criterion(
             logger.error(f"Granularity analysis failed: {e}")
             target_granularity = Granularity.GLOBAL_SUMMARY # Fallback
     
-    # 3. Decompose task (if needed)
+    # 3) Select decomposition for aggregation (reuse preliminary phase decomposition when possible)
     decomposition = None
-    # Only decompose if PHASE_LEVEL granularity is required
     if target_granularity == Granularity.PHASE_LEVEL:
-        try:
-            decomposition = await asyncio.to_thread(
-                services.task_decomposer.decompose_for_phase_evaluation,
-                task=task,
-                all_steps=all_steps,
-                criterion_title=crit.title,
-                criterion_assertion=crit.assertion,
-                model_name=judge_model or "gpt-4o-mini",
-            )
-            if decomposition is None:
-                logger.warning("Phase decomposition returned None, falling back to STEP_LEVEL")
-                target_granularity = Granularity.STEP_LEVEL
-        except Exception as e:
-            logger.error(f"Phase decomposition failed: {e}", exc_info=True)
+        decomposition = criterion_phase_decomposition
+        if decomposition is None:
+            logger.warning("No phase decomposition available, falling back to STEP_LEVEL")
             target_granularity = Granularity.STEP_LEVEL
     
-    # 4. Aggregate steps
+    # 4) Aggregate steps
     try:
         logger.info(f"Starting step aggregation. All steps count: {len(all_steps)}, Granularity: {target_granularity}")
         aggregated_steps = await asyncio.to_thread(
@@ -411,6 +503,11 @@ async def _process_single_criterion(
             task_decomposition=decomposition,
             task_name=task.name,
             model_name=judge_model or "deepseek-chat",
+        )
+        aggregated_steps = _inject_preliminary_context(
+            aggregated_steps=aggregated_steps,
+            preliminary_analysis=preliminary_analysis,
+            relevant_step_indices=relevant_step_indices,
         )
         logger.info(f"Step aggregation successful. Aggregated steps type: {type(aggregated_steps)}")
     except Exception as e:
@@ -438,7 +535,7 @@ async def _process_single_criterion(
         
         involved_steps_list = []
         
-        # If we have highlighted evidence, we can create per-step details
+        # Only build involved_steps from grounded highlighted evidence.
         if eval_result.highlighted_evidence:
             # Group evidence by step_index
             steps_evidence = {}
@@ -447,6 +544,10 @@ async def _process_single_criterion(
                 ev_obj = evidence
                 if isinstance(evidence, dict):
                     ev_obj = EvidenceCitation(**evidence)
+
+                # Skip empty evidence text to avoid empty highlight sections in frontend
+                if not (ev_obj.highlighted_text or "").strip():
+                    continue
                     
                 step_idx = ev_obj.step_index
                 if step_idx not in steps_evidence:
@@ -483,26 +584,6 @@ async def _process_single_criterion(
                     steps=[step_idx]
                 )
                 involved_steps_list.append(step_detail)
-        
-        # If no evidence or we want to ensure we have at least one detail (e.g. if no steps were highlighted but we have a verdict)
-        if not involved_steps_list:
-            # Convert EvidenceCitation objects to dicts for Pydantic validation
-            evidence_dicts = []
-            for evidence in eval_result.highlighted_evidence:
-                if isinstance(evidence, EvidenceCitation):
-                    evidence_dicts.append(evidence.model_dump())
-                else:
-                    evidence_dicts.append(evidence)
-                    
-            step_detail = StepEvaluationDetail(
-                granularity=target_granularity,
-                evaluateStatus=EvaluateStatus(eval_result.verdict.lower()) if eval_result.verdict.lower() in ["pass", "fail", "partial"] else EvaluateStatus.UNKNOWN,
-                reasoning=eval_result.reasoning,
-                highlighted_evidence=evidence_dicts,
-                confidenceScore=eval_result.confidence_score,
-                steps=eval_result.relevant_steps
-            )
-            involved_steps_list.append(step_detail)
         
         logger.info(f"Created {len(involved_steps_list)} StepEvaluationDetail objects")
         
@@ -678,13 +759,24 @@ def _safe_condition_result(ctx: Dict[str, Any], criteria_results: List[Experimen
 async def _gather_with_limit(
     coroutines: List[asyncio.Future],
     max_concurrency: int,
+    timeout_seconds: int = 0,
 ) -> List[Any]:
     limit = max(1, int(max_concurrency or 1))
     semaphore = asyncio.Semaphore(limit)
+    effective_timeout = max(0, int(timeout_seconds or 0))
 
     async def _run(coroutine: asyncio.Future) -> Any:
         async with semaphore:
-            return await coroutine
+            try:
+                if effective_timeout > 0:
+                    return await asyncio.wait_for(coroutine, timeout=effective_timeout)
+                return await coroutine
+            except asyncio.TimeoutError:
+                logger.warning("A judge coroutine timed out after %ss", effective_timeout)
+                return None
+            except Exception as exc:
+                logger.error("A judge coroutine failed: %s", exc)
+                return None
 
     return await asyncio.gather(*[_run(coroutine) for coroutine in coroutines])
 
@@ -969,13 +1061,15 @@ async def evaluate_experiment(
     5. Evaluate multi-condition assessment if applicable.
     """
     max_concurrency = max(1, settings.JUDGE_EVALUATION_MAX_CONCURRENCY)
+    task_timeout_seconds = max(0, int(getattr(settings, "JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS", 0) or 0))
     logger.info(
-        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, forced_granularity=%s, max_concurrency=%d)",
+        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, forced_granularity=%s, max_concurrency=%d, task_timeout_seconds=%d)",
         len(request.conditions),
         len(request.criteria),
         request.judge_model,
         request.forced_granularity,
         max_concurrency,
+        task_timeout_seconds,
     )
     
     history_logs_dir = Path(__file__).parent.parent.parent / "history_logs"
@@ -985,7 +1079,11 @@ async def evaluate_experiment(
     for condition in request.conditions:
         load_tasks.append(_load_condition_run_data(condition, history_logs_dir))
     
-    loaded_contexts_raw = await _gather_with_limit(load_tasks, max_concurrency=max_concurrency)
+    loaded_contexts_raw = await _gather_with_limit(
+        load_tasks,
+        max_concurrency=max_concurrency,
+        timeout_seconds=task_timeout_seconds,
+    )
     loaded_contexts = [ctx for ctx in loaded_contexts_raw if ctx is not None]
     
     if not loaded_contexts:
@@ -1009,13 +1107,20 @@ async def evaluate_experiment(
     logger.info("Starting %d evaluation tasks with bounded concurrency=%d", len(evaluation_tasks), max_concurrency)
     
     # 3. Execute all evaluations concurrently
-    flat_results = await _gather_with_limit(evaluation_tasks, max_concurrency=max_concurrency)
+    flat_results = await _gather_with_limit(
+        evaluation_tasks,
+        max_concurrency=max_concurrency,
+        timeout_seconds=task_timeout_seconds,
+    )
     
     # 4. Group results by condition
     # Map: conditionID -> List[ExperimentCriterionResult]
     results_by_condition = {ctx["conditionID"]: [] for ctx in loaded_contexts}
     
-    for cond_id, result in flat_results:
+    for item in flat_results:
+        if not item:
+            continue
+        cond_id, result = item
         if result is not None:
             results_by_condition[cond_id].append(result)
             

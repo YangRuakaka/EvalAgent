@@ -20,6 +20,7 @@ from ..schemas.judge import (
     EvidenceCitation,
 )
 from ..schemas.browser_agent import BrowserAgentTask
+from ..core.config import settings
 from .llm_factory import ChatLLMFactory
 from .task_decomposer import TaskDecomposerService
 from .granularity_analyzer import GranularityAnalyzerService
@@ -75,6 +76,7 @@ class JudgeEvaluatorService:
         personas_str: str,
         models_str: str,
         model_name: Optional[str] = None,
+        all_steps: Optional[List[Dict[str, Any]]] = None,
         is_first_step: bool = False
     ) -> EvaluationResult:
         """Asynchronously evaluate a single step against a criterion.
@@ -131,7 +133,7 @@ class JudgeEvaluatorService:
             # Get LLM client and invoke
             llm = self.llm_factory.get_langchain_llm(model_name)
             chain = self.step_evaluation_template | llm
-            response = chain.invoke(input_dict)
+            response = await asyncio.to_thread(chain.invoke, input_dict)
             response_text = response.content if hasattr(response, 'content') else str(response)
             
             if is_first_step:
@@ -150,7 +152,8 @@ class JudgeEvaluatorService:
             res = self._parse_evaluation_response(
                 response_text,
                 criterion_name,
-                step_agg
+                step_agg,
+                all_steps=all_steps,
             )
             res.used_granularity = Granularity.STEP_LEVEL
             return res
@@ -196,6 +199,8 @@ class JudgeEvaluatorService:
         models_str = ", ".join(models) if models else "None"
         
         logger.info(f"Starting concurrent evaluation of {len(target_indices)} steps for criterion '{criterion_name}'")
+        step_limit = max(1, int(getattr(settings, "JUDGE_EVALUATION_STEP_MAX_CONCURRENCY", 8) or 8))
+        semaphore = asyncio.Semaphore(step_limit)
         
         # Create tasks for concurrent execution
         tasks = []
@@ -203,23 +208,37 @@ class JudgeEvaluatorService:
             if 0 <= idx < len(all_steps):
                 step = all_steps[idx]
                 is_first = (i == 0)
-                task = self._evaluate_step_async(
-                    idx=idx,
-                    step=step,
-                    criterion_name=criterion_name,
-                    criterion_assertion=criterion_assertion,
-                    task_name=task_name,
-                    personas_str=personas_str,
-                    models_str=models_str,
-                    model_name=model_name,
-                    is_first_step=is_first
-                )
+
+                async def _run_single(
+                    step_idx: int = idx,
+                    step_obj: Dict[str, Any] = step,
+                    first_flag: bool = is_first,
+                ) -> EvaluationResult:
+                    async with semaphore:
+                        return await self._evaluate_step_async(
+                            idx=step_idx,
+                            step=step_obj,
+                            criterion_name=criterion_name,
+                            criterion_assertion=criterion_assertion,
+                            task_name=task_name,
+                            personas_str=personas_str,
+                            models_str=models_str,
+                            model_name=model_name,
+                            all_steps=all_steps,
+                            is_first_step=first_flag,
+                        )
+
+                task = _run_single()
                 tasks.append(task)
         
         # Execute all tasks concurrently
         if tasks:
             results = await asyncio.gather(*tasks)
-            logger.info(f"Completed concurrent evaluation of {len(results)} steps")
+            logger.info(
+                "Completed concurrent evaluation of %d steps (step concurrency limit=%d)",
+                len(results),
+                step_limit,
+            )
             return results
         else:
             logger.warning(f"No valid steps found for evaluation")
@@ -408,7 +427,7 @@ class JudgeEvaluatorService:
             print(formatted_prompt)
             print("="*80)
             
-            response = chain.invoke(input_dict)
+            response = await asyncio.to_thread(chain.invoke, input_dict)
             
             response_text = response.content if hasattr(response, 'content') else str(response)
             print("[RESPONSE FROM LLM]:")
@@ -419,7 +438,8 @@ class JudgeEvaluatorService:
             result = self._parse_evaluation_response(
                 response_text,
                 criterion_name,
-                aggregated_steps
+                aggregated_steps,
+                all_steps=all_steps
             )
             result.used_granularity = aggregated_steps.granularity
             return result
@@ -539,7 +559,8 @@ class JudgeEvaluatorService:
             result = self._parse_evaluation_response(
                 response_text,
                 criterion_name,
-                aggregated_steps
+                aggregated_steps,
+                all_steps=all_steps
             )
             result.used_granularity = Granularity.STEP_LEVEL
             return result
@@ -633,7 +654,8 @@ class JudgeEvaluatorService:
             result = self._parse_evaluation_response(
                 response_text,
                 criterion_name,
-                aggregated_steps
+                aggregated_steps,
+                all_steps=all_steps
             )
             result.used_granularity = Granularity.PHASE_LEVEL
             return result
@@ -714,7 +736,7 @@ class JudgeEvaluatorService:
             print(formatted_prompt)
             print("="*80)
             
-            response = chain.invoke(invoke_dict)
+            response = await asyncio.to_thread(chain.invoke, invoke_dict)
             
             response_text = response.content if hasattr(response, 'content') else str(response)
             print("[RESPONSE FROM LLM]:")
@@ -725,7 +747,8 @@ class JudgeEvaluatorService:
             result = self._parse_evaluation_response(
                 response_text,
                 criterion_name,
-                aggregated_steps
+                aggregated_steps,
+                all_steps=all_steps
             )
             result.used_granularity = Granularity.PHASE_LEVEL
             return result
@@ -816,7 +839,8 @@ class JudgeEvaluatorService:
             result = self._parse_evaluation_response(
                 response_text,
                 criterion_name,
-                aggregated_steps
+                aggregated_steps,
+                all_steps=all_steps
             )
             result.used_granularity = Granularity.GLOBAL_SUMMARY
             return result
@@ -1161,7 +1185,8 @@ class JudgeEvaluatorService:
         self,
         response_text: str,
         criterion_name: str,
-        aggregated_steps: AggregatedSteps
+        aggregated_steps: AggregatedSteps,
+        all_steps: Optional[List[Dict[str, Any]]] = None
     ) -> EvaluationResult:
         """Parse LLM evaluation response into EvaluationResult.
         
@@ -1215,6 +1240,21 @@ class JudgeEvaluatorService:
                         print(f"    ✗ Error parsing: {e}")
                 print()
 
+            # Ground highlighted evidence on original step text when available.
+            if all_steps and highlighted_evidence:
+                original_count = len(highlighted_evidence)
+                highlighted_evidence = self._filter_grounded_evidence(
+                    highlighted_evidence,
+                    all_steps
+                )
+                filtered_count = original_count - len(highlighted_evidence)
+                if filtered_count > 0:
+                    logger.info(
+                        "Filtered %s ungrounded evidence items for criterion '%s'",
+                        filtered_count,
+                        criterion_name
+                    )
+
             result = EvaluationResult(
                 criterion_name=criterion_name,
                 verdict=response_data.get("verdict", "UNABLE_TO_EVALUATE"),
@@ -1234,6 +1274,182 @@ class JudgeEvaluatorService:
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse evaluation JSON: {e}")
             return self._create_default_evaluation_result(criterion_name, aggregated_steps)
+
+    def _normalize_text_for_match(self, value: Any) -> str:
+        """Normalize text for robust case/whitespace-insensitive matching."""
+        if value is None:
+            return ""
+        return " ".join(str(value).lower().split())
+
+    def _extract_field_candidates(self, step_obj: Dict[str, Any], source_field: str) -> List[str]:
+        """Extract raw step field candidates according to evidence source field."""
+        normalized = (source_field or "").lower().strip()
+        values: List[Any] = []
+
+        if normalized == "evaluation":
+            values.extend([
+                step_obj.get("evaluation_previous_goal"),
+                step_obj.get("evaluation"),
+            ])
+        elif normalized == "memory":
+            values.append(step_obj.get("memory"))
+        elif normalized in {"thinking process", "thinking_process", "thinking"}:
+            values.extend([
+                step_obj.get("thinking_process"),
+                step_obj.get("thinking"),
+            ])
+        elif normalized in {"next goal", "next_goal"}:
+            values.append(step_obj.get("next_goal"))
+        elif normalized == "action":
+            values.append(step_obj.get("action"))
+        else:
+            values.extend(step_obj.values())
+
+        candidates: List[str] = []
+        for item in values:
+            if item is None:
+                continue
+            if isinstance(item, str):
+                candidates.append(item)
+            else:
+                try:
+                    candidates.append(json.dumps(item, ensure_ascii=False))
+                except Exception:
+                    candidates.append(str(item))
+
+        return candidates
+
+    def _find_exact_original_snippet(self, candidate: str, requested_text: str) -> Optional[str]:
+        """Find requested text in candidate and return exact original substring from candidate."""
+        if not candidate or not requested_text:
+            return None
+
+        # Prefer exact case-sensitive match first.
+        exact_pos = candidate.find(requested_text)
+        if exact_pos != -1:
+            return candidate[exact_pos:exact_pos + len(requested_text)]
+
+        # Fallback to case-insensitive direct substring while preserving original casing.
+        lower_candidate = candidate.lower()
+        lower_requested = requested_text.lower()
+        ci_pos = lower_candidate.find(lower_requested)
+        if ci_pos != -1:
+            return candidate[ci_pos:ci_pos + len(requested_text)]
+
+        return None
+
+    def _ground_evidence_to_original_text(
+        self,
+        evidence: EvidenceCitation,
+        all_steps: List[Dict[str, Any]],
+    ) -> Optional[EvidenceCitation]:
+        """Ground an evidence item and replace highlighted_text with exact original text snippet."""
+        requested = (evidence.highlighted_text or "").strip()
+        if not requested:
+            return None
+
+        source_field = evidence.source_field.value if hasattr(evidence.source_field, "value") else str(evidence.source_field)
+        declared_step_index = int(evidence.step_index)
+
+        if 0 <= declared_step_index < len(all_steps):
+            candidates = self._extract_field_candidates(all_steps[declared_step_index], source_field)
+            for candidate in candidates:
+                matched = self._find_exact_original_snippet(candidate, requested)
+                if matched:
+                    return evidence.model_copy(
+                        update={
+                            "step_index": declared_step_index,
+                            "highlighted_text": matched,
+                        }
+                    )
+
+        unique_match = self._locate_unique_evidence_match(
+            requested_text=requested,
+            source_field=source_field,
+            all_steps=all_steps,
+        )
+        if unique_match is None:
+            return None
+
+        matched_step_index, matched_text = unique_match
+        return evidence.model_copy(
+            update={
+                "step_index": matched_step_index,
+                "highlighted_text": matched_text,
+            }
+        )
+
+    def _locate_unique_evidence_match(
+        self,
+        requested_text: str,
+        source_field: str,
+        all_steps: List[Dict[str, Any]],
+    ) -> Optional[tuple[int, str]]:
+        """Locate evidence text across all steps and return a unique match only."""
+        if not requested_text:
+            return None
+
+        matches: List[tuple[int, str]] = []
+        for step_index, step_obj in enumerate(all_steps):
+            candidates = self._extract_field_candidates(step_obj, source_field)
+            for candidate in candidates:
+                matched = self._find_exact_original_snippet(candidate, requested_text)
+                if matched:
+                    matches.append((step_index, matched))
+
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def _is_evidence_grounded(self, evidence: EvidenceCitation, all_steps: List[Dict[str, Any]]) -> bool:
+        """Check whether highlighted evidence exists in the original step raw data."""
+        if evidence.step_index < 0 or evidence.step_index >= len(all_steps):
+            return False
+
+        highlighted_text = self._normalize_text_for_match(evidence.highlighted_text)
+        if not highlighted_text:
+            return False
+
+        source_field = evidence.source_field.value if hasattr(evidence.source_field, "value") else str(evidence.source_field)
+        candidates = self._extract_field_candidates(all_steps[evidence.step_index], source_field)
+        for candidate in candidates:
+            if highlighted_text in self._normalize_text_for_match(candidate):
+                return True
+
+        return False
+
+    def _filter_grounded_evidence(
+        self,
+        evidence_list: List[EvidenceCitation],
+        all_steps: List[Dict[str, Any]]
+    ) -> List[EvidenceCitation]:
+        """Filter out evidence items that cannot be grounded to original step text."""
+        grounded: List[EvidenceCitation] = []
+        seen_keys = set()
+        for evidence in evidence_list:
+            try:
+                grounded_item = self._ground_evidence_to_original_text(evidence, all_steps)
+                if grounded_item is None:
+                    continue
+
+                text = (grounded_item.highlighted_text or "").strip()
+                if not text:
+                    continue
+
+                source_field = grounded_item.source_field.value if hasattr(grounded_item.source_field, "value") else str(grounded_item.source_field)
+                dedupe_key = (
+                    int(grounded_item.step_index),
+                    source_field,
+                    self._normalize_text_for_match(text),
+                )
+                if dedupe_key in seen_keys:
+                    continue
+
+                seen_keys.add(dedupe_key)
+                grounded.append(grounded_item)
+            except Exception as exc:
+                logger.debug(f"Evidence grounding failed for one item: {exc}")
+        return grounded
     
     def _create_default_evaluation_result(
         self,

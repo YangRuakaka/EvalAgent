@@ -90,11 +90,47 @@
 	fill: none;
 	stroke: rgba(30, 64, 175, 0.35);
 	transition: stroke 0.2s ease, stroke-width 0.2s ease;
+	cursor: pointer;
 }
 
 .trajectory-link__arrow {
 	fill: currentColor;
 	transition: fill 0.2s ease;
+}
+
+.trajectory-link-actions {
+	pointer-events: none;
+}
+
+.trajectory-link-action-chip {
+	pointer-events: auto;
+	cursor: pointer;
+}
+
+.trajectory-link-action-chip__bg {
+	fill: rgba(255, 255, 255, 0.92);
+	stroke: rgba(30, 64, 175, 0.55);
+	stroke-width: 1;
+	filter: drop-shadow(0 1px 3px rgba(15, 23, 42, 0.1));
+}
+
+.trajectory-link-action-chip__icon {
+	font-size: 10px;
+	fill: #1e3a8a;
+	user-select: none;
+}
+
+.trajectory-link-action-chip__label {
+	font-size: 8px;
+	font-weight: 700;
+	text-transform: lowercase;
+	fill: #1e293b;
+	user-select: none;
+}
+
+.trajectory-link-action-chip:hover .trajectory-link-action-chip__bg {
+	fill: #eff6ff;
+	stroke: #1d4ed8;
 }
 
 .trajectory-link.is-dimmed {

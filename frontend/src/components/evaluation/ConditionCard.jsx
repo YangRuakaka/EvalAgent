@@ -23,6 +23,7 @@ const ConditionCard = ({
 			finalResult: condition.raw?.final_result || condition.raw?.output || 'No Result',
 			isDone: condition.is_done ?? condition.raw?.is_done ?? false,
 			isSuccessful: condition.is_successful ?? condition.raw?.is_successful ?? false,
+			trajectoryColor: condition.trajectoryColor || '#6b7280',
 		};
 	}, [condition]);
 
@@ -63,6 +64,7 @@ const ConditionCard = ({
 					</div>
 					
 					<div className="condition-card__meta-info">
+						<div className="condition-card__legend-dot" style={{ backgroundColor: displayInfo.trajectoryColor }} title="Trajectory color" />
 						<div className="condition-card__model-name" title={displayInfo.model}>
 							{displayInfo.model}
 						</div>

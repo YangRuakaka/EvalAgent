@@ -163,6 +163,9 @@ const ReasoningPanel = ({
 	selectedExperimentId = null,
 	experimentsMap = {},
 	evaluationResponse = null,
+	evidenceHighlightEnabled,
+	onEvidenceHighlightChange,
+	navigationRequest,
 }) => {
 	const { state: { criterias } } = useData();
 	const [selectedStepIndex, setSelectedStepIndex] = useState(0);
@@ -174,10 +177,23 @@ const ReasoningPanel = ({
 	const [evaluatingCriteria, setEvaluatingCriteria] = useState([]);
 	const [selectedCriterion, setSelectedCriterion] = useState(null);
 	const [hoveredHighlight, setHoveredHighlight] = useState(null);
-	const [isEvidenceHighlightEnabled, setIsEvidenceHighlightEnabled] = useState(true);
+	const [internalEvidenceHighlightEnabled, setInternalEvidenceHighlightEnabled] = useState(true);
 
 	// Get runId from reasoningDetails (will be computed in memoized value)
 	const [runId, setRunId] = useState(null);
+	const isEvidenceHighlightEnabled = typeof evidenceHighlightEnabled === 'boolean'
+		? evidenceHighlightEnabled
+		: internalEvidenceHighlightEnabled;
+
+	const handleEvidenceHighlightChange = useCallback((nextValue) => {
+		const normalized = Boolean(nextValue);
+		if (typeof onEvidenceHighlightChange === 'function') {
+			onEvidenceHighlightChange(normalized);
+		}
+		if (typeof evidenceHighlightEnabled !== 'boolean') {
+			setInternalEvidenceHighlightEnabled(normalized);
+		}
+	}, [onEvidenceHighlightChange, evidenceHighlightEnabled]);
 
 	// Get all available agents (model + persona combinations)
 	const agents = useMemo(() => {
@@ -221,6 +237,39 @@ const ReasoningPanel = ({
 			}
 		}
 	}, [agents, selectedAgentIndex]);
+
+	useEffect(() => {
+		if (!navigationRequest) {
+			return;
+		}
+
+		const nextAgentIndex = Number.isFinite(navigationRequest.agentIndex)
+			? navigationRequest.agentIndex
+			: null;
+		const nextStepIndex = Number.isFinite(navigationRequest.stepIndex)
+			? navigationRequest.stepIndex
+			: null;
+
+		if (nextAgentIndex === null || nextStepIndex === null) {
+			return;
+		}
+
+		if (Array.isArray(data?.details) && data.details[nextAgentIndex]) {
+			setSelectedAgentIndex(nextAgentIndex);
+		}
+
+		const maxStep = Array.isArray(data?.details?.[nextAgentIndex]?.model_outputs)
+			? data.details[nextAgentIndex].model_outputs.length - 1
+			: null;
+		const clampedStepIndex = maxStep !== null
+			? Math.max(0, Math.min(nextStepIndex, Math.max(maxStep, 0)))
+			: Math.max(0, nextStepIndex);
+
+		window.setTimeout(() => {
+			setSelectedStepIndex(clampedStepIndex);
+		}, 0);
+		setShowEvaluationPanel(false);
+	}, [navigationRequest, data]);
 
 	// Extract reasoning details based on selected agent
 	const reasoningDetails = useMemo(() => {
@@ -899,7 +948,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 						type="checkbox"
 						id="reasoning-highlight-toggle"
 						checked={isEvidenceHighlightEnabled}
-						onChange={(e) => setIsEvidenceHighlightEnabled(Boolean(e?.target?.checked))}
+						onChange={(e) => handleEvidenceHighlightChange(e?.target?.checked)}
 					/>
 					<span>Evidence Highlight</span>
 				</label>
@@ -982,6 +1031,9 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 						{displayCriteria.length > 0 ? (
 							<div className="reasoning-criteria-list">
 								{displayCriteria.map((criterion, index) => {
+									const criterionKey = criterion.id || criterion.title || criterion.criterionName || criterion.name || `criterion-${index}`;
+									const selectedCriterionKey = selectedCriterion?.id || selectedCriterion?.title || selectedCriterion?.criterionName || selectedCriterion?.name;
+									const isSelectedCriterion = Boolean(selectedCriterionKey && selectedCriterionKey === criterionKey);
 									// Get evaluate status of criterion, default to 'unevaluated'
 									const evaluateStatus = criterion.evaluateStatus || 'unevaluated';
 									const statusConfig = evaluateStatusMap[evaluateStatus.toLowerCase()] || evaluateStatusMap['unevaluated'];
@@ -1025,8 +1077,8 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 									
 									return (
 										<div 
-											key={index} 
-											className="reasoning-criteria-card reasoning-criteria-card--active"
+											key={criterionKey}
+											className={`reasoning-criteria-card${isSelectedCriterion ? ' reasoning-criteria-card--active' : ''}`}
 											onClick={() => setSelectedCriterion(criterion)}
 											style={{
 												...cardStyle,
@@ -1181,6 +1233,13 @@ ReasoningPanel.propTypes = {
 	selectedExperimentId: PropTypes.string,
 	experimentsMap: PropTypes.object,
 	evaluationResponse: PropTypes.object, // New: evaluation response
+	evidenceHighlightEnabled: PropTypes.bool,
+	onEvidenceHighlightChange: PropTypes.func,
+	navigationRequest: PropTypes.shape({
+		agentIndex: PropTypes.number,
+		stepIndex: PropTypes.number,
+		nonce: PropTypes.number,
+	}),
 };
 
 ReasoningPanel.defaultProps = {
@@ -1188,6 +1247,9 @@ ReasoningPanel.defaultProps = {
 	selectedExperimentId: null,
 	experimentsMap: {},
 	evaluationResponse: null, // New default value
+	evidenceHighlightEnabled: undefined,
+	onEvidenceHighlightChange: undefined,
+	navigationRequest: null,
 };
 
 export default ReasoningPanel;

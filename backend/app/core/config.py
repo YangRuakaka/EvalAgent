@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     CORS_ALLOW_ORIGIN_REGEX: str = r"https://evalagent-67802(--[a-zA-Z0-9-]+)?\.web\.app"
     CORS_ALLOW_LOCALHOST_REGEX: str = r"http://(localhost|127\.0\.0\.1):\d+"
     JUDGE_EVALUATION_MAX_CONCURRENCY: int = 8
+    JUDGE_EVALUATION_STEP_MAX_CONCURRENCY: int = 12
+    JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS: int = 1800
 
     class Config:
         env_file = ".env"

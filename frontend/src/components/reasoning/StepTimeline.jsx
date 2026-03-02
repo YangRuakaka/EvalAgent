@@ -166,6 +166,7 @@ const StepTimeline = ({
 					const verdictConfig = verdictToColor[verdictKey] || verdictToColor['UNABLE_TO_EVALUATE'];
 					
 					const confidencePercent = evaluation.confidence_score ? (evaluation.confidence_score * 100).toFixed(0) : 'N/A';
+					const indicatorIconClassName = `evaluation-indicator-svg ${verdictKey === 'PASS' ? 'evaluation-indicator-svg--pass' : ''}`;
 
 					return (
 						<div
@@ -180,7 +181,7 @@ const StepTimeline = ({
 							}}
 							title={`${evaluation.criterion_name}\nStatus: ${status.toUpperCase()}\nConfidence: ${confidencePercent}%`}
 						>
-							<IconComponent width={11} height={11} strokeWidth={3.6} />
+							<IconComponent className={indicatorIconClassName} width={12} height={12} />
 						</div>
 					);
 				})}

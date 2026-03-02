@@ -12,7 +12,7 @@ const getColorFromLegend = (legendEntries, sequenceIndex) => {
 	return entry?.color || '#6B7280';
 };
 
-const ScreenshotPopUp = ({ node, legendEntries, onClose }) => {
+const ScreenshotPopUp = ({ node, legendEntries, onClose, onNavigateToReasoning }) => {
 	if (!node) return null;
 
 	return (
@@ -30,11 +30,12 @@ const ScreenshotPopUp = ({ node, legendEntries, onClose }) => {
 					</svg>
 				</button>
 				<img src={node.src} alt="Step detail" className="trajectory-modal__image" />
-				<div className="trajectory-modal__details">
+				<div className="trajectory-modal__details trajectory-modal__details--grid">
 					{node.occurrences && node.occurrences.map((occ, index) => {
 						const output = occ.model_output || occ.raw?.model_output || occ.raw || {};
 						const modelOutput = {
 							memory: output?.memory || null,
+							thinking: output?.thinking || null,
 						};
 
 						// 获取legend颜色（根据sequenceIndex）
@@ -50,12 +51,12 @@ const ScreenshotPopUp = ({ node, legendEntries, onClose }) => {
 						const agentLabel = agentModel || 'Unknown Agent';
 
 						// 如果没有 memory，但有其他数据，仍然显示
-						const hasContent = modelOutput.memory || occ.description || occ.sequenceLabel;
+						const hasContent = modelOutput.memory || modelOutput.thinking || occ.description || occ.sequenceLabel;
 
 						if (!hasContent) return null;
 
 						return (
-							<div key={index} className="trajectory-modal__memory-item" style={{ borderLeftColor: agentColor }}>
+							<div key={index} className="trajectory-modal__memory-item trajectory-modal__memory-item--fixed" style={{ borderLeftColor: agentColor }}>
 								<div className="trajectory-modal__memory-header" style={{ borderBottomColor: agentColor }}>
 									<span className="trajectory-modal__memory-color-dot" style={{ backgroundColor: agentColor }}></span>
 									<strong>Agent:</strong> {agentLabel}
@@ -66,7 +67,7 @@ const ScreenshotPopUp = ({ node, legendEntries, onClose }) => {
 										<span className="trajectory-modal__memory-runindex"> (Run #{occ.agentRunIndex})</span>
 									)}
 									<span style={{ marginLeft: '8px', fontWeight: 'bold' }}>
-										Step {occ.position}
+										Step {Number.isFinite(occ.position) ? occ.position + 1 : '-'}
 									</span>
 									{isDuplicate && (
 										<span
@@ -84,15 +85,47 @@ const ScreenshotPopUp = ({ node, legendEntries, onClose }) => {
 											Duplicate
 										</span>
 									)}
+									<button
+										type="button"
+										className="trajectory-modal__jump-btn"
+										onClick={(e) => {
+											e.stopPropagation();
+											if (typeof onNavigateToReasoning === 'function' && Number.isFinite(sequenceIndex) && Number.isFinite(occ.position)) {
+												onNavigateToReasoning({
+													agentIndex: sequenceIndex,
+													stepIndex: occ.position,
+												});
+												onClose();
+											}
+										}}
+										title="Jump to this step in Reasoning"
+										aria-label="Jump to reasoning"
+									>
+										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M7 17L17 7"></path>
+											<path d="M7 7h10v10"></path>
+										</svg>
+									</button>
 								</div>
 								{occ.description && (
 									<div className="trajectory-modal__memory-sub">
 										<strong>Action:</strong> {occ.description}
 									</div>
 								)}
+								{modelOutput.thinking && (
+									<div className="trajectory-modal__memory-block trajectory-modal__memory-block--scrollable">
+										<div className="trajectory-modal__memory-title">Thinking</div>
+										<div className="trajectory-modal__memory-content trajectory-modal__memory-content--scroll">
+											{modelOutput.thinking}
+										</div>
+									</div>
+								)}
 								{modelOutput.memory && (
-									<div className="trajectory-modal__memory-content">
-										{modelOutput.memory}
+									<div className="trajectory-modal__memory-block trajectory-modal__memory-block--scrollable">
+										<div className="trajectory-modal__memory-title">Memory</div>
+										<div className="trajectory-modal__memory-content trajectory-modal__memory-content--scroll">
+											{modelOutput.memory}
+										</div>
 									</div>
 								)}
 							</div>
@@ -115,11 +148,13 @@ ScreenshotPopUp.propTypes = {
 			color: PropTypes.string,
 		}),
 	),
+	onNavigateToReasoning: PropTypes.func,
 	onClose: PropTypes.func.isRequired,
 };
 
 ScreenshotPopUp.defaultProps = {
 	legendEntries: [],
+	onNavigateToReasoning: null,
 };
 
 export default ScreenshotPopUp;

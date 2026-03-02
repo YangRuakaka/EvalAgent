@@ -37,7 +37,10 @@ const CriteriaCard = ({
 				style={{ backgroundColor: cardColor }} 
 			/>
 			<div className="criteria-card__content">
-				<div className="criteria-card__title">{criteria.title}</div>
+				<div className="criteria-card__title-row">
+					<span className="criteria-card__legend-dot" style={{ backgroundColor: cardColor }} />
+					<div className="criteria-card__title">{criteria.title}</div>
+				</div>
 				<div className="criteria-card__description">
 					{criteria.description || 'No description provided.'}
 				</div>

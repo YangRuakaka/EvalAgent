@@ -37,6 +37,36 @@ const coerceText = (value) => {
 	return trimmed.length > 0 ? trimmed : null;
 };
 
+const extractActionTypes = (actionPayload) => {
+	if (!actionPayload) {
+		return [];
+	}
+
+	const actionItems = Array.isArray(actionPayload) ? actionPayload : [actionPayload];
+	const actionTypes = [];
+
+	actionItems.forEach((item) => {
+		if (!item || typeof item !== 'object') {
+			return;
+		}
+
+		const payload = item.root && typeof item.root === 'object' ? item.root : item;
+		const keys = Object.keys(payload);
+		if (!keys.length) {
+			return;
+		}
+
+		const actionType = coerceText(keys[0]);
+		if (!actionType) {
+			return;
+		}
+
+		actionTypes.push(actionType.toLowerCase());
+	});
+
+	return Array.from(new Set(actionTypes));
+};
+
 const SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 
 const extractMimeType = (raw, metadata) => {
@@ -506,6 +536,8 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 			const nextNodeId = sequenceNodeIds[sequenceIndex][position + 1];
 			const currentShot = screenshots[position];
 			const nextShot = screenshots[position + 1];
+			const actionPayload = currentShot?.model_output?.action || null;
+			const actionSummary = currentShot?.description || null;
 
 			if (!currentNodeId || !nextNodeId) {
 				continue;
@@ -527,6 +559,7 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 					sequenceIndex,
 					sequenceLabel: sequence.label,
 					personas: new Set(),
+					actionTypes: new Set(),
 				});
 			}
 
@@ -546,17 +579,34 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 					link.personas.add(linkPersona);
 				}
 			}
+			const actionTypes = extractActionTypes(actionPayload);
+			actionTypes.forEach((actionType) => {
+				if (link.actionTypes) {
+					link.actionTypes.add(actionType);
+				}
+			});
 			link.count += 1;
-			link.occurrences.push({ sequenceIndex, position });
+			link.occurrences.push({
+				sequenceIndex,
+				position,
+				action: actionPayload,
+				actionTypes,
+				actionSummary,
+				fromStepId: currentShot?.stepId || null,
+				toStepId: nextShot?.stepId || null,
+				modelOutput: currentShot?.model_output || null,
+			});
 		}
 	});
 
 	const links = Array.from(linksMap.values()).map((link) => {
 		const personas = link.personas ? Array.from(link.personas) : [];
+		const actionTypes = link.actionTypes ? Array.from(link.actionTypes) : [];
 		return {
 			...link,
 			persona: link.persona || personas[0] || null,
 			personas,
+			actionTypes,
 			color: sequenceColors[link.sequenceIndex] || '#1f2937',
 		};
 	});

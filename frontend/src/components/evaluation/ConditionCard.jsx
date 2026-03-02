@@ -41,40 +41,49 @@ const ConditionCard = ({
 
 	return (
 		<div
-			className={`condition-card ${isSelected ? 'condition-card--selected' : ''} ${isDragging ? 'condition-card--dragging' : ''} ${displayInfo.isDone ? (displayInfo.isSuccessful ? 'condition-card--success-state' : 'condition-card--failure-state') : ''}`}
+			className={`condition-card ${isSelected ? 'condition-card--selected' : ''} ${isDragging ? 'condition-card--dragging' : ''}`}
+			style={{ '--trajectory-color': displayInfo.trajectoryColor }}
 			draggable={isSelected || draggable}
 			onDragStart={handleDragStart}
 			onDragEnd={onDragEnd}
 			onClick={handleClick}
 		>
+			<div
+				className={`condition-card__status-top-right ${displayInfo.isDone ? (displayInfo.isSuccessful ? 'condition-card__status-top-right--success' : 'condition-card__status-top-right--failure') : 'condition-card__status-top-right--pending'}`}
+			>
+				{displayInfo.isDone ? (
+					displayInfo.isSuccessful ? (
+						<CheckIcon className="condition-card__status-icon-large condition-card__status-icon--success" title="Success" />
+					) : (
+						<CrossIcon className="condition-card__status-icon-large condition-card__status-icon--failure" title="Failed" />
+					)
+				) : (
+					<div className="condition-card__status-pending-large" title="In Progress" />
+				)}
+			</div>
+
 			{/* Content */}
 			<div className="condition-card__content">
-				{/* Top Row: Status Icon, Model, Run Index */}
+				{/* Top Row: Model, Run Index */}
 				<div className="condition-card__top-row">
-					<div className="condition-card__status-indicator">
-						{displayInfo.isDone ? (
-							displayInfo.isSuccessful ? (
-								<CheckIcon className="condition-card__status-icon-large condition-card__status-icon--success" title="Success" />
-							) : (
-								<CrossIcon className="condition-card__status-icon-large condition-card__status-icon--failure" title="Failed" />
-							)
-						) : (
-							<div className="condition-card__status-pending-large" title="In Progress" />
-						)}
-					</div>
-					
-					<div className="condition-card__meta-info">
-						<div className="condition-card__legend-dot" style={{ backgroundColor: displayInfo.trajectoryColor }} title="Trajectory color" />
-						<div className="condition-card__model-name" title={displayInfo.model}>
-							{displayInfo.model}
-						</div>
+					<div className="condition-card__meta-block">
+						<div className="condition-card__legend-dot" title="Trajectory color" />
+						<div className="condition-card__meta-info">
+							<div className="condition-card__meta-line">
+								<div className="condition-card__model-name" title={displayInfo.model}>
+									{displayInfo.model}
+								</div>
+							</div>
 						<div className="condition-card__sub-meta">
-							<div className="condition-card__value-badge" title={displayInfo.value}>
-								{displayInfo.value}
+							<div className="condition-card__persona-inline">
+								<div className="condition-card__value-badge" title={displayInfo.value}>
+									{displayInfo.value}
+								</div>
 							</div>
 							<div className="condition-card__run-badge">
 								#{displayInfo.runIndex}
 							</div>
+						</div>
 						</div>
 					</div>
 				</div>

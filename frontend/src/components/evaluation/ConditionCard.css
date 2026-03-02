@@ -4,7 +4,7 @@
 	align-items: stretch;
 	gap: 0;
 	padding: 10px;
-	border: 1px solid #e5e7eb;
+	border: 1px solid var(--trajectory-color, #6b7280);
 	border-radius: 6px;
 	background-color: #fff;
 	transition: all 0.2s ease;
@@ -17,14 +17,14 @@
 
 .condition-card:hover {
 	background-color: #f9fafb;
-	border-color: #059669;
+	border-color: var(--trajectory-color, #6b7280);
 	box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .condition-card--selected {
-	background-color: #f0fdf4;
-	border-color: #16a34a;
-	box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.1);
+	background-color: color-mix(in srgb, var(--trajectory-color, #6b7280) 8%, white);
+	border-color: var(--trajectory-color, #6b7280);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--trajectory-color, #6b7280) 20%, transparent);
 }
 
 .condition-card--draggable {
@@ -62,6 +62,7 @@
 	gap: 10px;
 	border-bottom: 1px solid #f3f4f6;
 	padding-bottom: 8px;
+	padding-right: 34px;
 }
 
 .condition-card__status-indicator {
@@ -76,9 +77,47 @@
 	height: 24px;
 }
 
+.condition-card__status-top-right {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	width: 24px;
+	height: 24px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 9999px;
+	background-color: #f3f4f6;
+	box-shadow: 0 0 0 1px #d1d5db;
+	z-index: 2;
+}
+
+.condition-card__status-top-right--success {
+	background-color: #dcfce7;
+	box-shadow: 0 0 0 1px #16a34a;
+}
+
+.condition-card__status-top-right--failure {
+	background-color: #fee2e2;
+	box-shadow: 0 0 0 1px #dc2626;
+}
+
+.condition-card__status-top-right--pending {
+	background-color: #f3f4f6;
+	box-shadow: 0 0 0 1px #9ca3af;
+}
+
+.condition-card__status-icon--success {
+	color: #16a34a;
+}
+
+.condition-card__status-icon--failure {
+	color: #dc2626;
+}
+
 .condition-card__status-pending-large {
-	width: 20px;
-	height: 20px;
+	width: 16px;
+	height: 16px;
 	border: 2px solid #e5e7eb;
 	border-top-color: #3b82f6;
 	border-radius: 50%;
@@ -97,12 +136,28 @@
 	gap: 2px;
 }
 
+.condition-card__meta-block {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.condition-card__meta-line {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
 .condition-card__legend-dot {
 	width: 8px;
 	height: 8px;
 	border-radius: 50%;
-	box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.2);
-	margin-bottom: 1px;
+	background-color: var(--trajectory-color, #6b7280);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--trajectory-color, #6b7280) 40%, rgba(15, 23, 42, 0.2));
+	flex-shrink: 0;
 }
 
 .condition-card__model-name {
@@ -118,6 +173,13 @@
 	display: flex;
 	align-items: center;
 	gap: 4px;
+}
+
+.condition-card__persona-inline {
+	display: flex;
+	align-items: center;
+	gap: 0;
+	min-width: 0;
 }
 
 .condition-card__value-badge {
@@ -222,14 +284,6 @@
 }
 
 /* ========== States ========== */
-.condition-card--success-state {
-	border-left: 4px solid #10b981;
-}
-
-.condition-card--failure-state {
-	border-left: 4px solid #ef4444;
-}
-
 .condition-card__status-pending {
 	width: 12px;
 	height: 12px;

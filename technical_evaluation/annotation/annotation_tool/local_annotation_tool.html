@@ -1,0 +1,1042 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Behavior Annotation Tool</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --primary: #2563eb;
+      --pass: #15803d;
+      --partial: #b45309;
+      --fail: #b91c1c;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 12px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .row > label {
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    input[type="text"], input[type="number"], select {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      min-width: 180px;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 6px 10px;
+      cursor: pointer;
+      background: #fff;
+      color: var(--text);
+    }
+
+    button.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+
+    button.small {
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .header-fixed {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 100px 1fr;
+      gap: 6px 10px;
+      font-size: 13px;
+    }
+
+    .meta-grid .k {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 10px;
+    }
+
+    .step-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .field-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 8px;
+      background: #fff;
+    }
+
+    .field-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .field-text {
+      white-space: pre-wrap;
+      line-height: 1.5;
+      font-size: 14px;
+      border: 1px dashed #d1d5db;
+      border-radius: 6px;
+      padding: 8px;
+      min-height: 48px;
+      background: #fafafa;
+      user-select: text;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .behavior-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+
+    .behavior-btn.active-pass { border-color: var(--pass); color: var(--pass); background: #f0fdf4; }
+    .behavior-btn.active-partial { border-color: var(--partial); color: var(--partial); background: #fffbeb; }
+    .behavior-btn.active-fail { border-color: var(--fail); color: var(--fail); background: #fef2f2; }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 2px 8px;
+      margin: 2px;
+      background: #fff;
+    }
+
+    .chip button {
+      border: none;
+      padding: 0;
+      background: none;
+      color: #991b1b;
+      font-size: 12px;
+    }
+
+    .scrollable-list {
+      max-height: 220px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px;
+      background: #fafafa;
+    }
+
+    .bottom-jumper {
+      position: sticky;
+      bottom: 0;
+      z-index: 6;
+      background: rgba(247, 248, 250, 0.98);
+      border-top: 1px solid var(--border);
+      padding: 8px 0;
+      margin-top: 10px;
+    }
+
+    .status {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .hidden { display: none; }
+
+    @media (max-width: 980px) {
+      .main-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="panel" id="setupPanel">
+      <div class="row" style="margin-bottom: 8px;">
+        <label>Evaluator
+          <select id="annotatorId">
+            <option value="Yukun">Yukun</option>
+            <option value="Simret">Simret</option>
+            <option value="Dan">Dan</option>
+          </select>
+        </label>
+        <label>Criteria ID
+          <input id="criteriaId" type="text" value="criteria1" />
+        </label>
+        <label>Samples per evaluator
+          <input id="sampleSize" type="number" min="24" value="24" style="width: 80px; min-width: 80px;" disabled />
+        </label>
+      </div>
+
+      <div class="row" style="margin-bottom: 8px;">
+        <label>Select raw_data folder
+          <input id="folderInput" type="file" webkitdirectory directory multiple accept=".json" />
+        </label>
+        <button id="initBtn" class="primary">Initialize Task</button>
+        <button id="restoreLocalBtn">Restore from Local Cache</button>
+      </div>
+
+      <div class="row" style="margin-bottom: 8px;">
+        <button id="chooseSaveFileBtn">Choose Auto-save JSON File (Optional)</button>
+        <button id="exportBtn">Export JSON</button>
+        <label>Import Existing Annotation JSON
+          <input id="importInput" type="file" accept=".json" />
+        </label>
+      </div>
+
+      <div class="status" id="globalStatus">Not initialized</div>
+    </div>
+
+    <div id="workArea" class="hidden">
+      <div class="panel header-fixed">
+        <div class="row" style="justify-content: space-between;">
+          <div>
+            <strong>Sample</strong> <span id="dataIndexText">0 / 0</span>
+            &nbsp;&nbsp;|&nbsp;&nbsp;
+            <strong>data_id</strong> <span id="dataIdText">-</span>
+          </div>
+          <div class="row">
+            <button id="prevDataBtn">Previous Data</button>
+            <button id="nextDataBtn">Next Data</button>
+          </div>
+        </div>
+        <div class="meta-grid" style="margin-top: 10px;">
+          <div class="k">task</div><div id="taskText">-</div>
+          <div class="k">persona</div><div id="personaText">-</div>
+          <div class="k">criteria1</div><div id="criteriaText">-</div>
+        </div>
+      </div>
+
+      <div class="main-grid">
+        <div class="panel">
+          <div class="step-title">
+            <div>Step <span id="stepIdText">-</span> (<span id="stepIndexText">0 / 0</span>)</div>
+            <div class="muted">Label Step Verdict first, then select text and click right-side Text Verdict button</div>
+          </div>
+
+          <div id="fieldsContainer"></div>
+        </div>
+
+        <div class="panel">
+          <div style="font-weight: 600; margin-bottom: 8px;">Step Verdict (for current criteria)</div>
+          <div class="behavior-buttons" id="behaviorButtons"></div>
+
+          <div style="font-weight: 600; margin: 14px 0 8px;">Overall Assessment (current data)</div>
+          <div class="behavior-buttons" id="overallButtons"></div>
+
+          <div style="font-weight: 600; margin: 14px 0 8px;">Current Selection</div>
+          <div id="selectionPreview" class="muted" style="min-height: 48px; border: 1px dashed #d1d5db; border-radius: 6px; padding: 8px;">Nothing selected</div>
+
+          <div style="font-weight: 600; margin: 14px 0 8px;">Text Verdict (for selected text)</div>
+          <div class="behavior-buttons" id="textVerdictButtons"></div>
+
+          <div style="font-weight: 600; margin: 14px 0 8px;">Actual Text Verdicts (current data)</div>
+          <div id="evidenceList" class="muted scrollable-list">No evidence yet</div>
+
+          <div style="font-weight: 600; margin: 14px 0 8px;">Step Verdict Summary (current data)</div>
+          <div id="stepLabelSummary" class="muted">No labels yet</div>
+        </div>
+      </div>
+
+      <div class="bottom-jumper">
+        <div class="panel" style="margin: 0;">
+          <div class="row" style="justify-content: space-between;">
+            <div class="row">
+              <button id="prevStepBtn">Previous Step</button>
+              <button id="nextStepBtn">Next Step</button>
+              <label>Jump to Step
+                <input id="jumpStepInput" type="number" min="1" value="1" style="width: 80px; min-width: 80px;" />
+              </label>
+              <button id="jumpStepBtn">Jump</button>
+            </div>
+            <div class="status" id="saveStatus">Not saved</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'local_annotation_tool_progress_v1';
+    const EVALUATORS = ['Yukun', 'Simret', 'Dan'];
+    const FIXED_SAMPLE_SIZE = 24;
+
+    const state = {
+      rawItems: [],
+      assignment: [],
+      currentDataIndex: 0,
+      currentStepIndex: 0,
+      annotatorId: 'Yukun',
+      criteriaId: 'criteria1',
+      sampleSize: FIXED_SAMPLE_SIZE,
+      annotations: {},
+      saveFileHandle: null,
+      lastSelection: null,
+      lastSaveAt: null
+    };
+
+    const FIELDS = ['EVALUATION', 'MEMORY', 'TARGET OBJECTIVE', 'AI REASONING', 'ACTION'];
+    const BEHAVIORS = ['pass', 'partial', 'fail'];
+
+    const els = {
+      annotatorId: document.getElementById('annotatorId'),
+      criteriaId: document.getElementById('criteriaId'),
+      sampleSize: document.getElementById('sampleSize'),
+      folderInput: document.getElementById('folderInput'),
+      importInput: document.getElementById('importInput'),
+      initBtn: document.getElementById('initBtn'),
+      restoreLocalBtn: document.getElementById('restoreLocalBtn'),
+      chooseSaveFileBtn: document.getElementById('chooseSaveFileBtn'),
+      exportBtn: document.getElementById('exportBtn'),
+      globalStatus: document.getElementById('globalStatus'),
+      setupPanel: document.getElementById('setupPanel'),
+      workArea: document.getElementById('workArea'),
+      dataIndexText: document.getElementById('dataIndexText'),
+      dataIdText: document.getElementById('dataIdText'),
+      taskText: document.getElementById('taskText'),
+      personaText: document.getElementById('personaText'),
+      criteriaText: document.getElementById('criteriaText'),
+      fieldsContainer: document.getElementById('fieldsContainer'),
+      stepIdText: document.getElementById('stepIdText'),
+      stepIndexText: document.getElementById('stepIndexText'),
+      behaviorButtons: document.getElementById('behaviorButtons'),
+      overallButtons: document.getElementById('overallButtons'),
+      textVerdictButtons: document.getElementById('textVerdictButtons'),
+      selectionPreview: document.getElementById('selectionPreview'),
+      evidenceList: document.getElementById('evidenceList'),
+      stepLabelSummary: document.getElementById('stepLabelSummary'),
+      prevStepBtn: document.getElementById('prevStepBtn'),
+      nextStepBtn: document.getElementById('nextStepBtn'),
+      jumpStepInput: document.getElementById('jumpStepInput'),
+      jumpStepBtn: document.getElementById('jumpStepBtn'),
+      prevDataBtn: document.getElementById('prevDataBtn'),
+      nextDataBtn: document.getElementById('nextDataBtn'),
+      saveStatus: document.getElementById('saveStatus')
+    };
+
+    function safeText(v) {
+      if (v === null || v === undefined) return '';
+      return String(v);
+    }
+
+    function hashString(input) {
+      let hash = 2166136261;
+      for (let i = 0; i < input.length; i++) {
+        hash ^= input.charCodeAt(i);
+        hash = (hash * 16777619) >>> 0;
+      }
+      return hash >>> 0;
+    }
+
+    function mulberry32(seed) {
+      return function() {
+        let t = seed += 0x6D2B79F5;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function deterministicPick(items, k, seedText) {
+      const arr = [...items];
+      const rand = mulberry32(hashString(seedText));
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr.slice(0, Math.min(k, arr.length));
+    }
+
+    function getCurrentData() {
+      const dataId = state.assignment[state.currentDataIndex];
+      return state.rawItems.find(item => item.data_id === dataId) || null;
+    }
+
+    function ensureAnnotation(dataId) {
+      if (!state.annotations[dataId]) {
+        state.annotations[dataId] = {
+          data_id: dataId,
+          criteria_id: state.criteriaId,
+          step_labels: {},
+          overall_assessment: '',
+          evidences: [],
+          updated_at: new Date().toISOString()
+        };
+      }
+      if (!('overall_assessment' in state.annotations[dataId])) {
+        state.annotations[dataId].overall_assessment = '';
+      }
+      return state.annotations[dataId];
+    }
+
+    function getCurrentStep() {
+      const item = getCurrentData();
+      if (!item || !Array.isArray(item.steps) || item.steps.length === 0) return null;
+      const idx = Math.max(0, Math.min(state.currentStepIndex, item.steps.length - 1));
+      return item.steps[idx];
+    }
+
+    function setGlobalStatus(text) {
+      els.globalStatus.textContent = text;
+    }
+
+    function setSaveStatus(text) {
+      els.saveStatus.textContent = text;
+    }
+
+    function getProgressPayload() {
+      return {
+        version: 1,
+        meta: {
+          annotator_id: state.annotatorId,
+          criteria_id: state.criteriaId,
+          sample_size: state.sampleSize,
+          total_raw_items: state.rawItems.length,
+          assigned_count: state.assignment.length,
+          last_save_at: new Date().toISOString()
+        },
+        assignment: state.assignment,
+        current: {
+          data_index: state.currentDataIndex,
+          step_index: state.currentStepIndex
+        },
+        annotations: state.annotations
+      };
+    }
+
+    function applyProgressPayload(payload, options = { keepRaw: true }) {
+      if (!payload || typeof payload !== 'object') return;
+      const meta = payload.meta || {};
+      state.annotatorId = meta.annotator_id || state.annotatorId;
+      state.criteriaId = meta.criteria_id || state.criteriaId;
+      state.sampleSize = FIXED_SAMPLE_SIZE;
+      state.assignment = Array.isArray(payload.assignment) ? payload.assignment : state.assignment;
+      state.annotations = payload.annotations && typeof payload.annotations === 'object' ? payload.annotations : state.annotations;
+      state.currentDataIndex = Number(payload.current?.data_index || 0);
+      state.currentStepIndex = Number(payload.current?.step_index || 0);
+
+      if (!EVALUATORS.includes(state.annotatorId)) {
+        state.annotatorId = 'Yukun';
+      }
+
+      els.annotatorId.value = state.annotatorId;
+      els.criteriaId.value = state.criteriaId;
+      els.sampleSize.value = FIXED_SAMPLE_SIZE;
+
+      if (!options.keepRaw) state.rawItems = [];
+    }
+
+    async function persistAuto() {
+      const payload = getProgressPayload();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      state.lastSaveAt = new Date();
+      setSaveStatus(`Auto-saved: ${state.lastSaveAt.toLocaleTimeString()}`);
+
+      if (state.saveFileHandle) {
+        try {
+          const writable = await state.saveFileHandle.createWritable();
+          await writable.write(JSON.stringify(payload, null, 2));
+          await writable.close();
+          setSaveStatus(`Auto-saved to JSON: ${state.lastSaveAt.toLocaleTimeString()}`);
+        } catch (e) {
+          setSaveStatus('Failed to auto-write JSON (still saved in local cache)');
+        }
+      }
+    }
+
+    const debouncedPersist = (() => {
+      let timer = null;
+      return function() {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          persistAuto();
+        }, 300);
+      };
+    })();
+
+    function renderBehaviorButtons() {
+      const step = getCurrentStep();
+      const item = getCurrentData();
+      if (!step || !item) {
+        els.behaviorButtons.innerHTML = '';
+        return;
+      }
+      const annotation = ensureAnnotation(item.data_id);
+      const stepId = step.step_id;
+      const current = annotation.step_labels[String(stepId)] || '';
+
+      els.behaviorButtons.innerHTML = '';
+      BEHAVIORS.forEach(label => {
+        const btn = document.createElement('button');
+        btn.className = 'behavior-btn small';
+        if (current === label) btn.classList.add(`active-${label}`);
+        btn.textContent = label.toUpperCase();
+        btn.onclick = () => {
+          annotation.step_labels[String(stepId)] = label;
+          annotation.updated_at = new Date().toISOString();
+          renderBehaviorButtons();
+          renderStepLabelSummary();
+          debouncedPersist();
+        };
+        els.behaviorButtons.appendChild(btn);
+      });
+
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'small';
+      clearBtn.textContent = 'Clear step label';
+      clearBtn.onclick = () => {
+        delete annotation.step_labels[String(stepId)];
+        annotation.updated_at = new Date().toISOString();
+        renderBehaviorButtons();
+        renderStepLabelSummary();
+        debouncedPersist();
+      };
+      els.behaviorButtons.appendChild(clearBtn);
+    }
+
+    function renderOverallButtons() {
+      const item = getCurrentData();
+      if (!item) {
+        els.overallButtons.innerHTML = '';
+        return;
+      }
+      const annotation = ensureAnnotation(item.data_id);
+      const current = annotation.overall_assessment || '';
+
+      els.overallButtons.innerHTML = '';
+      BEHAVIORS.forEach(label => {
+        const btn = document.createElement('button');
+        btn.className = 'behavior-btn small';
+        if (current === label) btn.classList.add(`active-${label}`);
+        btn.textContent = label.toUpperCase();
+        btn.onclick = () => {
+          annotation.overall_assessment = label;
+          annotation.updated_at = new Date().toISOString();
+          renderOverallButtons();
+          refreshGlobalStatus();
+          debouncedPersist();
+        };
+        els.overallButtons.appendChild(btn);
+      });
+
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'small';
+      clearBtn.textContent = 'Clear overall';
+      clearBtn.onclick = () => {
+        annotation.overall_assessment = '';
+        annotation.updated_at = new Date().toISOString();
+        renderOverallButtons();
+        refreshGlobalStatus();
+        debouncedPersist();
+      };
+      els.overallButtons.appendChild(clearBtn);
+    }
+
+    function renderTextVerdictButtons() {
+      els.textVerdictButtons.innerHTML = '';
+
+      BEHAVIORS.forEach(verdict => {
+        const btn = document.createElement('button');
+        btn.className = 'behavior-btn small';
+        btn.textContent = verdict.toUpperCase();
+        btn.onclick = () => addEvidenceFromCurrentSelection(verdict);
+        els.textVerdictButtons.appendChild(btn);
+      });
+    }
+
+    function renderFields() {
+      const step = getCurrentStep();
+      const item = getCurrentData();
+      els.fieldsContainer.innerHTML = '';
+
+      if (!step || !item) {
+        els.fieldsContainer.innerHTML = '<div class="muted">Current data has no steps</div>';
+        return;
+      }
+
+      FIELDS.forEach(field => {
+        const card = document.createElement('div');
+        card.className = 'field-card';
+
+        const head = document.createElement('div');
+        head.className = 'field-head';
+        head.innerHTML = `<span>${field}</span>`;
+
+        const text = document.createElement('div');
+        text.className = 'field-text';
+        text.dataset.field = field;
+        text.dataset.stepid = String(step.step_id);
+        text.textContent = safeText(step[field]);
+
+        card.appendChild(head);
+        card.appendChild(text);
+        els.fieldsContainer.appendChild(card);
+      });
+    }
+
+    function renderHeader() {
+      const item = getCurrentData();
+      if (!item) {
+        els.dataIndexText.textContent = '0 / 0';
+        els.dataIdText.textContent = '-';
+        els.taskText.textContent = '-';
+        els.personaText.textContent = '-';
+        els.criteriaText.textContent = '-';
+        return;
+      }
+
+      els.dataIndexText.textContent = `${state.currentDataIndex + 1} / ${state.assignment.length}`;
+      els.dataIdText.textContent = item.data_id || '-';
+      els.taskText.textContent = safeText(item.task);
+      els.personaText.textContent = safeText(item.persona);
+      els.criteriaText.textContent = safeText(item.criteria1);
+    }
+
+    function renderStepInfo() {
+      const item = getCurrentData();
+      const step = getCurrentStep();
+      if (!item || !step) {
+        els.stepIdText.textContent = '-';
+        els.stepIndexText.textContent = '0 / 0';
+        return;
+      }
+      els.stepIdText.textContent = String(step.step_id);
+      els.stepIndexText.textContent = `${state.currentStepIndex + 1} / ${item.steps.length}`;
+      els.jumpStepInput.value = String(state.currentStepIndex + 1);
+    }
+
+    function renderEvidenceList() {
+      const item = getCurrentData();
+      if (!item) {
+        els.evidenceList.textContent = 'No evidence yet';
+        return;
+      }
+      const annotation = ensureAnnotation(item.data_id);
+      const evidences = annotation.evidences || [];
+
+      if (evidences.length === 0) {
+        els.evidenceList.textContent = 'No evidence yet';
+        return;
+      }
+
+      const wrap = document.createElement('div');
+      evidences.forEach((ev, idx) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        const shortText = safeText(ev.text).slice(0, 60);
+        chip.title = safeText(ev.text);
+        const verdict = safeText(ev.verdict || 'unlabeled').toUpperCase();
+        chip.innerHTML = `<strong>#${idx + 1}</strong> step ${ev.step_id} | ${ev.field} | ${verdict} | ${shortText}`;
+
+        const del = document.createElement('button');
+        del.textContent = '✕';
+        del.onclick = () => {
+          annotation.evidences = annotation.evidences.filter(x => x.id !== ev.id);
+          annotation.updated_at = new Date().toISOString();
+          renderEvidenceList();
+          debouncedPersist();
+        };
+        chip.appendChild(del);
+        wrap.appendChild(chip);
+      });
+      els.evidenceList.innerHTML = '';
+      els.evidenceList.appendChild(wrap);
+    }
+
+    function renderStepLabelSummary() {
+      const item = getCurrentData();
+      if (!item) {
+        els.stepLabelSummary.textContent = 'No step verdicts yet';
+        return;
+      }
+      const annotation = ensureAnnotation(item.data_id);
+      const labels = annotation.step_labels || {};
+      const keys = Object.keys(labels).sort((a, b) => Number(a) - Number(b));
+      if (keys.length === 0) {
+        els.stepLabelSummary.textContent = 'No step verdicts yet';
+        return;
+      }
+      els.stepLabelSummary.innerHTML = keys.map(k => `<span class="chip">step ${k}: ${labels[k]}</span>`).join(' ');
+    }
+
+    function renderSelectionPreview() {
+      if (!state.lastSelection) {
+        els.selectionPreview.textContent = 'Nothing selected';
+        return;
+      }
+      const s = state.lastSelection;
+      els.selectionPreview.textContent = `step ${s.step_id} | ${s.field} | ${s.text}`;
+    }
+
+    function renderAll() {
+      renderHeader();
+      renderStepInfo();
+      renderFields();
+      renderBehaviorButtons();
+      renderOverallButtons();
+      renderTextVerdictButtons();
+      renderEvidenceList();
+      renderStepLabelSummary();
+      renderSelectionPreview();
+      refreshGlobalStatus();
+    }
+
+    function addEvidenceFromCurrentSelection(verdict) {
+      const item = getCurrentData();
+      const step = getCurrentStep();
+      if (!item || !step) return;
+      if (!BEHAVIORS.includes(verdict)) {
+        alert('Invalid verdict for actual text.');
+        return;
+      }
+      if (!state.lastSelection) {
+        alert('Please select text first, then click a Text Verdict button.');
+        return;
+      }
+      if (String(state.lastSelection.step_id) !== String(step.step_id)) {
+        alert('Selected text is not in the current step. Please re-select text in this step.');
+        return;
+      }
+
+      const annotation = ensureAnnotation(item.data_id);
+
+      const normalizedText = safeText(state.lastSelection.text).trim();
+      const existing = annotation.evidences.find(ev =>
+        Number(ev.step_id) === Number(step.step_id) &&
+        safeText(ev.field) === safeText(state.lastSelection.field) &&
+        safeText(ev.text).trim() === normalizedText
+      );
+
+      if (existing) {
+        existing.verdict = verdict;
+        existing.updated_at = new Date().toISOString();
+      } else {
+        annotation.evidences.push({
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          step_id: Number(step.step_id),
+          field: state.lastSelection.field,
+          verdict,
+          text: state.lastSelection.text,
+          created_at: new Date().toISOString()
+        });
+      }
+      annotation.updated_at = new Date().toISOString();
+      renderEvidenceList();
+      debouncedPersist();
+    }
+
+    function toDataMap(items) {
+      const map = new Map();
+      items.forEach(it => {
+        if (!it || !it.data_id) return;
+        map.set(it.data_id, it);
+      });
+      return map;
+    }
+
+    async function readRawFiles(fileList) {
+      const files = Array.from(fileList || []).filter(f => f.name.toLowerCase().endsWith('.json'));
+      const all = [];
+      for (const file of files) {
+        try {
+          const txt = await file.text();
+          const obj = JSON.parse(txt);
+          if (obj && obj.data_id && Array.isArray(obj.steps)) all.push(obj);
+        } catch (e) {
+        }
+      }
+      all.sort((a, b) => String(a.data_id).localeCompare(String(b.data_id)));
+      return all;
+    }
+
+    function initAssignment() {
+      const ids = state.rawItems.map(x => x.data_id);
+      if (ids.length === 0) {
+        state.assignment = [];
+        state.currentDataIndex = 0;
+        state.currentStepIndex = 0;
+        return;
+      }
+
+      const shuffled = deterministicPick(ids, ids.length, `ring::${state.criteriaId}`);
+      const evaluatorIndex = Math.max(0, EVALUATORS.indexOf(state.annotatorId));
+      const stride = Math.max(1, Math.floor(shuffled.length / EVALUATORS.length));
+      const start = (evaluatorIndex * stride) % shuffled.length;
+
+      const assignment = [];
+      for (let i = 0; i < FIXED_SAMPLE_SIZE; i++) {
+        assignment.push(shuffled[(start + i) % shuffled.length]);
+      }
+
+      state.assignment = assignment;
+      state.sampleSize = FIXED_SAMPLE_SIZE;
+      state.currentDataIndex = 0;
+      state.currentStepIndex = 0;
+    }
+
+    function clampIndexes() {
+      if (state.currentDataIndex < 0) state.currentDataIndex = 0;
+      if (state.currentDataIndex >= state.assignment.length) state.currentDataIndex = Math.max(0, state.assignment.length - 1);
+      const item = getCurrentData();
+      if (!item || !Array.isArray(item.steps) || item.steps.length === 0) {
+        state.currentStepIndex = 0;
+        return;
+      }
+      if (state.currentStepIndex < 0) state.currentStepIndex = 0;
+      if (state.currentStepIndex >= item.steps.length) state.currentStepIndex = item.steps.length - 1;
+    }
+
+    function switchData(offset) {
+      state.currentDataIndex += offset;
+      state.currentStepIndex = 0;
+      clampIndexes();
+      renderAll();
+      debouncedPersist();
+    }
+
+    function switchStep(offset) {
+      state.currentStepIndex += offset;
+      clampIndexes();
+      renderAll();
+      debouncedPersist();
+    }
+
+    function jumpStep(targetOneBased) {
+      const item = getCurrentData();
+      if (!item || !item.steps?.length) return;
+      const idx = Math.max(1, Math.min(Number(targetOneBased || 1), item.steps.length)) - 1;
+      state.currentStepIndex = idx;
+      renderAll();
+      debouncedPersist();
+    }
+
+    function downloadJson(filename, data) {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function showWorkArea() {
+      els.workArea.classList.remove('hidden');
+    }
+
+    function hasUsableDataLoaded() {
+      return state.rawItems.length > 0 && state.assignment.length > 0;
+    }
+
+    function refreshGlobalStatus() {
+      const doneCount = state.assignment.filter(dataId => {
+        const ann = state.annotations[dataId];
+        if (!ann) return false;
+        const hasLabel = ann.step_labels && Object.keys(ann.step_labels).length > 0;
+        const hasEvidence = ann.evidences && ann.evidences.length > 0;
+        const hasOverall = !!ann.overall_assessment;
+        return hasLabel || hasEvidence || hasOverall;
+      }).length;
+      setGlobalStatus(`raw_data: ${state.rawItems.length} items | assigned: ${state.assignment.length} items | started: ${doneCount} items`);
+    }
+
+    document.addEventListener('selectionchange', () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      const text = sel.toString().trim();
+      if (!text) return;
+
+      let node = range.commonAncestorContainer;
+      if (node.nodeType === 3) node = node.parentElement;
+      if (!(node instanceof Element)) return;
+      const fieldText = node.closest('.field-text');
+      if (!fieldText) return;
+
+      const field = fieldText.dataset.field;
+      const stepId = fieldText.dataset.stepid;
+      state.lastSelection = {
+        field,
+        step_id: Number(stepId),
+        text
+      };
+      renderSelectionPreview();
+    });
+
+    els.initBtn.onclick = async () => {
+      state.annotatorId = els.annotatorId.value;
+      state.criteriaId = els.criteriaId.value.trim() || 'criteria1';
+      state.sampleSize = FIXED_SAMPLE_SIZE;
+      if (!els.folderInput.files || els.folderInput.files.length === 0) {
+        alert('Please select the raw_data folder first.');
+        return;
+      }
+
+      state.rawItems = await readRawFiles(els.folderInput.files);
+      if (state.rawItems.length === 0) {
+        alert('No valid JSON data loaded. Please check the raw_data folder.');
+        return;
+      }
+
+      initAssignment();
+      clampIndexes();
+      showWorkArea();
+      renderAll();
+      refreshGlobalStatus();
+      debouncedPersist();
+    };
+
+    els.restoreLocalBtn.onclick = () => {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        alert('No local cache found.');
+        return;
+      }
+      try {
+        const payload = JSON.parse(raw);
+        applyProgressPayload(payload);
+        if (state.rawItems.length === 0) {
+          alert('Progress restored. Please still select raw_data folder and click "Initialize Task" to load source data.');
+        } else {
+          clampIndexes();
+          showWorkArea();
+          renderAll();
+          refreshGlobalStatus();
+        }
+      } catch (e) {
+        alert('Failed to parse local cache.');
+      }
+    };
+
+    els.importInput.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const payload = JSON.parse(await file.text());
+        applyProgressPayload(payload);
+        clampIndexes();
+        showWorkArea();
+        renderAll();
+        refreshGlobalStatus();
+        debouncedPersist();
+        alert('Annotation JSON imported.');
+      } catch (err) {
+        alert('Import failed: invalid JSON format.');
+      }
+      e.target.value = '';
+    };
+
+    els.exportBtn.onclick = () => {
+      const payload = getProgressPayload();
+      const base = `${state.annotatorId || 'annotator'}_${state.criteriaId || 'criteria1'}_annotations.json`;
+      downloadJson(base, payload);
+    };
+
+    els.chooseSaveFileBtn.onclick = async () => {
+      if (!window.showSaveFilePicker) {
+        alert('This browser does not support direct file auto-save. You can still use local cache + export JSON. Chrome/Edge is recommended.');
+        return;
+      }
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: `${state.annotatorId || 'annotator'}_${state.criteriaId || 'criteria1'}_annotations.json`,
+          types: [{
+            description: 'JSON file',
+            accept: { 'application/json': ['.json'] }
+          }]
+        });
+        state.saveFileHandle = handle;
+        await persistAuto();
+        alert('Auto-save JSON file linked. Future edits will be written automatically.');
+      } catch (e) {
+      }
+    };
+
+    els.prevDataBtn.onclick = () => switchData(-1);
+    els.nextDataBtn.onclick = () => switchData(1);
+    els.prevStepBtn.onclick = () => switchStep(-1);
+    els.nextStepBtn.onclick = () => switchStep(1);
+    els.jumpStepBtn.onclick = () => jumpStep(els.jumpStepInput.value);
+
+    window.addEventListener('beforeunload', () => {
+      const payload = getProgressPayload();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    });
+
+    els.annotatorId.value = state.annotatorId;
+    els.sampleSize.value = FIXED_SAMPLE_SIZE;
+    setGlobalStatus('Select evaluator, choose raw_data folder, then click "Initialize Task"');
+    setSaveStatus('Not saved');
+  </script>
+</body>
+</html>

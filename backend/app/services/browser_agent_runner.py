@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Dict, List, Optional
 
 from ..core.config import get_settings
+from ..core.storage_paths import get_browser_run_output_dir
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ class BrowserAgentService:
 
     def __init__(self) -> None:
         self._settings = get_settings()
-        self._output_dir = Path(self._settings.BROWSER_AGENT_OUTPUT_DIR).resolve()
+        self._output_dir = get_browser_run_output_dir(self._settings)
         self._status_dir = (self._output_dir / "run_status").resolve()
         self._status_dir.mkdir(parents=True, exist_ok=True)
         self._max_concurrent = max(

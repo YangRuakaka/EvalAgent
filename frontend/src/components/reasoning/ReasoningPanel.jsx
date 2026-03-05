@@ -164,7 +164,6 @@ const ReasoningPanel = ({
 	experimentsMap = {},
 	evaluationResponse = null,
 	evidenceHighlightEnabled,
-	onEvidenceHighlightChange,
 	navigationRequest,
 }) => {
 	const { state: { criterias } } = useData();
@@ -177,25 +176,12 @@ const ReasoningPanel = ({
 	const [evaluatingCriteria, setEvaluatingCriteria] = useState([]);
 	const [selectedCriterion, setSelectedCriterion] = useState(null);
 	const [hoveredHighlight, setHoveredHighlight] = useState(null);
-	const [internalEvidenceHighlightEnabled, setInternalEvidenceHighlightEnabled] = useState(true);
 	const skipNextAgentStepResetRef = useRef(false);
 	const lastHandledNavigationNonceRef = useRef(null);
 
 	// Get runId from reasoningDetails (will be computed in memoized value)
 	const [runId, setRunId] = useState(null);
-	const isEvidenceHighlightEnabled = typeof evidenceHighlightEnabled === 'boolean'
-		? evidenceHighlightEnabled
-		: internalEvidenceHighlightEnabled;
-
-	const handleEvidenceHighlightChange = useCallback((nextValue) => {
-		const normalized = Boolean(nextValue);
-		if (typeof onEvidenceHighlightChange === 'function') {
-			onEvidenceHighlightChange(normalized);
-		}
-		if (typeof evidenceHighlightEnabled !== 'boolean') {
-			setInternalEvidenceHighlightEnabled(normalized);
-		}
-	}, [onEvidenceHighlightChange, evidenceHighlightEnabled]);
+	const isEvidenceHighlightEnabled = evidenceHighlightEnabled !== false;
 
 	// Get all available agents (model + persona combinations)
 	const agents = useMemo(() => {
@@ -1047,15 +1033,6 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
                 >
                     📷 View Screenshot
                 </button>
-				<label className="reasoning-highlight-toggle" htmlFor="reasoning-highlight-toggle">
-					<input
-						type="checkbox"
-						id="reasoning-highlight-toggle"
-						checked={isEvidenceHighlightEnabled}
-						onChange={(e) => handleEvidenceHighlightChange(e?.target?.checked)}
-					/>
-					<span>Evidence Highlight</span>
-				</label>
 			</PanelHeader>
 			<div className="reasoning-panel__body">
 
@@ -1338,7 +1315,6 @@ ReasoningPanel.propTypes = {
 	experimentsMap: PropTypes.object,
 	evaluationResponse: PropTypes.object, // New: evaluation response
 	evidenceHighlightEnabled: PropTypes.bool,
-	onEvidenceHighlightChange: PropTypes.func,
 	navigationRequest: PropTypes.shape({
 		agentIndex: PropTypes.number,
 		stepIndex: PropTypes.number,
@@ -1352,7 +1328,6 @@ ReasoningPanel.defaultProps = {
 	experimentsMap: {},
 	evaluationResponse: null, // New default value
 	evidenceHighlightEnabled: undefined,
-	onEvidenceHighlightChange: undefined,
 	navigationRequest: null,
 };
 

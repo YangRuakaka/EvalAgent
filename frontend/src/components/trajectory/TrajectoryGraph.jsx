@@ -394,7 +394,16 @@ const getActionIcon = (actionType) => {
 	return ACTION_ICON_MAP[normalized] || '•';
 };
 
-const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highlightRequest, onNodeClick, onLinkClick }) => {
+const TrajectoryGraph = ({
+	graph,
+	isLoading,
+	emptyMessage,
+	containerSize,
+	highlightRequest,
+	onNodeClick,
+	onLinkClick,
+	onInteraction,
+}) => {
 	const containerRef = useRef(null);
 	const svgRef = useRef(null);
 	const rootLayerRef = useRef(null);
@@ -412,6 +421,26 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 	const tooltipRef = useRef(null);
 	const tooltipTimeoutRef = useRef(null);
 	const persistentNodeStateRef = useRef(new Map());
+	const interactionCallbackRef = useRef(onInteraction);
+	const lastMouseMoveLoggedAtRef = useRef(0);
+	const lastZoomLoggedAtRef = useRef(0);
+	const lastDragLoggedAtRef = useRef(0);
+
+	const emitInteraction = (payload) => {
+		const callback = interactionCallbackRef.current;
+		if (typeof callback !== 'function' || !payload) {
+			return;
+		}
+
+		callback({
+			scope: 'trajectory_dag',
+			...payload,
+		});
+	};
+
+	useEffect(() => {
+		interactionCallbackRef.current = onInteraction;
+	}, [onInteraction]);
 
 	const cancelHighlightTimers = () => {
 		const { timers } = highlightStateRef.current;
@@ -489,6 +518,17 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 			.on('zoom', (event) => {
 				zoomStateRef.current = event.transform;
 				root.attr('transform', event.transform);
+
+				const now = Date.now();
+				if (now - lastZoomLoggedAtRef.current >= 160) {
+					lastZoomLoggedAtRef.current = now;
+					emitInteraction({
+						type: 'zoom_pan',
+						scale: Number(event.transform.k?.toFixed?.(4) || event.transform.k || 1),
+						translateX: Number(event.transform.x?.toFixed?.(2) || event.transform.x || 0),
+						translateY: Number(event.transform.y?.toFixed?.(2) || event.transform.y || 0),
+					});
+				}
 			});
 
 		zoomBehaviourRef.current = zoomBehaviour;
@@ -900,6 +940,11 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 
 		linksMerged.on('click', (event, link) => {
 			event.stopPropagation();
+			emitInteraction({
+				type: 'link_click',
+				linkId: link?.id || null,
+				actionType: null,
+			});
 			if (onLinkClick) {
 				onLinkClick({ link, actionType: null });
 			}
@@ -942,6 +987,11 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 				.attr('transform', (_, idx) => `translate(0, ${(idx - (actionTypes.length - 1) / 2) * 24})`)
 				.on('click', (event, actionType) => {
 					event.stopPropagation();
+					emitInteraction({
+						type: 'link_action_click',
+						linkId: link?.id || null,
+						actionType: actionType || null,
+					});
 					if (onLinkClick) {
 						onLinkClick({ link, actionType });
 					}
@@ -1304,6 +1354,10 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 				hideTooltip();
 			})
 			.on('click', (event, node) => {
+				emitInteraction({
+					type: 'node_click',
+					nodeId: node?.id || null,
+				});
 				if (onNodeClick) {
 					onNodeClick(node);
 				}
@@ -1311,6 +1365,11 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 			.on('contextmenu', (event, node) => {
 				event.preventDefault();
 				togglePin(node, event.currentTarget);
+				emitInteraction({
+					type: 'node_pin_toggle',
+					nodeId: node?.id || null,
+					isPinned: Boolean(node?._pinned),
+				});
 			})
 			.on('mousemove', (event) => {
 				// Update tooltip position on mouse move
@@ -1338,10 +1397,27 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 				}
 				node.fx = node.x;
 				node.fy = node.y;
+				emitInteraction({
+					type: 'node_drag_start',
+					nodeId: node?.id || null,
+					x: Number(node?.x?.toFixed?.(2) || node?.x || 0),
+					y: Number(node?.y?.toFixed?.(2) || node?.y || 0),
+				});
 			})
 			.on('drag', (event, node) => {
 				node.fx = event.x;
 				node.fy = event.y;
+
+				const now = Date.now();
+				if (now - lastDragLoggedAtRef.current >= 180) {
+					lastDragLoggedAtRef.current = now;
+					emitInteraction({
+						type: 'node_drag',
+						nodeId: node?.id || null,
+						x: Number(event?.x?.toFixed?.(2) || event?.x || 0),
+						y: Number(event?.y?.toFixed?.(2) || event?.y || 0),
+					});
+				}
 			})
 			.on('end', (event, node) => {
 				if (!event.active && simulationRef.current) {
@@ -1357,6 +1433,14 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 						y: node.y,
 					});
 				}
+
+				emitInteraction({
+					type: 'node_drag_end',
+					nodeId: node?.id || null,
+					x: Number(node?.x?.toFixed?.(2) || node?.x || 0),
+					y: Number(node?.y?.toFixed?.(2) || node?.y || 0),
+					isPinned: Boolean(node?._pinned),
+				});
 			});
 
 		nodesMerged.call(dragBehaviour);
@@ -1556,8 +1640,52 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 
 	const shouldShowPlaceholder = !isLoading && (!data.nodes.length || !width || !height);
 
+	const handleContainerMouseMove = (event) => {
+		const now = Date.now();
+		if (now - lastMouseMoveLoggedAtRef.current < 120) {
+			return;
+		}
+
+		const containerRect = containerRef.current?.getBoundingClientRect();
+		if (!containerRect) {
+			return;
+		}
+
+		lastMouseMoveLoggedAtRef.current = now;
+		emitInteraction({
+			type: 'mousemove',
+			x: Number((event.clientX - containerRect.left).toFixed(1)),
+			y: Number((event.clientY - containerRect.top).toFixed(1)),
+			containerWidth: Number(containerRect.width.toFixed(1)),
+			containerHeight: Number(containerRect.height.toFixed(1)),
+		});
+	};
+
+	const handleContainerMouseDown = () => {
+		emitInteraction({ type: 'mouse_down' });
+	};
+
+	const handleContainerMouseUp = () => {
+		emitInteraction({ type: 'mouse_up' });
+	};
+
+	const handleContainerWheel = (event) => {
+		emitInteraction({
+			type: 'mouse_wheel',
+			deltaY: Number(event?.deltaY?.toFixed?.(2) || event?.deltaY || 0),
+			deltaX: Number(event?.deltaX?.toFixed?.(2) || event?.deltaX || 0),
+		});
+	};
+
 	return (
-		<div className="trajectory-graph" ref={containerRef}>
+		<div
+			className="trajectory-graph"
+			ref={containerRef}
+			onMouseMove={handleContainerMouseMove}
+			onMouseDown={handleContainerMouseDown}
+			onMouseUp={handleContainerMouseUp}
+			onWheel={handleContainerWheel}
+		>
 			{shouldShowPlaceholder && <p className="trajectory-graph__placeholder">{emptyMessage}</p>}
 			<svg ref={svgRef} className="trajectory-graph__svg" role="presentation">
 				<defs ref={defsRef} />
@@ -1629,7 +1757,9 @@ TrajectoryGraph.propTypes = {
 		nonce: PropTypes.number,
 		snapshotKey: PropTypes.string,
 	}),
+	onNodeClick: PropTypes.func,
 	onLinkClick: PropTypes.func,
+	onInteraction: PropTypes.func,
 };
 
 TrajectoryGraph.defaultProps = {
@@ -1638,7 +1768,9 @@ TrajectoryGraph.defaultProps = {
 	emptyMessage: 'Select a run to explore its screenshot trajectory.',
 	containerSize: null,
 	highlightRequest: null,
+	onNodeClick: null,
 	onLinkClick: null,
+	onInteraction: null,
 };
 
 export default TrajectoryGraph;

@@ -10,6 +10,14 @@ from typing import Any, Iterable, List, Optional
 
 from PIL import Image
 
+from ..core.config import get_settings
+from ..core.storage_paths import (
+    get_cache_dataset_dir,
+    get_cache_history_root,
+    get_legacy_data1_dirs,
+    normalize_cache_dataset,
+    resolve_backend_path,
+)
 from ..schemas.history_logs import HistoryLogDetails, HistoryLogPayload
 
 
@@ -21,24 +29,57 @@ class HistoryLogsService:
     """Provides read access to cached history logs on disk."""
 
     def __init__(self, cache_dir: Optional[Path | str] = None) -> None:
-        base_dir = Path(cache_dir) if cache_dir is not None else self._default_cache_dir()
-        self._cache_dir = base_dir
-        self._project_root = base_dir.parent
+        self._settings = get_settings()
+        self._backend_root = Path(__file__).resolve().parents[2]
+        self._has_custom_cache_dir = cache_dir is not None
+        self._cache_root = (
+            resolve_backend_path(cache_dir, self._backend_root)
+            if cache_dir is not None
+            else get_cache_history_root(self._settings)
+        )
+        self._legacy_data1_dirs = [
+            resolve_backend_path(path, self._backend_root)
+            for path in get_legacy_data1_dirs(self._settings)
+        ]
 
-    def list_logs(self) -> List[HistoryLogPayload]:
+    def list_logs(self, dataset: str = "data1") -> List[HistoryLogPayload]:
         """Return all cached history logs with inline screenshot payloads."""
+        try:
+            dataset_key = normalize_cache_dataset(dataset)
+        except ValueError as exc:
+            raise HistoryLogsServiceError(str(exc)) from exc
 
-        if not self._cache_dir.exists() or not self._cache_dir.is_dir():
+        cache_dir = self._resolve_dataset_dir(dataset_key)
+
+        if not cache_dir.exists() or not cache_dir.is_dir():
             return []
 
         logs: List[HistoryLogPayload] = []
-        for json_path in sorted(self._cache_dir.glob("*.json")):
+        for json_path in sorted(cache_dir.glob("*.json")):
             try:
                 logs.append(self._load_single_log(json_path))
             except Exception as exc:
                 print(f"Warning: Skipping corrupted or invalid log file '{json_path.name}': {exc}")
                 continue
         return logs
+
+    def _resolve_dataset_dir(self, dataset_key: str) -> Path:
+        if self._has_custom_cache_dir:
+            return self._cache_root
+
+        dataset_dir = get_cache_dataset_dir(self._settings, dataset_key)
+        if dataset_key != "data1":
+            return dataset_dir
+
+        has_dataset_data = any(dataset_dir.glob("*.json"))
+        if has_dataset_data:
+            return dataset_dir
+
+        for legacy_dir in self._legacy_data1_dirs:
+            if legacy_dir.exists() and legacy_dir.is_dir() and any(legacy_dir.glob("*.json")):
+                return legacy_dir
+
+        return dataset_dir
 
     def _load_single_log(self, json_path: Path) -> HistoryLogPayload:
         raw_payload = self._read_json(json_path)
@@ -145,12 +186,8 @@ class HistoryLogsService:
             return candidate
 
         # Treat paths as relative to the project root to support stored relative references.
-        candidate = (self._project_root / candidate).resolve()
+        candidate = (self._backend_root / candidate).resolve()
         return candidate
-
-    @staticmethod
-    def _default_cache_dir() -> Path:
-        return Path(__file__).resolve().parents[2] / "history_logs"
 
 
 class HistoryLogsReader:
@@ -160,12 +197,12 @@ class HistoryLogsReader:
         """Initialize the HistoryLogsReader.
         
         Args:
-            history_dir: Directory containing history logs (defaults to history_logs/)
+            history_dir: Directory containing history logs (defaults to cache_history_logs/data1)
         """
         if history_dir is None:
-            self.history_dir = Path(__file__).resolve().parents[2] / "history_logs"
+            self.history_dir = get_cache_dataset_dir(get_settings(), "data1")
         else:
-            self.history_dir = Path(history_dir)
+            self.history_dir = resolve_backend_path(history_dir)
     
     def read_run(self, run_id: str) -> dict[str, Any]:
         """Read a run result by ID.

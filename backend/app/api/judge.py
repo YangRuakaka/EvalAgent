@@ -33,6 +33,7 @@ from ..schemas.browser_agent import BrowserAgentTask
 from ..api.deps import get_judge_services, JudgeServices
 from ..core.config import settings
 from ..core.normalizers import normalize_run_index, normalize_to_string
+from ..core.storage_paths import get_condition_lookup_dirs
 from ..services.llm_factory import get_chat_llm
 
 logger = logging.getLogger(__name__)
@@ -345,16 +346,27 @@ async def _process_single_criterion(
 
 async def _load_condition_run_data(
     condition: ConditionRequest,
-    history_logs_dir: Path
+    history_lookup_dirs: List[Path],
 ) -> Optional[Dict]:
     """Load run data for a condition from disk."""
     logger.info(f"Loading data for condition: {condition.conditionID}")
     
     # 1. Load run data using conditionID as filename
     try:
-        json_file = history_logs_dir / f"{condition.conditionID}.json"
-        if not json_file.exists():
-            logger.error(f"Condition file not found: {json_file}")
+        json_file = None
+        filename = f"{condition.conditionID}.json"
+        for lookup_dir in history_lookup_dirs:
+            candidate = lookup_dir / filename
+            if candidate.exists() and candidate.is_file():
+                json_file = candidate
+                break
+
+        if json_file is None:
+            logger.error(
+                "Condition file not found for %s (searched: %s)",
+                condition.conditionID,
+                [path.as_posix() for path in history_lookup_dirs],
+            )
             return None
         
         with open(json_file, 'r', encoding='utf-8') as f:
@@ -779,12 +791,12 @@ async def evaluate_experiment(
         task_timeout_seconds,
     )
     
-    history_logs_dir = Path(__file__).parent.parent.parent / "history_logs"
+    history_lookup_dirs = get_condition_lookup_dirs(settings)
     
     # 1. Load data for all conditions concurrently
     load_tasks = []
     for condition in request.conditions:
-        load_tasks.append(_load_condition_run_data(condition, history_logs_dir))
+        load_tasks.append(_load_condition_run_data(condition, history_lookup_dirs))
     
     loaded_contexts_raw = await _gather_with_limit(
         load_tasks,

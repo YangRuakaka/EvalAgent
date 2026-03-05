@@ -27,11 +27,6 @@ gcloud auth login
 
 # 2. 设置项目 ID (替换 <YOUR_PROJECT_ID>)
 gcloud config set project charged-sled-486613-b7
-
-# 3. 设置代理 (仅中国大陆用户需要，根据实际端口修改，例如 7890)
-gcloud config set proxy/type http
-gcloud config set proxy/address 127.0.0.1
-gcloud config set proxy/port 1080
 ```
 
 ### 2. 准备持久化存储 (重要)
@@ -109,11 +104,7 @@ gcloud beta run services logs tail eval-agent-backend --project <YOUR_PROJECT_ID
 
 ### 2. 网络错误 (SSL Error / Connection Reset)
 *   **现象**：`SSLError(SSLEOFError)` 或连接超时。
-*   **解决**：检查代理设置。确保终端的环境变量也配置了代理：
-    ```cmd
-    set HTTP_PROXY=http://127.0.0.1:1080
-    set HTTPS_PROXY=http://127.0.0.1:1080
-    ```
+*   **解决**：先确认本机网络可访问 Google Cloud 服务，并检查防火墙/企业网络策略后重试。
 
 ### 3. 计费问题
 *   **现象**：提示需要开启 Billing。

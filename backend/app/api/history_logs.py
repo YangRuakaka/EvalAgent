@@ -1,10 +1,10 @@
 """API routes exposing cached history logs."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from ..core.normalizers import to_bool, to_float, to_int, to_str, to_str_list
-from ..schemas.history_logs import HistoryLogPayload, HistoryLogsListResponse
+from ..schemas.history_logs import HistoryLogsListResponse
 from ..services.history_logs_reader import HistoryLogsService, HistoryLogsServiceError
 
 router = APIRouter(prefix="/history-logs", tags=["history-logs"])
@@ -16,10 +16,16 @@ _service = HistoryLogsService()
     response_model=HistoryLogsListResponse,
     summary="List cached history log payloads (custom format)",
 )
-async def list_history_logs() -> HistoryLogsListResponse:
+async def list_history_logs(
+    dataset: str = Query(
+        "data1",
+        description="Select cache dataset bucket: data1, data2, or data3.",
+        pattern=r"^(data[123]|[123])$",
+    ),
+) -> HistoryLogsListResponse:
     """Return all cached history logs in the new custom format for frontend consumption."""
     try:
-        logs = _service.list_logs()
+        logs = _service.list_logs(dataset=dataset)
         results = []
         for log in logs:
             raw_persona = log.metadata.get("persona", "")

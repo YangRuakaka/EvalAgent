@@ -39,9 +39,22 @@ export const generatePersonaVariation = (personaContent, values, model, client =
 	});
 };
 
-export const fetchHistoryLogs = (client = defaultClient) => {
-	console.log('[API] fetchHistoryLogs - Request');
-	return client.get(API_ENDPOINTS.historyLogs.root).then(response => {
+export const fetchHistoryLogs = (datasetOrClient = 'data1', maybeClient = defaultClient) => {
+	let dataset = 'data1';
+	let client = defaultClient;
+
+	if (datasetOrClient && typeof datasetOrClient.get === 'function') {
+		client = datasetOrClient;
+	} else {
+		dataset = String(datasetOrClient || 'data1');
+		if (maybeClient && typeof maybeClient.get === 'function') {
+			client = maybeClient;
+		}
+	}
+
+	const requestPath = `${API_ENDPOINTS.historyLogs.root}?dataset=${encodeURIComponent(dataset)}`;
+	console.log('[API] fetchHistoryLogs - Request:', { dataset, requestPath });
+	return client.get(requestPath).then(response => {
 		console.log('[API] fetchHistoryLogs - Response:', response);
 		return response;
 	});

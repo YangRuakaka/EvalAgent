@@ -41,11 +41,18 @@ const RIGHT_PANEL_TABS = [
 const createDefaultExperimentState = () => ({
 	selectedCriteriaIds: [],
 	selectedConditionIds: [],
-	trajectoryUseImageHash: true,
-	reasoningEvidenceHighlight: true,
 });
 
-const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun, onCloseRun }) => {
+const VisualizationView = ({
+	activeRun,
+	historyEntries,
+	activeRunId,
+	onSelectRun,
+	onCloseRun,
+	trajectoryUseImageHashEnabled,
+	reasoningEvidenceHighlightEnabled,
+	onDAGInteraction,
+}) => {
 	const { state: { mappings, criterias, evaluationResponses }, updateEvaluationResponse } = useData();
 	const [activeTab, setActiveTab] = useState('trajectory');
 	const [evaluateModel, setEvaluateModel] = useState('gpt-4o-mini');
@@ -62,9 +69,10 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 	const {
 		selectedCriteriaIds,
 		selectedConditionIds,
-		trajectoryUseImageHash,
-		reasoningEvidenceHighlight,
 	} = currentExperimentState;
+
+	const effectiveTrajectoryUseImageHash = trajectoryUseImageHashEnabled !== false;
+	const effectiveReasoningEvidenceHighlight = reasoningEvidenceHighlightEnabled !== false;
 
 	const isEvaluatingCurrentRun = useMemo(() => {
 		if (!activeRunId) {
@@ -100,14 +108,6 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 
 	const setSelectedConditionIds = useCallback((ids) => {
 		updateActiveExperimentState({ selectedConditionIds: ids });
-	}, [updateActiveExperimentState]);
-
-	const setTrajectoryUseImageHash = useCallback((enabled) => {
-		updateActiveExperimentState({ trajectoryUseImageHash: Boolean(enabled) });
-	}, [updateActiveExperimentState]);
-
-	const setReasoningEvidenceHighlight = useCallback((enabled) => {
-		updateActiveExperimentState({ reasoningEvidenceHighlight: Boolean(enabled) });
 	}, [updateActiveExperimentState]);
 
 	const handleTrajectoryNavigateToReasoning = useCallback((payload) => {
@@ -261,9 +261,9 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 							<TrajectoryVisualizer 
 								trajectory={trajectoryData}
 								conditions={experimentsData?.conditions || []}
-								useImageHashEnabled={trajectoryUseImageHash}
-								onUseImageHashChange={setTrajectoryUseImageHash}
+								useImageHashEnabled={effectiveTrajectoryUseImageHash}
 								onNavigateToReasoning={handleTrajectoryNavigateToReasoning}
+								onDAGInteraction={onDAGInteraction}
 							/>
 						) : (
 							<div style={{ padding: '20px', color: '#999' }}>
@@ -278,8 +278,7 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 								selectedExperimentId={activeRunId}
 								experimentsMap={experimentsMapByAgentId}
 								evaluationResponse={evaluationResponse}
-								evidenceHighlightEnabled={reasoningEvidenceHighlight}
-								onEvidenceHighlightChange={setReasoningEvidenceHighlight}
+								evidenceHighlightEnabled={effectiveReasoningEvidenceHighlight}
 								navigationRequest={reasoningNavigationRequest}
 							/>
 						) : (
@@ -352,11 +351,17 @@ VisualizationView.propTypes = {
 	activeRunId: PropTypes.string,
 	onSelectRun: PropTypes.func.isRequired,
 	onCloseRun: PropTypes.func.isRequired,
+	trajectoryUseImageHashEnabled: PropTypes.bool,
+	reasoningEvidenceHighlightEnabled: PropTypes.bool,
+	onDAGInteraction: PropTypes.func,
 };
 
 VisualizationView.defaultProps = {
 	activeRun: null,
 	activeRunId: null,
+	trajectoryUseImageHashEnabled: undefined,
+	reasoningEvidenceHighlightEnabled: undefined,
+	onDAGInteraction: undefined,
 };
 
 export default VisualizationView;

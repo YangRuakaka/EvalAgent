@@ -149,13 +149,12 @@ const TrajectoryVisualizer = ({
 	trajectory,
 	conditions,
 	useImageHashEnabled,
-	onUseImageHashChange,
 	onNavigateToReasoning,
+	onDAGInteraction,
 }) => {
 	const [graph, setGraph] = useState(EMPTY_GRAPH);
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [error, setError] = useState(null);
-	const [internalUseImageHash, setInternalUseImageHash] = useState(true);
 	const [filterType, setFilterType] = useState('all'); // 'all' | 'model' | 'persona' | 'task'
 	const [filterValue, setFilterValue] = useState(null);
 	const [activeLegendId, setActiveLegendId] = useState(null);
@@ -178,17 +177,7 @@ const TrajectoryVisualizer = ({
 	}, [shellWidth, shellHeight]);
 
 	const hasTrajectory = Boolean(trajectory?.details);
-	const useImageHash = typeof useImageHashEnabled === 'boolean' ? useImageHashEnabled : internalUseImageHash;
-
-	const handleUseImageHashChange = useCallback((nextValue) => {
-		const normalized = Boolean(nextValue);
-		if (typeof onUseImageHashChange === 'function') {
-			onUseImageHashChange(normalized);
-		}
-		if (typeof useImageHashEnabled !== 'boolean') {
-			setInternalUseImageHash(normalized);
-		}
-	}, [onUseImageHashChange, useImageHashEnabled]);
+	const useImageHash = useImageHashEnabled !== false;
 
 	useEffect(() => {
 		let isMounted = true;
@@ -466,12 +455,28 @@ const TrajectoryVisualizer = ({
 	};
 
 	const handleNodeClick = (node) => {
+		if (typeof onDAGInteraction === 'function') {
+			onDAGInteraction({
+				type: 'node_click',
+				nodeId: node?.id || null,
+				nodeLabel: node?.label || null,
+			});
+		}
+
 		if (node && node.src) {
 			setSelectedNode(node);
 		}
 	};
 
 	const handleLinkClick = (payload) => {
+		if (typeof onDAGInteraction === 'function') {
+			onDAGInteraction({
+				type: 'link_click',
+				linkId: payload?.link?.id || payload?.id || null,
+				actionType: payload?.actionType || null,
+			});
+		}
+
 		if (!payload) {
 			return;
 		}
@@ -546,16 +551,6 @@ const TrajectoryVisualizer = ({
 						))}
 					</select>
 				</div>
-
-				<label className="trajectory-toggle" htmlFor="trajectory-use-imagehash">
-					<input
-						type="checkbox"
-						id="trajectory-use-imagehash"
-						checked={useImageHash}
-						onChange={(e) => handleUseImageHashChange(e?.target?.checked)}
-					/>
-					<span>ImageHash</span>
-				</label>
 
 				<button
 					type="button"
@@ -646,6 +641,7 @@ const TrajectoryVisualizer = ({
 						highlightRequest={highlightRequest}
 						onNodeClick={handleNodeClick}
 						onLinkClick={handleLinkClick}
+						onInteraction={onDAGInteraction}
 					/>
 				</div>
 			</div>
@@ -695,16 +691,16 @@ TrajectoryVisualizer.propTypes = {
 		}),
 	),
 	useImageHashEnabled: PropTypes.bool,
-	onUseImageHashChange: PropTypes.func,
 	onNavigateToReasoning: PropTypes.func,
+	onDAGInteraction: PropTypes.func,
 };
 
 TrajectoryVisualizer.defaultProps = {
 	trajectory: undefined,
 	conditions: [],
 	useImageHashEnabled: undefined,
-	onUseImageHashChange: undefined,
 	onNavigateToReasoning: undefined,
+	onDAGInteraction: undefined,
 };
 
 export default TrajectoryVisualizer;

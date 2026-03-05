@@ -21,17 +21,14 @@ const NODE_BORDER_WIDTH = 5;
 const NODE_BORDER_GAP = 2;
 const LINK_BASE_DISTANCE = 350;
 const LINK_DISTANCE_SCALER = 32;
-const CLUSTER_BASE_PADDING = 68;
-const CLUSTER_SIZE_SCALE = 24;
-const CLUSTER_NODE_MARGIN = 36;
-const CLUSTER_SEPARATION_MARGIN = 100;
-const CLUSTER_EXTERNAL_GAP = 16;
-const INTER_CLUSTER_DISTANCE_BOOST = 10;
 const PARALLEL_LINK_SEPARATION = 128;
 const PARALLEL_LINK_OFFSET_MULTIPLIER = 0.6;
 const PARALLEL_LINK_CURVE_MULTIPLIER = 0.1;
 const PARALLEL_LINK_CONTROL_PULL = 0.4;
+const ACTION_CHIP_VERTICAL_NUDGE = 10;
 const RENDER_FRAME_SKIP = 2;
+const SIMULATION_ALPHA_MIN = 0.02;
+const SIMULATION_ALPHA_DECAY = 0.045;
 const ICON_PIN = 'M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z';
 const ICON_UNPIN = 'M2,5.27L3.28,4L20,20.72L18.73,22L12.8,16.07V22H11.2V16H6V14L8,12V11.27L2,5.27M16,12L18,14V16H17.82L8,6.18V4H7V2H17V4H16V12Z';
 const ACTION_ICON_MAP = {
@@ -249,19 +246,24 @@ const computeSelfLoopPath = (node, parallelOffsetIndex) => {
 	return `M ${startX} ${startY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${endX} ${endY}`;
 };
 
-const computeLinkPath = (link) => {
+const computeLinkGeometry = (link) => {
 	const source = link.source;
 	const target = link.target;
 
 	if (!source || !target) {
-		return '';
+		return null;
 	}
 
 	const parallelOffsetIndex =
 		link.__parallelCount > 1 ? link.__parallelIndex - (link.__parallelCount - 1) / 2 : 0;
 
 	if (source === target || source.id === target.id) {
-		return computeSelfLoopPath(source, parallelOffsetIndex);
+		return {
+			type: 'self-loop',
+			source,
+			target,
+			parallelOffsetIndex,
+		};
 	}
 
 	const sx = source.x || 0;
@@ -271,10 +273,10 @@ const computeLinkPath = (link) => {
 	const dx = tx - sx;
 	const dy = ty - sy;
 	const distance = Math.sqrt(dx * dx + dy * dy) || 1;
-	
+
 	const perpX = distance === 0 ? 0 : -dy / distance;
 	const perpY = distance === 0 ? 0 : dx / distance;
-	
+
 	const offsetMagnitude = Math.abs(parallelOffsetIndex);
 	const separationScale = offsetMagnitude
 		? PARALLEL_LINK_OFFSET_MULTIPLIER + Math.sqrt(offsetMagnitude) * PARALLEL_LINK_OFFSET_MULTIPLIER * 0.35
@@ -284,22 +286,33 @@ const computeLinkPath = (link) => {
 			? 0
 			: parallelOffsetIndex * PARALLEL_LINK_SEPARATION * separationScale;
 
-	// Virtual target for intersection calculation (shifted by parallel offset)
 	const virtualTarget = {
 		x: tx + perpX * perpendicularOffset,
-		y: ty + perpY * perpendicularOffset
+		y: ty + perpY * perpendicularOffset,
 	};
-	
+
 	const virtualSource = {
 		x: sx + perpX * perpendicularOffset,
-		y: sy + perpY * perpendicularOffset
+		y: sy + perpY * perpendicularOffset,
 	};
 
 	const sourcePadding = 4;
-	const targetPadding = 8; // More padding for arrow
+	const targetPadding = 8;
 
-	const start = computeRectIntersection(source, virtualTarget, source.width || 48, source.height || 32, sourcePadding);
-	const end = computeRectIntersection(target, virtualSource, target.width || 48, target.height || 32, targetPadding);
+	const start = computeRectIntersection(
+		source,
+		virtualTarget,
+		source.width || 48,
+		source.height || 32,
+		sourcePadding,
+	);
+	const end = computeRectIntersection(
+		target,
+		virtualSource,
+		target.width || 48,
+		target.height || 32,
+		targetPadding,
+	);
 
 	const startX = start.x;
 	const startY = start.y;
@@ -315,7 +328,65 @@ const computeLinkPath = (link) => {
 	const controlX = midX - perpX * (curveStrength + perpendicularContribution);
 	const controlY = midY - perpY * (curveStrength + perpendicularContribution);
 
-	return `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
+	return {
+		type: 'standard',
+		source,
+		target,
+		parallelOffsetIndex,
+		startX,
+		startY,
+		controlX,
+		controlY,
+		endX,
+		endY,
+	};
+};
+
+const computeLinkPath = (link) => {
+	const geometry = computeLinkGeometry(link);
+
+	if (!geometry) {
+		return '';
+	}
+
+	if (geometry.type === 'self-loop') {
+		return computeSelfLoopPath(geometry.source, geometry.parallelOffsetIndex);
+	}
+
+	return `M ${geometry.startX} ${geometry.startY} Q ${geometry.controlX} ${geometry.controlY} ${geometry.endX} ${geometry.endY}`;
+};
+
+const computeLinkActionAnchor = (link) => {
+	const geometry = computeLinkGeometry(link);
+
+	if (!geometry) {
+		return { x: 0, y: 0 };
+	}
+
+	if (geometry.type === 'self-loop') {
+		const source = geometry.source;
+		const loopOffset = Math.abs(geometry.parallelOffsetIndex || 0);
+		return {
+			x: (source.x || 0) + (source.width || 48) / 2 + 28 + loopOffset * 8,
+			y: (source.y || 0) - (source.height || 32) / 2 - 28 - loopOffset * 4 - ACTION_CHIP_VERTICAL_NUDGE,
+		};
+	}
+
+	const t = 0.5;
+	const oneMinusT = 1 - t;
+	const x =
+		oneMinusT * oneMinusT * geometry.startX
+		+ 2 * oneMinusT * t * geometry.controlX
+		+ t * t * geometry.endX;
+	const y =
+		oneMinusT * oneMinusT * geometry.startY
+		+ 2 * oneMinusT * t * geometry.controlY
+		+ t * t * geometry.endY;
+
+	return {
+		x,
+		y: y - ACTION_CHIP_VERTICAL_NUDGE,
+	};
 };
 
 const getActionIcon = (actionType) => {
@@ -327,7 +398,6 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 	const containerRef = useRef(null);
 	const svgRef = useRef(null);
 	const rootLayerRef = useRef(null);
-	const clustersLayerRef = useRef(null);
 	const linksLayerRef = useRef(null);
 	const linkActionsLayerRef = useRef(null);
 	const nodesLayerRef = useRef(null);
@@ -384,7 +454,6 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 	const data = useMemo(() => {
 		const nodes = graph?.nodes ? graph.nodes.map((node) => ({ ...node })) : [];
 		const links = graph?.links ? graph.links.map((link) => ({ ...link })) : [];
-		const clusters = graph?.clusters ? graph.clusters.map((cluster) => ({ ...cluster })) : [];
 		const meta = graph?.meta ? { ...graph.meta } : null;
 
 		if (persistentNodeStateRef.current) {
@@ -401,7 +470,7 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 			});
 		}
 
-		return { nodes, links, clusters, meta };
+		return { nodes, links, meta };
 	}, [graph]);
 
 	useEffect(() => {
@@ -500,12 +569,11 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 			return () => {};
 		}
 
-		const { nodes, links, clusters, meta } = data;
+		const { nodes, links, meta } = data;
 
 		if (!nodes.length) {
 			select(nodesLayerRef.current).selectAll('*').remove();
 			select(linksLayerRef.current).selectAll('*').remove();
-			select(clustersLayerRef.current).selectAll('*').remove();
 			simulationRef.current = null;
 			if (width > 0 && height > 0) {
 				containerSizeRef.current = { width, height };
@@ -764,22 +832,6 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 		if (validLinks.length) {
 		}
 
-		const clusterMembersMap = new Map();
-		const nodeClusterMap = new Map();
-
-		clusters.forEach((cluster) => {
-			const members = (cluster.nodeIds || [])
-				.map((id) => nodeLookup.get(id))
-				.filter(Boolean);
-
-			if (members.length > 1) {
-				clusterMembersMap.set(cluster.id, members);
-				members.forEach((member) => {
-					nodeClusterMap.set(member.id, { clusterId: cluster.id, members });
-				});
-			}
-		});
-
 		const defs = select(defsRef.current);
 		// Remove clip paths as we are using rectangular nodes now
 		defs.selectAll('clipPath.trajectory-node__clip').remove();
@@ -822,7 +874,6 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 		const linksLayer = select(linksLayerRef.current);
 		const linkActionsLayer = select(linkActionsLayerRef.current);
 		const nodesLayer = select(nodesLayerRef.current);
-		const clustersLayer = select(clustersLayerRef.current);
 
 		if (!rootLayer.empty()) {
 			rootLayer.attr('transform', zoomStateRef.current);
@@ -1081,48 +1132,6 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 			}
 		});
 
-		const computeClusterShapes = () =>
-			clusters
-				.map((cluster) => {
-					const members = clusterMembersMap.get(cluster.id) || [];
-
-					if (members.length < 2) {
-						return null;
-					}
-
-					const centroid = members.reduce(
-						(acc, member) => {
-							return {
-								x: acc.x + (member.x || 0),
-								y: acc.y + (member.y || 0),
-							};
-						},
-						{ x: 0, y: 0 },
-					);
-
-					centroid.x /= members.length;
-					centroid.y /= members.length;
-
-					const maxNodeRadius = members.reduce((max, member) => Math.max(max, member.radius || 0), 0);
-					const radius =
-						maxNodeRadius + CLUSTER_BASE_PADDING + Math.log2(members.length + 1) * CLUSTER_SIZE_SCALE;
-
-					return {
-						...cluster,
-						x: centroid.x,
-						y: centroid.y,
-						radius,
-						count: members.length,
-						members,
-					};
-				})
-				.filter(Boolean);
-
-		const getClusterId = (node) => {
-			const nodeId = typeof node === 'object' ? node?.id : node;
-			return nodeClusterMap.get(nodeId)?.clusterId || null;
-		};
-
 		const simulation = forceSimulation(nodes)
 			.force(
 				'link',
@@ -1131,22 +1140,20 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 					.distance((link) => {
 						const weight = Math.log2((link.count || 0) + 1);
 						const preferred = LINK_BASE_DISTANCE - Math.min(160, weight * LINK_DISTANCE_SCALER);
-						const baseDistance = Math.max(preferred, 120);
-						const sourceClusterId = getClusterId(link.source);
-						const targetClusterId = getClusterId(link.target);
-						const sameCluster = sourceClusterId && targetClusterId && sourceClusterId === targetClusterId;
-						return sameCluster ? baseDistance : baseDistance + INTER_CLUSTER_DISTANCE_BOOST;
+						return Math.max(preferred, 120);
 					})
 					.strength(0.55),
 			)
 			.force('charge', forceManyBody().strength(DEFAULT_FORCE_STRENGTH))
 			.force('collision', forceCollide().radius((node) => node.radius + NODE_COLLISION_BUFFER))
-		.force('center', forceCenter(width / 2, height / 2))
-		.force(
-			'horizontal',
-			forceX((node) => computeTargetX(node)).strength(0.08),
-		)
-		.force('vertical', forceY(height / 2).strength(0.18));
+			.force('center', forceCenter(width / 2, height / 2))
+			.force(
+				'horizontal',
+				forceX((node) => computeTargetX(node)).strength(0.08),
+			)
+			.force('vertical', forceY(height / 2).strength(0.18))
+			.alphaMin(SIMULATION_ALPHA_MIN)
+			.alphaDecay(SIMULATION_ALPHA_DECAY);
 
 		if (width > 0 && height > 0) {
 			containerSizeRef.current = { width, height };
@@ -1154,154 +1161,19 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 
 		simulationRef.current = simulation;
 		let tickCount = 0;
+		const renderFrameSkip =
+			nodes.length > 140 ? 4 : nodes.length > 70 ? 3 : RENDER_FRAME_SKIP;
 
 		const tick = () => {
 			tickCount += 1;
-			const shouldRenderThisTick = tickCount % RENDER_FRAME_SKIP === 0;
-			let clusterShapes = computeClusterShapes();
-
-			clusterShapes.forEach((clusterShape) => {
-				clusterShape.members.forEach((member) => {
-					const memberRadius = member.radius || 0;
-					const maxDistance = Math.max(clusterShape.radius - CLUSTER_NODE_MARGIN - memberRadius, 0);
-					const dx = (member.x || 0) - clusterShape.x;
-					const dy = (member.y || 0) - clusterShape.y;
-					const distance = Math.sqrt(dx * dx + dy * dy);
-
-					if (distance > maxDistance) {
-						if (maxDistance === 0) {
-							member.x = clusterShape.x;
-							member.y = clusterShape.y;
-						} else {
-							const scale = maxDistance / distance;
-							member.x = clusterShape.x + dx * scale;
-							member.y = clusterShape.y + dy * scale;
-						}
-
-						if (typeof member.fx === 'number') {
-							member.fx = member.x;
-						}
-
-						if (typeof member.fy === 'number') {
-							member.fy = member.y;
-						}
-					}
-				});
-			});
-
-			clusterShapes = computeClusterShapes();
-
-			if (clusterShapes.length > 1) {
-				for (let i = 0; i < clusterShapes.length; i += 1) {
-					for (let j = i + 1; j < clusterShapes.length; j += 1) {
-						const clusterA = clusterShapes[i];
-						const clusterB = clusterShapes[j];
-						let dx = (clusterB.x || 0) - (clusterA.x || 0);
-						let dy = (clusterB.y || 0) - (clusterA.y || 0);
-						let distance = Math.sqrt(dx * dx + dy * dy);
-						const minDistance = clusterA.radius + clusterB.radius + CLUSTER_SEPARATION_MARGIN;
-
-						if (distance < 1e-3) {
-							const angle = Math.random() * Math.PI * 2;
-							dx = Math.cos(angle);
-							dy = Math.sin(angle);
-							distance = 1;
-						}
-
-						if (distance < minDistance) {
-							const overlap = (minDistance - distance) / 2;
-							const nx = dx / distance;
-							const ny = dy / distance;
-							const shiftX = nx * overlap;
-							const shiftY = ny * overlap;
-
-							clusterA.members.forEach((member) => {
-								member.x -= shiftX;
-								member.y -= shiftY;
-								if (typeof member.fx === 'number') {
-									member.fx -= shiftX;
-								}
-								if (typeof member.fy === 'number') {
-									member.fy -= shiftY;
-								}
-							});
-
-							clusterB.members.forEach((member) => {
-								member.x += shiftX;
-								member.y += shiftY;
-								if (typeof member.fx === 'number') {
-									member.fx += shiftX;
-								}
-								if (typeof member.fy === 'number') {
-									member.fy += shiftY;
-								}
-							});
-						}
-					}
-				}
-
-				clusterShapes = computeClusterShapes();
-			}
-
-			if (clusterShapes.length) {
-				nodes.forEach((node) => {
-					const membership = nodeClusterMap.get(node.id);
-
-					clusterShapes.forEach((clusterShape) => {
-						if (membership && membership.clusterId === clusterShape.id) {
-							return;
-						}
-
-						let dx = (node.x || 0) - clusterShape.x;
-						let dy = (node.y || 0) - clusterShape.y;
-						let distance = Math.sqrt(dx * dx + dy * dy);
-						const minDistance =
-							(clusterShape.radius || 0) + (node.radius || 0) + CLUSTER_EXTERNAL_GAP;
-
-						if (distance < 1e-4) {
-							const angle = Math.random() * Math.PI * 2;
-							dx = Math.cos(angle);
-							dy = Math.sin(angle);
-							distance = 1;
-						}
-
-						if (distance < minDistance) {
-							const scale = minDistance / distance;
-							node.x = clusterShape.x + dx * scale;
-							node.y = clusterShape.y + dy * scale;
-
-							if (typeof node.fx === 'number') {
-								node.fx = node.x;
-							}
-
-							if (typeof node.fy === 'number') {
-								node.fy = node.y;
-							}
-						}
-					});
-				});
-			}
+			const shouldRenderThisTick = tickCount % renderFrameSkip === 0;
 
 			if (shouldRenderThisTick) {
 				linksMerged.attr('d', (link) => computeLinkPath(link));
 
 				linkActionMerged.attr('transform', (link) => {
-					const source = link?.source;
-					const target = link?.target;
-
-					if (!source || !target) {
-						return 'translate(0, 0)';
-					}
-
-					if (source === target || source.id === target.id) {
-						const x = (source.x || 0) + (source.width || 48) / 2 + 28;
-						const y = (source.y || 0) - (source.height || 32) / 2 - 28;
-						return `translate(${x}, ${y})`;
-					}
-
-					const x = ((source.x || 0) + (target.x || 0)) / 2;
-					const y = ((source.y || 0) + (target.y || 0)) / 2;
-					return `translate(${x}, ${y})`;
+					const anchor = computeLinkActionAnchor(link);
+					return `translate(${anchor.x}, ${anchor.y})`;
 				});
 
 				nodesMerged.attr('transform', (node) => `translate(${node.x || 0}, ${node.y || 0})`);
@@ -1310,43 +1182,6 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 			if (!shouldRenderThisTick) {
 				return;
 			}
-
-			const clusterSelection = clustersLayer
-				.selectAll('g.trajectory-cluster')
-				.data(clusterShapes, (cluster) => cluster.id);
-
-			clusterSelection.exit().remove();
-
-			const clusterEnter = clusterSelection
-				.enter()
-				.append('g')
-				.attr('class', 'trajectory-cluster');
-
-			clusterEnter
-				.append('circle')
-				.attr('class', 'trajectory-cluster__ring');
-
-			clusterEnter
-				.append('text')
-				.attr('class', 'trajectory-cluster__label')
-				.attr('text-anchor', 'middle');
-
-			const clustersMerged = clusterEnter.merge(clusterSelection);
-
-			clustersMerged.attr('transform', (cluster) => `translate(${cluster.x || 0}, ${cluster.y || 0})`);
-
-			clustersMerged
-				.select('.trajectory-cluster__ring')
-				.attr('r', (cluster) => cluster.radius)
-				.attr('stroke', (cluster) => cluster.color)
-				.attr('fill', (cluster) => cluster.color)
-				.attr('fill-opacity', 0.04);
-
-			clustersMerged
-				.select('.trajectory-cluster__label')
-				.text((cluster) => `${cluster.label} · ${cluster.count}`)
-				.attr('y', (cluster) => cluster.radius + 24)
-				.style('fill', (cluster) => cluster.color);
 		};
 
 		// Add tooltip hover handlers
@@ -1501,61 +1336,26 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 				if (!event.active && simulationRef.current) {
 					simulationRef.current.alphaTarget(0.2).restart();
 				}
-				const clusterInfo = nodeClusterMap.get(node.id);
-				if (clusterInfo && clusterInfo.members.length > 1) {
-					clusterInfo.members.forEach((member) => {
-						member.fx = member.x;
-						member.fy = member.y;
-					});
-				} else {
-					node.fx = node.x;
-					node.fy = node.y;
-				}
+				node.fx = node.x;
+				node.fy = node.y;
 			})
 			.on('drag', (event, node) => {
-				const clusterInfo = nodeClusterMap.get(node.id);
-				const dx = Number.isFinite(event.dx) ? event.dx : (event.x ?? 0) - (node.fx ?? node.x ?? 0);
-				const dy = Number.isFinite(event.dy) ? event.dy : (event.y ?? 0) - (node.fy ?? node.y ?? 0);
-
-				if (clusterInfo && clusterInfo.members.length > 1) {
-					clusterInfo.members.forEach((member) => {
-						member.fx = (member.fx ?? member.x ?? 0) + dx;
-						member.fy = (member.fy ?? member.y ?? 0) + dy;
-					});
-				} else {
-					node.fx = event.x;
-					node.fy = event.y;
-				}
+				node.fx = event.x;
+				node.fy = event.y;
 			})
 			.on('end', (event, node) => {
 				if (!event.active && simulationRef.current) {
 					simulationRef.current.alphaTarget(0);
 				}
-				const clusterInfo = nodeClusterMap.get(node.id);
-				if (clusterInfo && clusterInfo.members.length > 1) {
-					clusterInfo.members.forEach((member) => {
-						if (!member._pinned) {
-							member.fx = null;
-							member.fy = null;
-						} else {
-							persistentNodeStateRef.current.set(member.id, {
-								pinned: true,
-								x: member.x,
-								y: member.y,
-							});
-						}
-					});
+				if (!node._pinned) {
+					node.fx = null;
+					node.fy = null;
 				} else {
-					if (!node._pinned) {
-						node.fx = null;
-						node.fy = null;
-					} else {
-						persistentNodeStateRef.current.set(node.id, {
-							pinned: true,
-							x: node.x,
-							y: node.y,
-						});
-					}
+					persistentNodeStateRef.current.set(node.id, {
+						pinned: true,
+						x: node.x,
+						y: node.y,
+					});
 				}
 			});
 
@@ -1762,7 +1562,6 @@ const TrajectoryGraph = ({ graph, isLoading, emptyMessage, containerSize, highli
 			<svg ref={svgRef} className="trajectory-graph__svg" role="presentation">
 				<defs ref={defsRef} />
 				<g ref={rootLayerRef} className="trajectory-graph__root">
-					<g ref={clustersLayerRef} className="trajectory-graph__clusters" />
 					<g ref={linksLayerRef} className="trajectory-graph__links" />
 					<g ref={linkActionsLayerRef} className="trajectory-graph__link-actions" />
 					<g ref={nodesLayerRef} className="trajectory-graph__nodes" />

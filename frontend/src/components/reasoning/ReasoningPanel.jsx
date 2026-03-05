@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import PropTypes from 'prop-types';
 import PanelHeader from '../common/PanelHeader';
@@ -178,6 +178,8 @@ const ReasoningPanel = ({
 	const [selectedCriterion, setSelectedCriterion] = useState(null);
 	const [hoveredHighlight, setHoveredHighlight] = useState(null);
 	const [internalEvidenceHighlightEnabled, setInternalEvidenceHighlightEnabled] = useState(true);
+	const skipNextAgentStepResetRef = useRef(false);
+	const lastHandledNavigationNonceRef = useRef(null);
 
 	// Get runId from reasoningDetails (will be computed in memoized value)
 	const [runId, setRunId] = useState(null);
@@ -243,6 +245,13 @@ const ReasoningPanel = ({
 			return;
 		}
 
+		if (
+			Number.isFinite(navigationRequest.nonce)
+			&& lastHandledNavigationNonceRef.current === navigationRequest.nonce
+		) {
+			return;
+		}
+
 		const nextAgentIndex = Number.isFinite(navigationRequest.agentIndex)
 			? navigationRequest.agentIndex
 			: null;
@@ -254,8 +263,15 @@ const ReasoningPanel = ({
 			return;
 		}
 
+		if (Number.isFinite(navigationRequest.nonce)) {
+			lastHandledNavigationNonceRef.current = navigationRequest.nonce;
+		}
+
 		if (Array.isArray(data?.details) && data.details[nextAgentIndex]) {
-			setSelectedAgentIndex(nextAgentIndex);
+			if (nextAgentIndex !== selectedAgentIndex) {
+				skipNextAgentStepResetRef.current = true;
+				setSelectedAgentIndex(nextAgentIndex);
+			}
 		}
 
 		const maxStep = Array.isArray(data?.details?.[nextAgentIndex]?.model_outputs)
@@ -265,11 +281,9 @@ const ReasoningPanel = ({
 			? Math.max(0, Math.min(nextStepIndex, Math.max(maxStep, 0)))
 			: Math.max(0, nextStepIndex);
 
-		window.setTimeout(() => {
-			setSelectedStepIndex(clampedStepIndex);
-		}, 0);
+		setSelectedStepIndex(clampedStepIndex);
 		setShowEvaluationPanel(false);
-	}, [navigationRequest, data]);
+	}, [navigationRequest, data, selectedAgentIndex]);
 
 	// Extract reasoning details based on selected agent
 	const reasoningDetails = useMemo(() => {
@@ -466,6 +480,13 @@ const ReasoningPanel = ({
 
 	// Reset step index when agent changes
 	useEffect(() => {
+		if (skipNextAgentStepResetRef.current) {
+			skipNextAgentStepResetRef.current = false;
+			setShowEvaluationPanel(false);
+			setEvaluatingCriteria([]);
+			return;
+		}
+
 		setSelectedStepIndex(0);
 		setShowEvaluationPanel(false);
 		setEvaluatingCriteria([]);
@@ -670,72 +691,146 @@ const HighlightText = ({ text, highlights, tagName = 'div', className = '', sour
 		return <Tag className={className}>{renderContent(cleanText)}</Tag>;
 	}
 
-	let parts = [{ text: cleanText, highlight: false }];
-
-	relevantHighlights.forEach(h => {
-		const phrase = h.text;
-		const color = h.color;
-		const criteriaColor = h.criteriaColor;
-		const reasoning = h.reasoning;
-		const verdict = h.verdict;
-
+	const highlightRanges = [];
+	relevantHighlights.forEach((highlight, order) => {
+		const phrase = typeof highlight?.text === 'string' ? highlight.text : '';
 		if (!phrase) return;
 
-		const newParts = [];
-		parts.forEach(part => {
-			if (part.highlight) {
-				newParts.push(part);
-			} else {
-				// Escape special regex characters in phrase
-				const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-				const regex = new RegExp(`(${escapedPhrase})`, 'gi');
-				const split = part.text.split(regex);
-				
-				split.forEach(segment => {
-				if (segment.toLowerCase() === phrase.toLowerCase()) {
-					newParts.push({ text: segment, highlight: true, color: color, criteriaColor: criteriaColor, reasoning: reasoning, verdict: verdict });
-				} else if (segment) {
-					newParts.push({ text: segment, highlight: false });
-				}
+		const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const regex = new RegExp(escapedPhrase, 'gi');
+		let match = regex.exec(cleanText);
+
+		while (match) {
+			const matchedText = match[0];
+			if (matchedText) {
+				highlightRanges.push({
+					start: match.index,
+					end: match.index + matchedText.length,
+					color: highlight.color,
+					criteriaColor: highlight.criteriaColor,
+					reasoning: highlight.reasoning,
+					verdict: highlight.verdict,
+					order,
 				});
 			}
-		});
-		parts = newParts;
+
+			if (regex.lastIndex === match.index) {
+				regex.lastIndex += 1;
+			}
+			match = regex.exec(cleanText);
+		}
 	});
+
+	if (highlightRanges.length === 0) {
+		return <Tag className={className}>{renderContent(cleanText)}</Tag>;
+	}
+
+	const uniqueRanges = [];
+	const rangeKeys = new Set();
+	highlightRanges.forEach((range) => {
+		const key = [
+			range.start,
+			range.end,
+			range.criteriaColor || '',
+			range.color || '',
+			range.verdict || '',
+			range.reasoning || '',
+		].join('|');
+		if (!rangeKeys.has(key)) {
+			rangeKeys.add(key);
+			uniqueRanges.push(range);
+		}
+	});
+
+	const boundaries = new Set([0, cleanText.length]);
+	uniqueRanges.forEach((range) => {
+		boundaries.add(range.start);
+		boundaries.add(range.end);
+	});
+
+	const sortedBoundaries = Array.from(boundaries).sort((a, b) => a - b);
+	const parts = [];
+
+	for (let i = 0; i < sortedBoundaries.length - 1; i += 1) {
+		const start = sortedBoundaries[i];
+		const end = sortedBoundaries[i + 1];
+
+		if (start >= end) continue;
+
+		const segmentText = cleanText.slice(start, end);
+		const segmentHighlights = uniqueRanges
+			.filter((range) => range.start <= start && range.end >= end)
+			.sort((a, b) => a.order - b.order);
+
+		if (segmentHighlights.length === 0) {
+			parts.push({ text: segmentText, highlight: false });
+			continue;
+		}
+
+		const seenLayerKeys = new Set();
+		const dedupedSegmentHighlights = [];
+		segmentHighlights.forEach((segmentHighlight) => {
+			const layerKey = [
+				segmentHighlight.criteriaColor || segmentHighlight.color || '',
+				segmentHighlight.verdict || '',
+				segmentHighlight.reasoning || '',
+			].join('|');
+
+			if (!seenLayerKeys.has(layerKey)) {
+				seenLayerKeys.add(layerKey);
+				dedupedSegmentHighlights.push(segmentHighlight);
+			}
+		});
+
+		parts.push({
+			text: segmentText,
+			highlight: true,
+			highlights: dedupedSegmentHighlights,
+		});
+	}
 
 	return (
 		<Tag className={className}>
 			{parts.map((part, i) => (
 				part.highlight ? (
-					<span 
-						key={i} 
-						style={{ 
-							backgroundColor: part.verdict && evaluateStatusMap[part.verdict.toLowerCase()] 
-								? evaluateStatusMap[part.verdict.toLowerCase()].bg 
-								: part.color,
-							border: `1px solid ${part.criteriaColor || part.color}`,
-							padding: '0 2px', 
-							borderRadius: '2px', 
-							cursor: part.reasoning ? 'help' : 'inherit',
-							display: 'inline-block' // Ensure transforms/box-model work well
-						}}
-						className={part.reasoning ? "highlight-interactive" : ""}
-						onMouseEnter={(e) => {
-							if (part.reasoning) {
-								handleHighlightHover({
-									reasoning: part.reasoning,
-									verdict: part.verdict,
-									event: e
-								});
-							}
-						}}
-						onMouseLeave={() => {
-							if (part.reasoning) {
-								handleHighlightHover(null);
-							}
-						}}
-					>
-						{renderContent(part.text)}
+					<span key={i} style={{ display: tagName === 'span' ? 'inline' : 'inline-block' }}>
+						{part.highlights.reduceRight((child, layer, layerIndex) => {
+							const normalizedVerdict = typeof layer.verdict === 'string' ? layer.verdict.toLowerCase() : null;
+							const verdictStyle = normalizedVerdict ? evaluateStatusMap[normalizedVerdict] : null;
+							const borderColor = layer.criteriaColor || layer.color;
+							const isInteractive = Boolean(layer.reasoning);
+
+							return (
+								<span
+									key={`${i}-${layerIndex}`}
+									style={{
+										backgroundColor: verdictStyle ? verdictStyle.bg : layer.color,
+										border: `1px solid ${borderColor}`,
+										padding: '0 2px',
+										borderRadius: '2px',
+										cursor: isInteractive ? 'help' : 'inherit',
+										display: 'inline-block'
+									}}
+									className={isInteractive ? 'highlight-interactive' : ''}
+									onMouseEnter={(e) => {
+										if (isInteractive) {
+											handleHighlightHover({
+												reasoning: layer.reasoning,
+												verdict: layer.verdict,
+												event: e
+											});
+										}
+									}}
+									onMouseLeave={() => {
+										if (isInteractive) {
+											handleHighlightHover(null);
+										}
+									}}
+								>
+									{child}
+								</span>
+							);
+						}, renderContent(part.text))}
 					</span>
 				) : (
 					<span key={i} style={{ display: tagName === 'span' ? 'inline' : undefined }}>
@@ -763,35 +858,44 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
                 // Check for card-level highlight
                 // We compare the formatted JSON of the action item with highlight text
                 const actJson = JSON.stringify(act, null, 2);
-                const cardHighlight = highlights?.find(h => 
+				const cardHighlights = (highlights || []).filter(h => 
                     h.sourceField && 
                     h.sourceField.toLowerCase() === 'action' && 
                     h.text === actJson
                 );
+				const cardHighlight = cardHighlights[0] || null;
+				const hoverHighlight = cardHighlights.find(h => h.reasoning) || cardHighlight;
+
+				const extraCardRings = cardHighlights.slice(1).map((highlight, index) => {
+					const ringColor = highlight.criteriaColor || highlight.color;
+					const ringWidth = (index + 2) * 2;
+					return `inset 0 0 0 ${ringWidth}px ${ringColor}`;
+				});
 
                 const cardStyle = cardHighlight ? {
 					backgroundColor: cardHighlight.verdict && evaluateStatusMap[cardHighlight.verdict.toLowerCase()]
 						? evaluateStatusMap[cardHighlight.verdict.toLowerCase()].bg
 						: cardHighlight.color,
 					border: `1px solid ${cardHighlight.criteriaColor || cardHighlight.color}`,
+					...(extraCardRings.length > 0 ? { boxShadow: extraCardRings.join(', ') } : {}),
                 } : {};
 
                 return (
                     <div 
                         key={idx} 
-                        className={`action-card ${isDone ? 'action-card--done' : ''} ${cardHighlight ? 'highlight-interactive' : ''}`}
+						className={`action-card ${isDone ? 'action-card--done' : ''} ${hoverHighlight ? 'highlight-interactive' : ''}`}
                         style={cardStyle}
                         onMouseEnter={(e) => {
-                            if (cardHighlight && onHover) {
+							if (hoverHighlight && onHover) {
                                 onHover({
                                     event: e,
-                                    reasoning: cardHighlight.reasoning,
-                                    verdict: cardHighlight.verdict
+									reasoning: hoverHighlight.reasoning,
+									verdict: hoverHighlight.verdict
                                 });
                             }
                         }}
                         onMouseLeave={() => {
-                            if (cardHighlight && onHover) {
+							if (hoverHighlight && onHover) {
                                 onHover(null);
                             }
                         }}

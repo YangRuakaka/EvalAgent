@@ -1,240 +1,423 @@
 """
-Prompt templates for judge evaluation service.
-
-This module contains all LLM prompt templates used by the JudgeEvaluatorService
-for evaluating agent behavior against criteria at different granularity levels.
+Prompt templates for unified judge evaluation service.
 """
 
 from langchain_core.prompts import PromptTemplate
 
 
 class EvaluationPrompts:
-    """Container for all evaluation prompt templates."""
-    
+    """Container for unified-evaluation prompt templates."""
+
     @staticmethod
-    def get_step_level_prompt() -> PromptTemplate:
-        """Get prompt template for step-level evaluation.
-        
-        Evaluates a single step in isolation without access to other steps.
-        
-        Returns:
-            PromptTemplate for step-level evaluation
-        """
+    def get_global_behavior_overview_prompt() -> PromptTemplate:
         return PromptTemplate(
             input_variables=[
-                "criterion_name",
-                "criterion_assertion",
                 "task_name",
-                "step_index",
-                "thinking",
-                "memory",
-                "evaluation_previous_goal",
-                "action",
-                "next_goal",
                 "personas",
-                "models"
+                "models",
+                "steps_text",
             ],
-            template="""You are an impartial and expert evaluator of AI agent behavior. Your task is to evaluate whether a specific step in an agent's execution satisfies a specific evaluation criterion.
+            template="""You are an expert in AI agent behavior analysis.
 
-EVALUATION GRANULARITY: STEP_LEVEL
-Note: You are provided with the details of a SINGLE execution step. Do NOT assume information from previous or subsequent steps.
-
-CRITERION TO EVALUATE:
-Name: {criterion_name}
-Assertion/How to verify: {criterion_assertion}
-
-TASK CONTEXT:
-Task Name: {task_name}
-Agent Personas/Values: {personas}
+Task: {task_name}
+Personas/Values: {personas}
 Models Used: {models}
 
-STEP DATA (The specific step to evaluate):
-Step Index: {step_index}
-Thinking Process: {thinking}
-Memory: {memory}
-Evaluation of Previous Goal: {evaluation_previous_goal}
-Action: {action}
-Next Goal: {next_goal}
+All Agent Steps:
+{steps_text}
 
----
+Your job:
+1) Read the WHOLE behavior first and summarize execution strategy.
+2) Segment all steps into non-overlapping semantic phases that cover the full execution.
+3) Identify key/critical phases likely to drive evaluation outcomes.
 
-Based on the criterion description and assertion, evaluate the agent's execution in this specific step.
-Examine the following fields in the step data carefully:
-- thinking/thinking_process: The agent's internal reasoning and decision making.
-- evaluation_previous_goal: The agent's assessment of its previous actions.
-- memory: The agent's current memory or context state.
-- next_goal: The agent's planned goal or action for the next step.
-- action: The actual action executed by the agent (e.g., navigate, click, type).
+Output ONLY one JSON object in this exact schema:
+{{
+  "overall_behavior_summary": "...",
+  "phases": [
+    {{
+      "phase_id": "phase_0",
+      "semantic_label": "...",
+      "step_indices": [0, 1, 2],
+      "phase_summary": "...",
+      "criticality": "high|medium|low",
+      "why_key": "..."
+    }}
+  ],
+  "key_phase_ids": ["phase_0"],
+  "global_reasoning": "..."
+}}
+""",
+        )
 
-Provide your evaluation in JSON format:
+    @staticmethod
+    def get_criterion_interpretation_prompt() -> PromptTemplate:
+        return PromptTemplate(
+            input_variables=[
+                "task_name",
+                "criterion_name",
+                "criterion_assertion",
+                "criterion_description",
+                "personas",
+                "models",
+                "global_behavior_summary",
+                "global_key_phases",
+            ],
+            template="""You are an expert evaluator designing a rubric for agent behavior analysis.
+
+Task: {task_name}
+Criterion Name: {criterion_name}
+Criterion Assertion: {criterion_assertion}
+Criterion Description: {criterion_description}
+Personas/Values: {personas}
+Models Used: {models}
+
+Global Behavior Summary:
+{global_behavior_summary}
+
+Key Phases from Global Behavior:
+{global_key_phases}
+
+Your job:
+1) Strengthen criterion interpretation using task + persona context.
+2) Produce concrete, directly observable dimensions for step-level and cross-step behavioral evidence.
+3) Define phase-selection heuristics so evaluator can focus on key sub-behaviors.
+4) Keep dimensions concise and non-overlapping.
+5) Prefer dimensions that can judge behavior chains (intent -> action -> outcome), not isolated snippets.
+
+Output ONLY one JSON object in this exact schema:
+{{
+  "criterion_intent": "...",
+  "persona_task_alignment": "...",
+  "evaluation_dimensions": [
+    {{
+      "dimension_name": "...",
+      "description": "...",
+      "why_relevant": "..."
+    }}
+  ],
+  "focus_points": ["..."],
+  "phase_selection_heuristics": ["..."],
+  "pass_signals": ["..."],
+  "fail_signals": ["..."]
+}}
+""",
+        )
+
+    @staticmethod
+    def get_phase_segmentation_prompt() -> PromptTemplate:
+        return PromptTemplate(
+            input_variables=[
+                "task_name",
+                "criterion_name",
+                "criterion_assertion",
+                "criterion_intent",
+                "phase_selection_heuristics",
+                "global_phases_overview",
+                "evaluation_dimensions",
+                "steps_text",
+            ],
+            template="""You are an expert in execution-trace analysis.
+
+Task: {task_name}
+Criterion Name: {criterion_name}
+Criterion Assertion: {criterion_assertion}
+Criterion Intent: {criterion_intent}
+
+Phase Selection Heuristics:
+{phase_selection_heuristics}
+
+Global Phase Overview:
+{global_phases_overview}
+
+Evaluation Dimensions:
+{evaluation_dimensions}
+
+All Agent Steps:
+{steps_text}
+
+Your job:
+1) Use global phases as default structure when possible.
+2) If needed, refine/split/merge to fit this criterion.
+3) Ensure step indices are accurate and non-overlapping across phases.
+4) Mark which phases are evaluation-relevant under this criterion.
+5) Keep steps that form one coherent behavior chain in the same phase when possible.
+
+Output ONLY one JSON object in this exact schema:
+{{
+  "phases": [
+    {{
+      "phase_id": "phase_0",
+      "semantic_label": "...",
+      "step_indices": [0, 1, 2],
+      "phase_summary": "...",
+      "relevant_to_evaluation": true
+    }}
+  ],
+  "relevant_phase_ids": ["phase_0"],
+  "segmentation_reasoning": "..."
+}}
+""",
+        )
+
+    @staticmethod
+    def get_unified_phase_evaluation_prompt() -> PromptTemplate:
+        return PromptTemplate(
+            input_variables=[
+                "task_name",
+                "criterion_name",
+                "criterion_assertion",
+                "criterion_intent",
+                "persona_task_alignment",
+                "pass_signals",
+                "fail_signals",
+                "global_behavior_summary",
+                "evaluation_dimensions",
+                "phase_id",
+                "phase_summary",
+                "phase_steps_context",
+                "personas",
+                "models",
+            ],
+            template="""You are an impartial expert judge for AI agent behavior.
+
+Task: {task_name}
+Criterion Name: {criterion_name}
+Criterion Assertion: {criterion_assertion}
+Criterion Intent: {criterion_intent}
+Persona-Task Alignment Notes: {persona_task_alignment}
+Expected Pass Signals: {pass_signals}
+Expected Fail Signals: {fail_signals}
+
+Global Behavior Summary:
+{global_behavior_summary}
+
+Personas/Values: {personas}
+Models Used: {models}
+
+Evaluation Dimensions:
+{evaluation_dimensions}
+
+Current Phase: {phase_id}
+Phase Summary: {phase_summary}
+Phase Steps (raw context):
+{phase_steps_context}
+
+Evaluate this phase against the criterion and dimensions.
+
+Critical judging policy:
+- Judge the phase as a behavior chain across multiple steps, not as isolated quotes.
+- For each dimension, synthesize intent, action, and outcome signals across the phase before deciding status.
+- Do NOT give PASS from a single positive snippet if surrounding steps weaken, contradict, or fail to realize it.
+- If evidence is incomplete/ambiguous for a dimension, prefer PARTIAL or UNABLE_TO_EVALUATE over optimistic PASS.
+- When pass and fail signals coexist, weigh explicit failures, ignored constraints, and harmful tradeoffs heavily.
+- Reserve PASS for cases with coherent, sustained support across key steps.
+
+Rules for evidence:
+- highlighted_text MUST be exact substring from raw step field text
+- Do not use ellipses
+- source_field must be one of: evaluation|memory|thinking_process|next_goal|action
+- Only include high-signal evidence that is materially relevant to this criterion.
+- Prefer evidence that changes or strongly supports the verdict (decisive actions, key tradeoffs, explicit constraints, failures).
+- Avoid generic or procedural lines that do not help judge this specific criterion.
+- Evidence may come from one or multiple steps; prioritize quality over quantity.
+- When criterion signal is distributed, combine snippets across related steps to support one integrated judgment.
+- Avoid overly long quotes: prefer short, atomic snippets (roughly 8-220 chars each).
+- Include both positive and negative/uncertain evidence when relevant to final verdict.
+- If the phase has limited criterion-relevant material, return a small concise set and explain why.
+- relevant_steps should include all key step indices needed to understand the behavior chain for your verdict.
+- In reasoning and dimension_assessments, explicitly explain cross-step synthesis and any contradictions.
+
+Output ONLY one JSON object:
 {{
   "verdict": "PASS|FAIL|PARTIAL|UNABLE_TO_EVALUATE",
-  "reasoning": "Detailed explanation (2-4 sentences) of your evaluation decision based ONLY on this step.",
-  "confidence_score": 0.0-1.0,
-  "supporting_evidence": "Specific quotes or observations from the step data",
+  "reasoning": "...",
+  "confidence_score": 0.0,
+  "supporting_evidence": "...",
+  "relevant_steps": [0, 1],
+  "dimension_assessments": [
+    {{
+      "dimension_name": "...",
+      "status": "PASS|FAIL|PARTIAL",
+      "reasoning": "..."
+    }}
+  ],
   "highlighted_evidence": [
     {{
-      "step_index": {step_index},
-      "source_field": "evaluation|memory|thinking_process|next_goal|action",
-      "highlighted_text": "Exact text from the step, do not use ellipses",
-      "reasoning": "Relevance to criterion",
-      "verdict": "pass|fail|partial"
+      "step_index": 0,
+      "source_field": "thinking_process",
+      "highlighted_text": "exact text",
+      "reasoning": "...",
+      "verdict": "pass"
+    }},
+    {{
+      "step_index": 1,
+      "source_field": "evaluation",
+      "highlighted_text": "exact text",
+      "reasoning": "...",
+      "verdict": "partial"
     }}
   ]
 }}
-"""
+""",
         )
-    
+
     @staticmethod
-    def get_phase_level_prompt() -> PromptTemplate:
-        """Get prompt template for phase-level evaluation.
-        
-        Evaluates a sequence of steps representing a distinct phase.
-        Only sees steps within the current phase, not other phases.
-        
-        Returns:
-            PromptTemplate for phase-level evaluation
-        """
+    def get_phase_evidence_expansion_prompt() -> PromptTemplate:
+        return PromptTemplate(
+            input_variables=[
+                "task_name",
+                "criterion_name",
+                "criterion_assertion",
+                "phase_id",
+                "phase_summary",
+                "phase_steps_context",
+                "existing_evidence_json",
+            ],
+            template="""You are an expert evidence miner for AI-agent execution traces.
+
+Task: {task_name}
+Criterion Name: {criterion_name}
+Criterion Assertion: {criterion_assertion}
+Phase: {phase_id}
+Phase Summary: {phase_summary}
+
+Current extracted evidence (may be insufficient):
+{existing_evidence_json}
+
+Phase Steps (raw context):
+{phase_steps_context}
+
+Your job:
+1) Find ADDITIONAL evidence not already covered by existing evidence.
+2) Only return evidence that is decisive/interesting for this criterion.
+3) Skip weak, generic, repetitive, or low-information snippets.
+4) Keep quotes short and atomic; each quote must be exact substring from raw text.
+5) If no meaningful additional evidence exists, return an empty list.
+6) Prioritize complementary snippets that together complete a cross-step behavior chain.
+7) If criterion signal remains fragmented, state that clearly in coverage_note.
+
+Hard constraints:
+- highlighted_text MUST be exact substring from raw step field text
+- Do not use ellipses
+- source_field must be one of: evaluation|memory|thinking_process|next_goal|action
+
+Output ONLY one JSON object:
+{{
+  "additional_highlighted_evidence": [
+    {{
+      "step_index": 0,
+      "source_field": "thinking_process",
+      "highlighted_text": "exact text",
+      "reasoning": "...",
+      "verdict": "pass"
+    }}
+  ],
+  "coverage_note": "..."
+}}
+""",
+        )
+
+    @staticmethod
+    def get_phase_overall_synthesis_prompt() -> PromptTemplate:
+        return PromptTemplate(
+            input_variables=[
+                "task_name",
+                "criterion_name",
+                "criterion_assertion",
+                "criterion_description",
+                "personas",
+                "models",
+                "criterion_intent",
+                "persona_task_alignment",
+                "evaluation_dimensions",
+                "global_behavior_summary",
+                "phase_evaluations_summary",
+            ],
+            template="""You are an expert evaluator producing a final criterion-level judgment.
+
+Task: {task_name}
+Criterion Name: {criterion_name}
+Criterion Assertion: {criterion_assertion}
+Criterion Description: {criterion_description}
+Personas/Values: {personas}
+Models Used: {models}
+
+Criterion Intent: {criterion_intent}
+Persona-Task Alignment Notes: {persona_task_alignment}
+
+Evaluation Dimensions:
+{evaluation_dimensions}
+
+Global Behavior Summary:
+{global_behavior_summary}
+
+Phase-by-phase Evaluation Results:
+{phase_evaluations_summary}
+
+Your job:
+1) Integrate all phase-level findings into one criterion-level verdict.
+2) Preserve nuance across phases (e.g., strong positives with critical failures).
+3) Output final confidence and concise aggregation summary.
+4) Prefer strict evidence-weighted synthesis over averaging by count.
+5) Decide based on the criteria rather than overall behavior quality.
+
+Output ONLY one JSON object:
+{{
+  "verdict": "PASS|FAIL|PARTIAL|UNABLE_TO_EVALUATE",
+  "reasoning": "...",
+  "confidence_score": 0.0,
+  "supporting_evidence": "...",
+  "aggregation_summary": "..."
+}}
+""",
+        )
+
+    @staticmethod
+    def get_evidence_reextract_prompt() -> PromptTemplate:
         return PromptTemplate(
             input_variables=[
                 "criterion_name",
-                "criterion_assertion",
-                "task_name",
-                "aggregated_steps",
-                "raw_context",
-                "personas",
-                "models"
+                "source_field",
+                "requested_text",
+                "step_index",
+                "step_json",
             ],
-            template="""You are an impartial and expert evaluator of AI agent behavior. Your task is to evaluate whether a specific phase (sequence of steps) of an agent's execution satisfies a specific evaluation criterion.
+            template="""You are an evidence extraction assistant.
 
-EVALUATION GRANULARITY: PHASE_LEVEL
-Note: You are provided with a sequence of steps representing a distinct phase of the task. Evaluate based on this sequence.
+Criterion: {criterion_name}
+Requested source field: {source_field}
+Previously extracted text (may be wrong): {requested_text}
+Step index: {step_index}
+Raw step JSON:
+{step_json}
 
-CRITERION TO EVALUATE:
-Name: {criterion_name}
-Assertion/How to verify: {criterion_assertion}
+Task:
+Extract ONE best evidence snippet from this step.
+Requirements:
+- highlighted_text must be an EXACT substring from this step's raw field text
+- If no valid evidence exists, return empty highlighted_text
+- source_field must be one of: evaluation|memory|thinking_process|next_goal|action
 
-TASK CONTEXT:
-Task Name: {task_name}
-Agent Personas/Values: {personas}
-Models Used: {models}
-
-PHASE SUMMARY:
-{aggregated_steps}
-
-PHASE STEPS (Detailed execution trace for this phase):
-{raw_context}
-
----
-
-Based on the criterion, evaluate the agent's behavior during this phase.
-Analyze the progression and consistency of the following fields across the steps:
-- thinking/thinking_process
-- evaluation_previous_goal
-- memory
-- next_goal
-- action
-
-Provide your evaluation in JSON format:
+Output ONLY one JSON object:
 {{
-  "verdict": "PASS|FAIL|PARTIAL|UNABLE_TO_EVALUATE",
-  "reasoning": "Detailed explanation of your evaluation decision for this phase.",
-  "confidence_score": 0.0-1.0,
-  "supporting_evidence": "Specific quotes or observations from the phase steps",
-  "highlighted_evidence": [
-    {{
-      "step_index": <index>,
-      "source_field": "evaluation|memory|thinking_process|next_goal|action",
-      "highlighted_text": "Exact text from the step, do not use ellipses",
-      "reasoning": "Relevance",
-      "verdict": "pass|fail|partial"
-    }}
-  ],
-  "relevant_steps": [list of step indices relevant to this phase evaluation]
+  "step_index": {step_index},
+  "source_field": "evaluation|memory|thinking_process|next_goal|action",
+  "highlighted_text": "",
+  "reasoning": "",
+  "verdict": "pass|fail|partial"
 }}
-"""
+""",
         )
-    
-    @staticmethod
-    def get_global_summary_prompt() -> PromptTemplate:
-        """Get prompt template for global-level evaluation.
-        
-        Evaluates the complete execution trace with all steps.
-        Used for criteria about overall task completion, strategy, or consistency.
-        
-        Returns:
-            PromptTemplate for global-level evaluation
-        """
-        return PromptTemplate(
-            input_variables=[
-                "criterion_name",
-                "criterion_assertion",
-                "task_name",
-                "aggregated_steps",
-                "raw_context",
-                "personas",
-                "models"
-            ],
-            template="""You are an impartial and expert evaluator of AI agent behavior. Your task is to evaluate whether the agent's COMPLETE execution satisfies a specific evaluation criterion.
 
-EVALUATION GRANULARITY: GLOBAL_SUMMARY
-Note: You are provided with the full execution trace and a high-level summary.
-
-CRITERION TO EVALUATE:
-Name: {criterion_name}
-Assertion/How to verify: {criterion_assertion}
-
-TASK CONTEXT:
-Task Name: {task_name}
-Agent Personas/Values: {personas}
-Models Used: {models}
-
-EXECUTION SUMMARY:
-{aggregated_steps}
-
-FULL EXECUTION TRACE:
-{raw_context}
-
----
-
-Based on the criterion, evaluate the agent's overall performance.
-Analyze the consistency and effectiveness of the agent's actions throughout the task, considering all fields (thinking, evaluation, memory, goal, action).
-
-Provide your evaluation in JSON format:
-{{
-  "verdict": "PASS|FAIL|PARTIAL|UNABLE_TO_EVALUATE",
-  "reasoning": "Detailed explanation of your evaluation decision based on the full execution.",
-  "confidence_score": 0.0-1.0,
-  "supporting_evidence": "Specific quotes or observations from the trace",
-  "highlighted_evidence": [
-    {{
-      "step_index": <index>,
-      "source_field": "evaluation|memory|thinking_process|next_goal|action",
-      "highlighted_text": "Exact text from the step, do not use ellipses",
-      "reasoning": "Relevance",
-      "verdict": "pass|fail|partial"
-    }}
-  ],
-  "relevant_steps": [list of key step indices]
-}}
-"""
-        )
-    
     @staticmethod
     def get_merge_results_prompt() -> PromptTemplate:
-        """Get prompt template for merging multiple evaluation results.
-        
-        Aggregates multiple sub-evaluations into a single criterion verdict.
-        
-        Returns:
-            PromptTemplate for merging evaluation results
-        """
         return PromptTemplate(
             input_variables=[
                 "criterion_name",
                 "criterion_assertion",
                 "granularity_type",
-                "individual_verdicts"
+                "individual_verdicts",
             ],
             template="""You are an expert aggregator evaluating multiple sub-evaluations for a single criterion.
 
@@ -243,48 +426,28 @@ Name: {criterion_name}
 Assertion/How to verify: {criterion_assertion}
 
 EVALUATION TYPE: {granularity_type}
-(STEP_LEVEL = individual step evaluations, PHASE_LEVEL = phase/cluster evaluations)
 
 INDIVIDUAL EVALUATION RESULTS:
 {individual_verdicts}
 
----
-
-Based on these individual evaluations, provide an overall verdict for the criterion. Consider:
-- How many steps/clusters passed vs failed?
-- Are there critical failures that make the whole criterion fail?
-- Is the failure pattern consistent or isolated?
-- What is the overall trend across all evaluations?
+Aggregation policy (strict):
+- Treat explicit failures and critical contradictions as high weight.
+- Do not output PASS unless support is coherent and materially strong.
+- If evidence quality is mixed or insufficient, prefer PARTIAL or UNABLE_TO_EVALUATE.
 
 Provide your aggregated verdict in JSON format:
 {{
   "verdict": "PASS|FAIL|PARTIAL|UNABLE_TO_EVALUATE",
-  "reasoning": "Detailed explanation (2-4 sentences) of how you aggregated these individual results into the final verdict",
+  "reasoning": "Detailed explanation of aggregation",
   "confidence_score": 0.0-1.0,
-  "aggregation_summary": "Brief summary of the aggregation logic (1-2 sentences)",
+  "aggregation_summary": "Brief summary",
   "pass_rate": 0.0-1.0
 }}
-
-Guidelines:
-- PASS: Overall, the criterion is satisfied across evaluations
-- FAIL: Critical failures detected or majority of evaluations failed
-- PARTIAL: Mixed results with some successes and some failures
-- UNABLE_TO_EVALUATE: Insufficient data to make a determination
-- confidence_score: Your confidence in this aggregated verdict (0 = very uncertain, 1 = very confident)
-- pass_rate: Fraction of evaluations that passed (0.0 to 1.0)
-"""
+""",
         )
 
     @staticmethod
     def get_overall_criterion_assessment_prompt() -> PromptTemplate:
-        """Get prompt template for generating overall assessment for a criterion.
-        
-        This prompt generates an overall pass/fail assessment and reasoning
-        based on the detailed step evaluations and criterion properties.
-        
-        Returns:
-            PromptTemplate for overall criterion assessment
-        """
         return PromptTemplate(
             input_variables=[
                 "criterion_title",
@@ -295,7 +458,7 @@ Guidelines:
                 "personas",
                 "models",
                 "evaluation_details",
-                "involved_steps_summary"
+                "involved_steps_summary",
             ],
             template="""You are an expert evaluator assessing the overall performance of an AI agent against a specific criterion.
 
@@ -317,28 +480,11 @@ DETAILED EVALUATION RESULTS:
 INVOLVED STEPS SUMMARY:
 {involved_steps_summary}
 
----
-
-Based on the criterion definition, the detailed evaluation results, and the involved steps, provide an OVERALL assessment.
-
-Consider:
-1. Does the agent's behavior align with the criterion's assertion across all evaluated steps?
-2. Are there consistent patterns of success or failure?
-3. Do the high-confidence evaluations support a clear verdict?
-4. What is the overall trend and quality of performance?
-
 Provide your overall assessment in JSON format:
 {{
   "overall_assessment": "pass|fail|partial",
-  "overall_reasoning": "Comprehensive explanation (3-5 sentences) of the overall assessment. Include key findings from the evaluation details and why this final verdict was reached.",
+  "overall_reasoning": "Comprehensive explanation",
   "confidence_score": 0.0-1.0
 }}
-
-Guidelines for overall_assessment:
-- "pass": The agent clearly satisfies the criterion across the evaluated steps
-- "fail": The agent clearly fails to satisfy the criterion, with critical issues identified
-- "partial": The agent partially satisfies the criterion with mixed results
-- confidence_score: Your confidence in this overall assessment (0 = very uncertain, 1 = very confident)
-"""
+""",
         )
-

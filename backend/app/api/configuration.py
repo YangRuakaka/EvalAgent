@@ -1,5 +1,5 @@
 """Unified configuration API module combining persona and persona variation management."""
-from typing import Optional
+from functools import lru_cache
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,7 +13,6 @@ from ..services.persona_generator import (
     PersonaGeneratorService,
 )
 from ..schemas.persona_variation import (
-    PersonaVariation,
     PersonaVariationRequest,
     PersonaVariationResponse,
 )
@@ -26,10 +25,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["configuration"])
 
-def get_persona_generator_service() -> PersonaGeneratorService:
-    """Dependency to get persona generator service instance."""
 
+@lru_cache()
+def _get_cached_persona_generator_service() -> PersonaGeneratorService:
     return create_persona_generator_service()
+
+
+def get_persona_generator_service() -> PersonaGeneratorService:
+    """Dependency to get cached persona generator service instance."""
+
+    return _get_cached_persona_generator_service()
 
 
 @router.post(
@@ -95,10 +100,15 @@ async def generate_persona(
         )
 
 
-def get_persona_variation_generator_service() -> PersonaVariationGeneratorService:
-    """Dependency to get persona variation generator service instance."""
-
+@lru_cache()
+def _get_cached_persona_variation_generator_service() -> PersonaVariationGeneratorService:
     return create_persona_variation_generator_service()
+
+
+def get_persona_variation_generator_service() -> PersonaVariationGeneratorService:
+    """Dependency to get cached persona variation generator service instance."""
+
+    return _get_cached_persona_variation_generator_service()
 
 
 @router.post(

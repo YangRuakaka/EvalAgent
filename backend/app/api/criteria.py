@@ -2,9 +2,9 @@
 API endpoints for criteria generation.
 Provides REST API for generating evaluation criteria using LLM.
 """
+from functools import lru_cache
 import logging
 from fastapi import APIRouter, HTTPException
-from typing import List
 
 from ..schemas.criteria import CriteriasGenerationRequest, CriteriasGenerationResponse
 from ..services.criteria_generator import CriteriaGenerator
@@ -12,6 +12,11 @@ from ..services.criteria_generator import CriteriaGenerator
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/criteria", tags=["criteria"])
+
+
+@lru_cache()
+def get_criteria_generator() -> CriteriaGenerator:
+    return CriteriaGenerator(model_name="deepseek-chat", provider="deepseek")
 
 
 @router.post(
@@ -37,12 +42,7 @@ async def generate_criteria(
     """
     try:
         logger.info(f"Generating criteria for task: {request.task_name}")
-        
-        # Create generator with default model and provider
-        generator = CriteriaGenerator(
-            model_name="deepseek-chat",
-            provider="deepseek"
-        )
+        generator = get_criteria_generator()
         
         # Generate criteria
         response = await generator.generate_criteria(

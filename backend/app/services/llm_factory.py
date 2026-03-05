@@ -12,6 +12,7 @@ import inspect
 from enum import Enum
 from typing import Any, Optional
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_openai import ChatOpenAI
 
 from ..core.config import get_settings
@@ -59,11 +60,81 @@ class LLMConfig:
     temperature: Optional[float]
 
 
+class ConsoleLLMTraceCallbackHandler(BaseCallbackHandler):
+    """Print every LLM request/response to console for debugging and traceability."""
+
+    def _print_header(self, title: str) -> None:
+        print("\n" + "=" * 100)
+        print(title)
+        print("=" * 100)
+
+    def _extract_model_name(self, serialized: dict[str, Any], kwargs: dict[str, Any]) -> str:
+        invocation_params = kwargs.get("invocation_params") or {}
+        model_name = invocation_params.get("model") or invocation_params.get("model_name")
+        if model_name:
+            return str(model_name)
+        if isinstance(serialized, dict):
+            name = serialized.get("name")
+            if name:
+                return str(name)
+            cls_name = serialized.get("id")
+            if cls_name:
+                return str(cls_name)
+        return "unknown-model"
+
+    def on_llm_start(
+        self,
+        serialized: dict[str, Any],
+        prompts: list[str],
+        **kwargs: Any,
+    ) -> Any:
+        model_name = self._extract_model_name(serialized, kwargs)
+        self._print_header(f"[LLM CALL START] model={model_name} type=llm")
+        for idx, prompt in enumerate(prompts or []):
+            print(f"[PROMPT #{idx}]\n{prompt}\n")
+        print("=" * 100 + "\n")
+
+    def on_chat_model_start(
+        self,
+        serialized: dict[str, Any],
+        messages: list[list[Any]],
+        **kwargs: Any,
+    ) -> Any:
+        model_name = self._extract_model_name(serialized, kwargs)
+        self._print_header(f"[LLM CALL START] model={model_name} type=chat")
+        for convo_idx, convo in enumerate(messages or []):
+            print(f"[CHAT INPUT #{convo_idx}]")
+            for msg_idx, msg in enumerate(convo or []):
+                role = getattr(msg, "type", None) or getattr(msg, "role", None) or msg.__class__.__name__
+                content = getattr(msg, "content", str(msg))
+                print(f"- message[{msg_idx}] role={role}\n{content}\n")
+        print("=" * 100 + "\n")
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> Any:
+        self._print_header("[LLM CALL END]")
+        generations = getattr(response, "generations", None) or []
+        for i, generation_group in enumerate(generations):
+            if not generation_group:
+                continue
+            for j, generation in enumerate(generation_group):
+                text = getattr(generation, "text", None)
+                if not text and hasattr(generation, "message"):
+                    text = getattr(generation.message, "content", None)
+                print(f"[RESPONSE #{i}.{j}]\n{text if text is not None else str(generation)}\n")
+        print("=" * 100 + "\n")
+
+    def on_llm_error(self, error: BaseException, **kwargs: Any) -> Any:
+        self._print_header("[LLM CALL ERROR]")
+        print(str(error))
+        print("=" * 100 + "\n")
+
+
 class ChatLLMFactory:
     """Factory responsible for producing configured LLM client instances."""
 
     def __init__(self) -> None:
         self._settings = get_settings()
+        self._console_callback = ConsoleLLMTraceCallbackHandler()
 
     def create(
         self,
@@ -86,7 +157,8 @@ class ChatLLMFactory:
         )
 
         if target is LLMTarget.LANGCHAIN_CHAT:
-            return self._create_langchain_chat(config)
+            llm = self._create_langchain_chat(config)
+            return llm.with_config({"callbacks": [self._console_callback]})
 
         if target is LLMTarget.BROWSER_USE:
             return self._create_browser_use_chat(config)

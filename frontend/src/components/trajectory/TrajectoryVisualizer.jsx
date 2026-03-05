@@ -12,8 +12,6 @@ import './TrajectoryVisualizer.css';
 
 const EMPTY_GRAPH = Object.freeze({ nodes: [], links: [], clusters: [], meta: {} });
 
-const DEFAULT_CLUSTER_THRESHOLD = 0;
-
 const PersonaPopUp = ({ entry, onClose }) => {
 	if (!entry) return null;
 	const { fullPersona, label } = entry;
@@ -157,7 +155,6 @@ const TrajectoryVisualizer = ({
 	const [graph, setGraph] = useState(EMPTY_GRAPH);
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [error, setError] = useState(null);
-	const [clusterThreshold, setClusterThreshold] = useState(DEFAULT_CLUSTER_THRESHOLD);
 	const [internalUseImageHash, setInternalUseImageHash] = useState(true);
 	const [filterType, setFilterType] = useState('all'); // 'all' | 'model' | 'persona' | 'task'
 	const [filterValue, setFilterValue] = useState(null);
@@ -211,7 +208,6 @@ const TrajectoryVisualizer = ({
 		buildTrajectoryGraph(trajectory, {
 			hash: { hashSize: 16 },
 			hashConcurrency: 8,
-			clusterThreshold,
 			useImageHash,
 			conditions: conditions || [],
 		})
@@ -236,14 +232,7 @@ const TrajectoryVisualizer = ({
 		return () => {
 			isMounted = false;
 		};
-	}, [clusterThreshold, hasTrajectory, trajectory, conditions, useImageHash]);
-
-	const handleClusterThresholdChange = (event) => {
-		const nextValue = Number(event?.target?.value);
-		if (Number.isFinite(nextValue)) {
-			setClusterThreshold(nextValue);
-		}
-	};
+	}, [hasTrajectory, trajectory, conditions, useImageHash]);
 
 
 	const legendEntries = useMemo(() => {
@@ -526,21 +515,6 @@ const TrajectoryVisualizer = ({
 	return (
 		<div className={`trajectory-panel${isFullscreen ? ' is-fullscreen' : ''}`} ref={containerRef}>
 			<PanelHeader title="Trajectory" icon={<TrajectoryIcon />}>
-				<label className="trajectory-threshold" htmlFor="trajectory-cluster-threshold">
-					<span className="trajectory-threshold__label">Cluster Threshold</span>
-					<input
-						type="range"
-						id="trajectory-cluster-threshold"
-						min="0"
-						max="128"
-						step="1"
-						value={clusterThreshold}
-						onChange={handleClusterThresholdChange}
-						aria-label="Adjust cluster grouping sensitivity"
-					/>
-					<span className="trajectory-threshold__value">{clusterThreshold}</span>
-				</label>
-
 				<div className="trajectory-filter" aria-label="Trajectory filter controls">
 					<label className="trajectory-filter__label" htmlFor="trajectory-filter-type">Filter</label>
 					<select

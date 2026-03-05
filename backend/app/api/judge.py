@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Any
 
@@ -15,19 +14,12 @@ from langchain_core.messages import HumanMessage
 from pydantic import ValidationError
 
 from ..schemas.judge import (
-    GranularityAnalysisRequest,
-    GranularityRequirementResponse,
-    TaskDecompositionRequest,
-    StepAggregationRequest,
-    TaskDecomposition,
-    AggregatedSteps,
     ExperimentEvaluationRequest,
     ExperimentEvaluationResponse,
     ConditionResult,
     ExperimentCriterionResult,
     StepEvaluationDetail,
     EvidenceCitation,
-    AgentStepField,
     EvaluateStatus,
     Granularity,
     ExperimentCriterion,
@@ -40,180 +32,12 @@ from ..schemas.judge import (
 from ..schemas.browser_agent import BrowserAgentTask
 from ..api.deps import get_judge_services, JudgeServices
 from ..core.config import settings
-from ..services.history_logs_reader import HistoryLogsReader
+from ..core.normalizers import normalize_run_index, normalize_to_string
 from ..services.llm_factory import get_chat_llm
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/judge", tags=["judge"])
-
-
-@router.post("/analyze-granularity", response_model=GranularityRequirementResponse)
-async def analyze_granularity(
-    request: GranularityAnalysisRequest,
-    services: JudgeServices = Depends(get_judge_services)
-) -> GranularityRequirementResponse:
-    """
-    Analyze the granularity level needed for a specific criterion.
-    
-    Args:
-        request: GranularityAnalysisRequest with criterion details
-        services: Injected JudgeServices
-        
-    Returns:
-        GranularityRequirementResponse with recommended granularity and rationale
-    """
-    
-    logger.info(f"Analyzing granularity for criterion: {request.criterion.get('name')}")
-    
-    try:
-        requirement = services.granularity_analyzer.analyze_criterion_granularity(
-            criterion_name=request.criterion.get("name", "unknown"),
-            criterion_assertion=request.criterion.get("assertion", ""),
-            task_name=request.task_name
-        )
-        
-        return GranularityRequirementResponse(
-            criterion_name=requirement.criterion_name,
-            required_granularity=requirement.required_granularity,
-            rationale=requirement.rationale
-        )
-    except Exception as e:
-        logger.error(f"Granularity analysis failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {str(e)}"
-        )
-
-
-@router.post("/decompose-task", response_model=TaskDecomposition)
-async def decompose_task(
-    request: TaskDecompositionRequest,
-    services: JudgeServices = Depends(get_judge_services)
-) -> TaskDecomposition:
-    """
-    Decompose a task execution into semantic step clusters.
-    
-    Args:
-        request: TaskDecompositionRequest with run_id
-        services: Injected JudgeServices
-        
-    Returns:
-        TaskDecomposition with semantic clusters and their definitions
-    """
-    
-    logger.info(f"Task decomposition request for run: {request.run_id}")
-    
-    # Load the run result
-    history_reader = HistoryLogsReader()
-    try:
-        run_data = history_reader.read_run(request.run_id)
-    except Exception as e:
-        logger.error(f"Failed to load run {request.run_id}: {e}")
-        raise HTTPException(
-            status_code=404,
-            detail=f"Run {request.run_id} not found"
-        )
-    
-    metadata = run_data.get("metadata", {})
-    details = run_data.get("details", {})
-    
-    # Reconstruct task
-    task = BrowserAgentTask(
-        name=metadata.get("task_name", "Unknown Task"),
-        description=metadata.get("task_description", ""),
-        url=metadata.get("task_url", "")
-    )
-    
-    # Extract steps
-    all_steps = details.get("model_outputs", [])
-    
-    try:
-        decomposition = services.task_decomposer.decompose_execution_steps(
-            task=task,
-            all_steps=all_steps,
-            run_metadata={"run_id": request.run_id}
-        )
-        return decomposition
-    except Exception as e:
-        logger.error(f"Task decomposition failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Decomposition failed: {str(e)}"
-        )
-
-
-@router.post("/aggregate-steps", response_model=AggregatedSteps)
-async def aggregate_steps(
-    request: StepAggregationRequest,
-    services: JudgeServices = Depends(get_judge_services)
-) -> AggregatedSteps:
-    """
-    Aggregate steps at a specific granularity level.
-    
-    Useful for debugging and understanding how steps are being encoded at different granularities.
-    
-    Args:
-        request: StepAggregationRequest with run_id and target granularity
-        services: Injected JudgeServices
-        
-    Returns:
-        AggregatedSteps with encoded/summarized content
-    """
-    
-    logger.info(f"Step aggregation request for run: {request.run_id} at {request.granularity}")
-    
-    # Load the run result
-    history_reader = HistoryLogsReader()
-    try:
-        run_data = history_reader.read_run(request.run_id)
-    except Exception as e:
-        logger.error(f"Failed to load run {request.run_id}: {e}")
-        raise HTTPException(
-            status_code=404,
-            detail=f"Run {request.run_id} not found"
-        )
-    
-    metadata = run_data.get("metadata", {})
-    details = run_data.get("details", {})
-    summary = run_data.get("summary", {})
-    
-    # Reconstruct task
-    task = BrowserAgentTask(
-        name=metadata.get("task_name", "Unknown Task"),
-        description=metadata.get("task_description", ""),
-        url=metadata.get("task_url", "")
-    )
-    
-    # Extract steps
-    all_steps = details.get("model_outputs", [])
-    
-    try:
-        # Get task decomposition if needed
-        task_decomposition = None
-        if request.granularity in ["phase_level", "global_summary"]:
-            task_decomposition = services.task_decomposer.decompose_execution_steps(
-                task=task,
-                all_steps=all_steps,
-                run_metadata={"run_id": request.run_id}
-            )
-        
-        execution_outcome = summary.get("task_result", "Task completed")
-        
-        aggregated = services.step_aggregator.aggregate_steps(
-            all_steps=all_steps,
-            granularity=request.granularity,
-            task_decomposition=task_decomposition,
-            task_name=task.name,
-            execution_outcome=execution_outcome
-        )
-        return aggregated
-    except Exception as e:
-        logger.error(f"Step aggregation failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Aggregation failed: {str(e)}"
-        )
 
 
 async def _generate_overall_assessment(
@@ -343,66 +167,33 @@ async def _generate_overall_assessment(
         return EvaluateStatus.UNKNOWN, f"Assessment generation failed: {str(e)}", 0.0
 
 
-def _build_preliminary_analysis_summary(
-    criterion_title: str,
-    criterion_assertion: str,
-    relevant_step_indices: List[int],
-    phase_summaries: Dict[str, str],
-) -> str:
-    """Build a compact preliminary analysis summary for evaluator grounding."""
-    relevant_preview = ", ".join(str(i) for i in relevant_step_indices[:20])
-    if len(relevant_step_indices) > 20:
-        relevant_preview = f"{relevant_preview}, ..."
-
-    phase_summary_lines = []
-    for phase_id, summary in phase_summaries.items():
-        clean_summary = (summary or "").strip()
-        if clean_summary:
-            phase_summary_lines.append(f"- {phase_id}: {clean_summary}")
-
-    phases_block = "\n".join(phase_summary_lines) if phase_summary_lines else "- No phase summaries available"
-
-    return (
-        f"Criterion: {criterion_title}\n"
-        f"Assertion: {criterion_assertion}\n"
-        f"Relevant step count: {len(relevant_step_indices)}\n"
-        f"Relevant steps: [{relevant_preview}]\n"
-        f"Phase-level preliminary analysis:\n{phases_block}"
-    )
+def _map_verdict_to_status(verdict: str) -> EvaluateStatus:
+    normalized = str(verdict or "").strip().lower()
+    if normalized in {"pass", "fail", "partial"}:
+        return EvaluateStatus(normalized)
+    return EvaluateStatus.UNKNOWN
 
 
-def _inject_preliminary_context(
-    aggregated_steps: AggregatedSteps,
-    preliminary_analysis: str,
-    relevant_step_indices: List[int],
-) -> AggregatedSteps:
-    """Inject preliminary relevance analysis into aggregation context for downstream evaluator."""
-    metadata = dict(aggregated_steps.summary_metadata or {})
-    metadata["preliminary_analysis"] = preliminary_analysis
-    metadata["relevant_step_indices"] = relevant_step_indices
-    aggregated_steps.summary_metadata = metadata
+def _has_verdict_conflict(
+    overall_assessment: EvaluateStatus,
+    involved_steps: List[StepEvaluationDetail],
+) -> bool:
+    step_statuses = {
+        step.evaluateStatus
+        for step in involved_steps
+        if step.evaluateStatus in {EvaluateStatus.PASS, EvaluateStatus.FAIL, EvaluateStatus.PARTIAL}
+    }
 
-    header = (
-        "[PRELIMINARY_ANALYSIS]\n"
-        f"{preliminary_analysis}\n"
-        "[/PRELIMINARY_ANALYSIS]\n\n"
-        f"Relevant steps for evaluation: {relevant_step_indices}\n\n"
-    )
+    if EvaluateStatus.PASS in step_statuses and EvaluateStatus.FAIL in step_statuses:
+        return True
 
-    if "[PRELIMINARY_ANALYSIS]" not in (aggregated_steps.aggregated_content or ""):
-        aggregated_steps.aggregated_content = f"{header}{aggregated_steps.aggregated_content or ''}"
+    if overall_assessment == EvaluateStatus.PASS and EvaluateStatus.FAIL in step_statuses:
+        return True
 
-    # For step-level evaluation, explicitly constrain target steps to relevant ones.
-    if aggregated_steps.granularity == Granularity.STEP_LEVEL and relevant_step_indices:
-        aggregated_steps.step_mapping = {"relevant_steps": relevant_step_indices}
+    if overall_assessment == EvaluateStatus.FAIL and EvaluateStatus.PASS in step_statuses:
+        return True
 
-    # For phase/global evaluation, include relevant step mapping while preserving existing mappings.
-    elif relevant_step_indices:
-        step_mapping = dict(aggregated_steps.step_mapping or {})
-        step_mapping["relevant_steps"] = relevant_step_indices
-        aggregated_steps.step_mapping = step_mapping
-
-    return aggregated_steps
+    return False
 
 
 async def _process_single_criterion(
@@ -413,120 +204,29 @@ async def _process_single_criterion(
     models: List[str],
     services: JudgeServices,
     judge_model: Optional[str] = None,
-    forced_granularity: Optional[Granularity] = None,
+    global_overview: Optional[Dict[str, Any]] = None,
+    step_max_concurrency: Optional[int] = None,
+    overall_assessment_confidence_threshold: float = 0.7,
 ) -> Optional[ExperimentCriterionResult]:
     """Process a single criterion evaluation asynchronously."""
     logger.info(f"Evaluating criterion: {crit.title}")
 
-    # 1) Preliminary relevance analysis: identify criterion-relevant steps first.
-    criterion_phase_decomposition = None
-    relevant_step_indices = list(range(len(all_steps)))
-    phase_summaries: Dict[str, str] = {}
-    preliminary_analysis = "No preliminary analysis available."
-
-    try:
-        criterion_phase_decomposition = await asyncio.to_thread(
-            services.task_decomposer.decompose_for_phase_evaluation,
-            task=task,
-            all_steps=all_steps,
-            criterion_title=crit.title,
-            criterion_assertion=crit.assertion,
-            model_name=judge_model or "gpt-4o-mini",
-        )
-        if criterion_phase_decomposition is not None:
-            if criterion_phase_decomposition.relevant_step_indices:
-                relevant_step_indices = criterion_phase_decomposition.relevant_step_indices
-            phase_summaries = criterion_phase_decomposition.phase_summaries or {}
-    except Exception as e:
-        logger.warning(
-            "Preliminary relevance analysis failed for '%s': %s. Fallback to all steps.",
-            crit.title,
-            e,
-        )
-
-    preliminary_analysis = _build_preliminary_analysis_summary(
-        criterion_title=crit.title,
-        criterion_assertion=crit.assertion,
-        relevant_step_indices=relevant_step_indices,
-        phase_summaries=phase_summaries,
-    )
-    
-    # 2) Determine granularity (forced mode has higher priority)
-    if forced_granularity is not None:
-        target_granularity = forced_granularity
-        logger.info(
-            "Using forced granularity for criterion '%s': %s",
-            crit.title,
-            target_granularity,
-        )
-    else:
-        try:
-            criterion_task_decomposition = None
-            if criterion_phase_decomposition is not None:
-                criterion_task_decomposition = TaskDecomposition(
-                    task_name=task.name,
-                    subtask_clusters=criterion_phase_decomposition.phase_clusters,
-                    total_steps=criterion_phase_decomposition.total_steps,
-                )
-
-            # Allow STEP_LEVEL, PHASE_LEVEL, and GLOBAL_SUMMARY
-            granularity_req = await asyncio.to_thread(
-                services.granularity_analyzer.analyze_criterion_granularity,
-                criterion_name=crit.title,
-                criterion_assertion=crit.assertion,
-                task_name=task.name,
-                model_name=judge_model or "gpt-4o-mini",
-                allowed_granularities=[Granularity.STEP_LEVEL, Granularity.PHASE_LEVEL, Granularity.GLOBAL_SUMMARY],
-                task_decomposition=criterion_task_decomposition,
-            )
-            target_granularity = granularity_req.required_granularity
-            logger.info(f"Determined granularity for criterion '{crit.title}': {target_granularity}")
-        except Exception as e:
-            logger.error(f"Granularity analysis failed: {e}")
-            target_granularity = Granularity.GLOBAL_SUMMARY # Fallback
-    
-    # 3) Select decomposition for aggregation (reuse preliminary phase decomposition when possible)
-    decomposition = None
-    if target_granularity == Granularity.PHASE_LEVEL:
-        decomposition = criterion_phase_decomposition
-        if decomposition is None:
-            logger.warning("No phase decomposition available, falling back to STEP_LEVEL")
-            target_granularity = Granularity.STEP_LEVEL
-    
-    # 4) Aggregate steps
-    try:
-        logger.info(f"Starting step aggregation. All steps count: {len(all_steps)}, Granularity: {target_granularity}")
-        aggregated_steps = await asyncio.to_thread(
-            services.step_aggregator.aggregate_steps,
-            all_steps=all_steps,
-            granularity=target_granularity,
-            task_decomposition=decomposition,
-            task_name=task.name,
-            model_name=judge_model or "deepseek-chat",
-        )
-        aggregated_steps = _inject_preliminary_context(
-            aggregated_steps=aggregated_steps,
-            preliminary_analysis=preliminary_analysis,
-            relevant_step_indices=relevant_step_indices,
-        )
-        logger.info(f"Step aggregation successful. Aggregated steps type: {type(aggregated_steps)}")
-    except Exception as e:
-        logger.error(f"Aggregation failed: {e}", exc_info=True)
-        return None
+    target_granularity = Granularity.PHASE_LEVEL
 
     # 5. Evaluate
     try:
-        logger.info(f"Starting evaluation for criterion: {crit.title}")
-        eval_result = await services.judge_evaluator.evaluate_criterion(
+        logger.info("Starting unified evaluation for criterion: %s", crit.title)
+        eval_result = await services.judge_evaluator.evaluate_criterion_unified(
             criterion_name=crit.title,
             criterion_assertion=crit.assertion,
-            aggregated_steps=aggregated_steps,
             task_name=task.name,
             personas=personas,
             models=models,
-            all_steps=all_steps,
+            all_steps=all_steps or [],
             model_name=judge_model,
-            criterion_description=crit.description
+            criterion_description=crit.description,
+            global_overview=global_overview,
+            step_max_concurrency=step_max_concurrency,
         )
         logger.info(f"Evaluation result: verdict={eval_result.verdict}, reasoning length={len(eval_result.reasoning) if eval_result.reasoning else 0}")
         
@@ -587,21 +287,45 @@ async def _process_single_criterion(
         
         logger.info(f"Created {len(involved_steps_list)} StepEvaluationDetail objects")
         
-        # 6. Generate overall assessment using LLM
-        logger.info(f"Generating overall assessment for criterion '{crit.title}'")
-        overall_assessment, overall_reasoning, confidence = await _generate_overall_assessment(
-            criterion_title=crit.title,
-            criterion_assertion=crit.assertion,
-            criterion_description=crit.description,
-            task_name=task.name,
-            granularity=target_granularity,
-            personas=personas,
-            models=models,
-            eval_result=eval_result,
-            involved_steps=involved_steps_list,
-            services=services,
-            judge_model=judge_model,
+        # 6. Generate overall assessment only when confidence is low or verdicts conflict.
+        overall_assessment = _map_verdict_to_status(eval_result.verdict)
+        overall_reasoning = eval_result.reasoning or ""
+        confidence = float(eval_result.confidence_score or 0.0)
+
+        has_verdict_conflict = _has_verdict_conflict(overall_assessment, involved_steps_list)
+        should_run_secondary_assessment = (
+            confidence < overall_assessment_confidence_threshold or has_verdict_conflict
         )
+
+        if should_run_secondary_assessment:
+            logger.info(
+                "Running secondary overall assessment for criterion '%s' (confidence=%.3f, threshold=%.3f, verdict_conflict=%s)",
+                crit.title,
+                confidence,
+                overall_assessment_confidence_threshold,
+                has_verdict_conflict,
+            )
+            overall_assessment, overall_reasoning, confidence = await _generate_overall_assessment(
+                criterion_title=crit.title,
+                criterion_assertion=crit.assertion,
+                criterion_description=crit.description,
+                task_name=task.name,
+                granularity=target_granularity,
+                personas=personas,
+                models=models,
+                eval_result=eval_result,
+                involved_steps=involved_steps_list,
+                services=services,
+                judge_model=judge_model,
+            )
+        else:
+            logger.info(
+                "Skipping secondary overall assessment for criterion '%s' (confidence=%.3f, threshold=%.3f, verdict_conflict=%s)",
+                crit.title,
+                confidence,
+                overall_assessment_confidence_threshold,
+                has_verdict_conflict,
+            )
         
         return ExperimentCriterionResult(
             title=crit.title,
@@ -659,15 +383,15 @@ async def _load_condition_run_data(
         )
     
     # Extract persona and model from metadata
-    persona = _normalize_to_string(metadata.get("persona", ""), "")
+    persona = normalize_to_string(metadata.get("persona", ""), "")
     personas = [persona] if persona else []
     
-    value = _normalize_to_string(metadata.get("value", ""), "")
+    value = normalize_to_string(metadata.get("value", ""), "")
     
-    model = _normalize_to_string(metadata.get("model", ""), "")
+    model = normalize_to_string(metadata.get("model", ""), "")
     models = [model] if model else []
     
-    run_index = _normalize_run_index(metadata.get("run_index", 1), condition.conditionID)
+    run_index = normalize_run_index(metadata.get("run_index", 1), condition.conditionID)
 
     logger.info(f"Loaded condition data: persona={persona}, value={value}, model={model}, run_index={run_index}, steps={len(all_steps)}")
 
@@ -688,7 +412,9 @@ async def _evaluate_condition_criterion_pair(
     criterion: ExperimentCriterion,
     services: JudgeServices,
     judge_model: Optional[str] = None,
-    forced_granularity: Optional[Granularity] = None,
+    global_overview: Optional[Dict[str, Any]] = None,
+    step_max_concurrency: Optional[int] = None,
+    overall_assessment_confidence_threshold: float = 0.7,
 ) -> Tuple[str, Optional[ExperimentCriterionResult]]:
     """Evaluate a single criterion for a loaded condition context."""
     result = await _process_single_criterion(
@@ -699,56 +425,21 @@ async def _evaluate_condition_criterion_pair(
         models=context["models"],
         services=services,
         judge_model=judge_model,
-        forced_granularity=forced_granularity,
+        global_overview=global_overview,
+        step_max_concurrency=step_max_concurrency,
+        overall_assessment_confidence_threshold=overall_assessment_confidence_threshold,
     )
     return context["conditionID"], result
-
-
-def _normalize_to_string(value: Any, fallback: str = "") -> str:
-    if value is None:
-        return fallback
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-    if isinstance(value, dict):
-        for key in ("value", "name", "label", "id"):
-            candidate = value.get(key)
-            if isinstance(candidate, str) and candidate.strip():
-                return candidate
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, list):
-        return ", ".join([_normalize_to_string(v) for v in value if v is not None])
-    return str(value)
-
-
-def _normalize_run_index(raw_run_index: Any, condition_id: str) -> int:
-    if isinstance(raw_run_index, int):
-        return raw_run_index
-
-    if isinstance(raw_run_index, float):
-        return int(raw_run_index)
-
-    if isinstance(raw_run_index, str):
-        digits = re.findall(r"\d+", raw_run_index)
-        if digits:
-            return int(digits[-1])
-
-    match = re.search(r"run(\d+)", condition_id, flags=re.IGNORECASE)
-    if match:
-        return int(match.group(1))
-
-    return 1
 
 
 def _safe_condition_result(ctx: Dict[str, Any], criteria_results: List[ExperimentCriterionResult]) -> Optional[ConditionResult]:
     try:
         return ConditionResult(
-            conditionID=_normalize_to_string(ctx.get("conditionID"), ""),
-            persona=_normalize_to_string(ctx.get("persona_str"), ""),
-            value=_normalize_to_string(ctx.get("value_str"), "") or None,
-            model=_normalize_to_string(ctx.get("model_str"), ""),
-            run_index=_normalize_run_index(ctx.get("run_index"), _normalize_to_string(ctx.get("conditionID"), "")),
+            conditionID=normalize_to_string(ctx.get("conditionID"), ""),
+            persona=normalize_to_string(ctx.get("persona_str"), ""),
+            value=normalize_to_string(ctx.get("value_str"), "") or None,
+            model=normalize_to_string(ctx.get("model_str"), ""),
+            run_index=normalize_run_index(ctx.get("run_index"), normalize_to_string(ctx.get("conditionID"), "")),
             criteria=criteria_results,
         )
     except ValidationError as exc:
@@ -779,12 +470,6 @@ async def _gather_with_limit(
                 return None
 
     return await asyncio.gather(*[_run(coroutine) for coroutine in coroutines])
-
-
-from ..services.llm_factory import get_chat_llm
-import json
-from langchain_core.messages import HumanMessage
-
 
 async def _rank_conditions_with_llm(
     criterion: ExperimentCriterion,
@@ -1061,14 +746,36 @@ async def evaluate_experiment(
     5. Evaluate multi-condition assessment if applicable.
     """
     max_concurrency = max(1, settings.JUDGE_EVALUATION_MAX_CONCURRENCY)
+    configured_step_max_concurrency = max(1, int(getattr(settings, "JUDGE_EVALUATION_STEP_MAX_CONCURRENCY", 12) or 12))
+    total_llm_concurrency_budget = max(
+        1,
+        int(
+            getattr(
+                settings,
+                "JUDGE_EVALUATION_TOTAL_LLM_CONCURRENCY_BUDGET",
+                configured_step_max_concurrency * max_concurrency,
+            )
+            or (configured_step_max_concurrency * max_concurrency)
+        ),
+    )
+    step_max_concurrency = max(
+        1,
+        min(configured_step_max_concurrency, total_llm_concurrency_budget // max(1, max_concurrency)),
+    )
+    overall_assessment_confidence_threshold = float(
+        getattr(settings, "JUDGE_EVALUATION_OVERALL_ASSESSMENT_CONFIDENCE_THRESHOLD", 0.7) or 0.7
+    )
+    overall_assessment_confidence_threshold = max(0.0, min(1.0, overall_assessment_confidence_threshold))
     task_timeout_seconds = max(0, int(getattr(settings, "JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS", 0) or 0))
     logger.info(
-        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, forced_granularity=%s, max_concurrency=%d, task_timeout_seconds=%d)",
+        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, max_concurrency=%d, step_max_concurrency=%d, llm_budget=%d, confidence_threshold=%.2f, task_timeout_seconds=%d)",
         len(request.conditions),
         len(request.criteria),
         request.judge_model,
-        request.forced_granularity,
         max_concurrency,
+        step_max_concurrency,
+        total_llm_concurrency_budget,
+        overall_assessment_confidence_threshold,
         task_timeout_seconds,
     )
     
@@ -1090,7 +797,50 @@ async def evaluate_experiment(
         logger.warning("No valid conditions loaded")
         return ExperimentEvaluationResponse(conditions=[], multi_condition_assessment=None)
 
-    # 2. Flattened Evaluation: Create tasks for all (Condition, Criterion) pairs
+    # 2. Build global overview once per condition and reuse for all criteria.
+    overview_tasks = []
+    for ctx in loaded_contexts:
+        overview_tasks.append(
+            services.judge_evaluator.build_global_behavior_overview(
+                task_name=ctx["task"].name,
+                personas=ctx["personas"],
+                models=ctx["models"],
+                all_steps=ctx["all_steps"],
+                model_name=request.judge_model,
+            )
+        )
+
+    global_overviews = await _gather_with_limit(
+        overview_tasks,
+        max_concurrency=max_concurrency,
+        timeout_seconds=task_timeout_seconds,
+    )
+
+    for idx, ctx in enumerate(loaded_contexts):
+        overview = global_overviews[idx] if idx < len(global_overviews) else None
+        if isinstance(overview, dict):
+            ctx["global_overview"] = overview
+            continue
+
+        all_steps = ctx.get("all_steps") or []
+        ctx["global_overview"] = {
+            "overall_behavior_summary": "",
+            "phases": [
+                {
+                    "phase_id": "phase_0",
+                    "semantic_label": "Complete Execution",
+                    "step_indices": list(range(len(all_steps))),
+                    "phase_summary": f"Complete execution with {len(all_steps)} steps",
+                    "relevant_to_evaluation": True,
+                    "criticality": "high",
+                    "why_key": "Fallback due to missing global overview.",
+                }
+            ],
+            "key_phase_ids": ["phase_0"],
+            "global_reasoning": "Fallback global overview due to upstream timeout/failure.",
+        }
+
+    # 3. Flattened Evaluation: Create tasks for all (Condition, Criterion) pairs
     evaluation_tasks = []
     for ctx in loaded_contexts:
         for crit in request.criteria:
@@ -1100,20 +850,22 @@ async def evaluate_experiment(
                     crit,
                     services,
                     judge_model=request.judge_model,
-                    forced_granularity=request.forced_granularity,
+                    global_overview=ctx.get("global_overview"),
+                    step_max_concurrency=step_max_concurrency,
+                    overall_assessment_confidence_threshold=overall_assessment_confidence_threshold,
                 )
             )
             
     logger.info("Starting %d evaluation tasks with bounded concurrency=%d", len(evaluation_tasks), max_concurrency)
     
-    # 3. Execute all evaluations concurrently
+    # 4. Execute all evaluations concurrently
     flat_results = await _gather_with_limit(
         evaluation_tasks,
         max_concurrency=max_concurrency,
         timeout_seconds=task_timeout_seconds,
     )
     
-    # 4. Group results by condition
+    # 5. Group results by condition
     # Map: conditionID -> List[ExperimentCriterionResult]
     results_by_condition = {ctx["conditionID"]: [] for ctx in loaded_contexts}
     
@@ -1124,7 +876,7 @@ async def evaluate_experiment(
         if result is not None:
             results_by_condition[cond_id].append(result)
             
-    # 5. Build final ConditionResult objects
+    # 6. Build final ConditionResult objects
     condition_results = []
     for ctx in loaded_contexts:
         cond_id = ctx["conditionID"]
@@ -1144,7 +896,7 @@ async def evaluate_experiment(
         else:
             logger.warning("Skipping invalid condition result: %s", cond_id)
     
-    # 6. Generate multi-condition assessment if there are 2+ conditions
+    # 7. Generate multi-condition assessment if there are 2+ conditions
     multi_condition_assessment = await _generate_multi_condition_assessment(condition_results, request.criteria)
     
     # Create response

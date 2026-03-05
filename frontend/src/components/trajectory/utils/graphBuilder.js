@@ -1,6 +1,6 @@
 import { schemeTableau10 } from 'd3-scale-chromatic';
 
-import { computeImageHash, hashesAreSimilar } from './imageHash';
+import { computeImageHash } from './imageHash';
 
 const COLOR_PALETTE = schemeTableau10 || [
 	'#1f77b4',
@@ -15,7 +15,6 @@ const COLOR_PALETTE = schemeTableau10 || [
 	'#17becf',
 ];
 
-const DEFAULT_CLUSTER_THRESHOLD = 12;
 const FIRST_CONDITION_HASH = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
 const DEFAULT_HASH_CONCURRENCY = 8;
 
@@ -322,67 +321,6 @@ const extractScreenshotSequences = (trajectory) => {
 		.filter(Boolean);
 };
 
-const buildClusters = (nodes, { similarityThreshold = DEFAULT_CLUSTER_THRESHOLD } = {}) => {
-	const clusterAssignments = new Map();
-	const clusterColors = new Map();
-	const clusters = [];
-
-	nodes.forEach((node, index) => {
-		if (clusterAssignments.has(node.id)) {
-			return;
-		}
-
-		const clusterId = `cluster-${clusters.length}`;
-		clusterAssignments.set(node.id, clusterId);
-
-		const members = [node];
-
-		for (let j = index + 1; j < nodes.length; j += 1) {
-			const candidate = nodes[j];
-
-			if (clusterAssignments.has(candidate.id)) {
-				continue;
-			}
-
-			if (node.isConditionFirst !== candidate.isConditionFirst) {
-				continue;
-			}
-
-			if (hashesAreSimilar(node.hash, candidate.hash, similarityThreshold)) {
-				clusterAssignments.set(candidate.id, clusterId);
-				members.push(candidate);
-			}
-		}
-
-		const color = COLOR_PALETTE[clusters.length % COLOR_PALETTE.length];
-
-		clusters.push({
-			id: clusterId,
-			label: `Cluster ${clusters.length + 1}`,
-			color,
-			nodeIds: members.map((member) => member.id),
-			representativeNodeId: node.id,
-		});
-		clusterColors.set(clusterId, color);
-
-		members.forEach((member) => {
-			member.clusterId = clusterId;
-			member.color = color;
-		});
-	});
-
-	nodes.forEach((node) => {
-		if (!node.clusterId) {
-			node.clusterId = clusterAssignments.get(node.id) || null;
-			if (node.clusterId && clusterColors.has(node.clusterId)) {
-				node.color = clusterColors.get(node.clusterId);
-			}
-		}
-	});
-
-	return clusters;
-};
-
 export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const sequences = extractScreenshotSequences(trajectory);
 	const conditions = Array.isArray(options.conditions) ? options.conditions : [];
@@ -646,7 +584,7 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 			.sort((a, b) => a.position - b.position),
 	);
 
-	const clusters = buildClusters(nodes, { similarityThreshold: options.clusterThreshold });
+	const clusters = [];
 
 	return {
 		nodes,

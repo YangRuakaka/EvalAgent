@@ -26,38 +26,48 @@ const clamp = (value, min, max) => {
 const MIN_LEFT = 0;
 const MIN_CENTER = 1;
 
+const CONFIG_TABS = [
+	{ key: 'persona', label: 'Persona', icon: PersonaIcon, title: 'Persona Generation' },
+	{ key: 'environment', label: 'Environment', icon: EnvironmentIcon, title: 'Environment Setting' },
+];
+
+const getResponseErrorDetail = (response) => {
+	if (!response) {
+		return 'No response from server';
+	}
+
+	if (typeof response.data === 'string') {
+		return response.data;
+	}
+
+	return response.data?.detail || `HTTP ${response.status}`;
+};
+
 const App = () => {
 	const { state: { experiments }, addExperiment, removeExperiment } = useData();
 	
 	// Derive historyEntries from context for compatibility
 	const historyEntries = useMemo(() => Object.values(experiments), [experiments]);
+	const historyEntryCount = historyEntries.length;
 
 	const handleAddRunEntry = useCallback((runPayload) => {
-		const index = Object.keys(experiments).length;
+		const index = historyEntryCount;
 		const nextEntry = processVisualizationData(runPayload, index);
 		
 		addExperiment(nextEntry);
 		setActiveRunId(nextEntry.id);
-	}, [experiments, addExperiment]);
+	}, [historyEntryCount, addExperiment]);
 
 	const containerRef = useRef(null);
-	// const dragStateRef = useRef(null); // Removed unused ref
-	const dragStateRef = useRef({
-		type: null,
-		startX: 0,
-		startLeft: 0,
-		containerWidth: 0,
-	});
+	const dragStateRef = useRef(null);
 
 	const [sizes, setSizes] = useState({
 		left: 50,
 	});
-	// const [historyEntries, setHistoryEntries] = useState([]); // Removed local state
 	const [activeRunId, setActiveRunId] = useState(null);
 	const [isFetchingCache, setIsFetchingCache] = useState(false);
 	const [isCleaningServerFiles, setIsCleaningServerFiles] = useState(false);
 	const [isRestartingBackend, setIsRestartingBackend] = useState(false);
-	const [cacheError, setCacheError] = useState(null);
 	const [activeConfigTab, setActiveConfigTab] = useState('persona');
 	const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
 
@@ -96,16 +106,16 @@ const App = () => {
 			}
 		};
 
-			const stopDragging = () => {
-				if (!dragStateRef.current) {
-					return;
-				}
+		const stopDragging = () => {
+			if (!dragStateRef.current) {
+				return;
+			}
 
-				dragStateRef.current = null;
-				document.body.style.cursor = '';
-				document.body.style.userSelect = '';
-				document.body.classList.remove('is-resizing', 'is-resizing--vertical', 'is-resizing--horizontal');
-			};
+			dragStateRef.current = null;
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			document.body.classList.remove('is-resizing', 'is-resizing--vertical', 'is-resizing--horizontal');
+		};
 
 		window.addEventListener('mousemove', handlePointerMove);
 		window.addEventListener('mouseup', stopDragging);
@@ -118,7 +128,6 @@ const App = () => {
 
 	const handleGetCacheData = useCallback(async () => {
 		setIsFetchingCache(true);
-		setCacheError(null);
 
 		try {
 			const response = await fetchHistoryLogs();
@@ -135,87 +144,89 @@ const App = () => {
 			setActiveRunId(processedData.id);
 
 		} catch (error) {
-			setCacheError(error);
+			alert(`Get cache data failed: ${error?.message || 'unknown error'}`);
 		} finally {
 			setIsFetchingCache(false);
 		}
 	}, [addExperiment]);
 
-	const handleCleanupServerFiles = useCallback(async () => {
-		const confirmed = window.confirm(
-			'This will clean extra files in backend/history_logs, and only keep buy_milk* items (including screenshots/buy_milk*). Continue?',
-		);
+	const runConfirmedServerAction = useCallback(async ({
+		confirmMessage,
+		setLoading,
+		action,
+		onSuccess,
+		onFailurePrefix,
+	}) => {
+		const confirmed = window.confirm(confirmMessage);
 		if (!confirmed) {
 			return;
 		}
 
-		setIsCleaningServerFiles(true);
+		setLoading(true);
 		try {
-			const response = await cleanupServerFiles();
+			const response = await action();
 			if (!response.ok || !response.data?.ok) {
-				const detail = typeof response.data === 'string'
-					? response.data
-					: (response.data?.detail || `HTTP ${response.status}`);
-				throw new Error(detail);
+				throw new Error(getResponseErrorDetail(response));
 			}
 
-			const deletedCount = Array.isArray(response.data.deleted) ? response.data.deleted.length : 0;
-			const failedCount = Array.isArray(response.data.failed) ? response.data.failed.length : 0;
-			alert(`History logs cleanup completed. Deleted: ${deletedCount}, Failed: ${failedCount}`);
+			onSuccess(response);
 		} catch (error) {
-			alert(`Cleanup failed: ${error?.message || 'unknown error'}`);
+			alert(`${onFailurePrefix}: ${error?.message || 'unknown error'}`);
 		} finally {
-			setIsCleaningServerFiles(false);
+			setLoading(false);
 		}
 	}, []);
+
+	const handleCleanupServerFiles = useCallback(async () => {
+		await runConfirmedServerAction({
+			confirmMessage: 'This will clean extra files in backend/history_logs, and only keep buy_milk* items (including screenshots/buy_milk*). Continue?',
+			setLoading: setIsCleaningServerFiles,
+			action: cleanupServerFiles,
+			onSuccess: (response) => {
+				const deletedCount = Array.isArray(response.data.deleted) ? response.data.deleted.length : 0;
+				const failedCount = Array.isArray(response.data.failed) ? response.data.failed.length : 0;
+				alert(`History logs cleanup completed. Deleted: ${deletedCount}, Failed: ${failedCount}`);
+			},
+			onFailurePrefix: 'Cleanup failed',
+		});
+	}, [runConfirmedServerAction]);
 
 	const handleRestartBackend = useCallback(async () => {
-		const confirmed = window.confirm(
-			'This will restart the backend service. Ongoing backend tasks may stop temporarily. Continue?',
-		);
-		if (!confirmed) {
-			return;
-		}
+		await runConfirmedServerAction({
+			confirmMessage: 'This will restart the backend service. Ongoing backend tasks may stop temporarily. Continue?',
+			setLoading: setIsRestartingBackend,
+			action: restartBackendService,
+			onSuccess: () => {
+				alert('Backend restart requested. Please wait a few seconds before next operation.');
+			},
+			onFailurePrefix: 'Restart failed',
+		});
+	}, [runConfirmedServerAction]);
 
-		setIsRestartingBackend(true);
-		try {
-			const response = await restartBackendService();
-			if (!response.ok || !response.data?.ok) {
-				const detail = typeof response.data === 'string'
-					? response.data
-					: (response.data?.detail || `HTTP ${response.status}`);
-				throw new Error(detail);
-			}
-
-			alert('Backend restart requested. Please wait a few seconds before next operation.');
-		} catch (error) {
-			alert(`Restart failed: ${error?.message || 'unknown error'}`);
-		} finally {
-			setIsRestartingBackend(false);
-		}
-	}, []);
-
-	useEffect(() => {
-		if (cacheError) {
-		}
-	}, [cacheError]);
-
-	const beginDrag = (type) => (event) => {
+	const beginDrag = useCallback((type) => (event) => {
 		event.preventDefault();
 
 		const containerRect = containerRef.current?.getBoundingClientRect();
 
-			dragStateRef.current = {
-				type,
-				startX: event.clientX,
-				startLeft: sizes.left,
-				containerWidth: containerRect ? containerRect.width : 0,
-			};
+		dragStateRef.current = {
+			type,
+			startX: event.clientX,
+			startLeft: sizes.left,
+			containerWidth: containerRect ? containerRect.width : 0,
+		};
 
-			document.body.style.userSelect = 'none';
-			document.body.style.cursor = 'col-resize';
-			document.body.classList.add('is-resizing', 'is-resizing--vertical');
-	};
+		document.body.style.userSelect = 'none';
+		document.body.style.cursor = 'col-resize';
+		document.body.classList.add('is-resizing', 'is-resizing--vertical');
+	}, [sizes.left]);
+
+	const openCriteriaManager = useCallback(() => {
+		setIsCriteriaManagerOpen(true);
+	}, []);
+
+	const closeCriteriaManager = useCallback(() => {
+		setIsCriteriaManagerOpen(false);
+	}, []);
 
 	const centerWeight = Math.max(MIN_CENTER, 100 - sizes.left);
 	const activeRun = useMemo(
@@ -236,12 +247,14 @@ const App = () => {
 		}
 	}, [historyEntries, activeRunId]);
 
-	const handleCloseTab = (id) => {
+	const handleCloseTab = useCallback((id) => {
 		removeExperiment(id);
 		
 		// Calculate next active ID
 		const index = historyEntries.findIndex((item) => item.id === id);
-		if (index === -1) return;
+		if (index === -1) {
+			return;
+		}
 
 		const nextItems = [...historyEntries.slice(0, index), ...historyEntries.slice(index + 1)];
 		
@@ -257,7 +270,7 @@ const App = () => {
 			const fallbackIndex = index >= nextItems.length ? nextItems.length - 1 : index;
 			return nextItems[fallbackIndex].id;
 		});
-	};
+	}, [historyEntries, removeExperiment]);
 
 	return (
 		<div className="app-shell">
@@ -266,7 +279,7 @@ const App = () => {
 					<PanelHeader
 						title="Eval Agent"
 						variant="page"
-						onManageCriteria={() => setIsCriteriaManagerOpen(true)}
+						onManageCriteria={openCriteriaManager}
 						onCleanupServer={handleCleanupServerFiles}
 						onRestartBackend={handleRestartBackend}
 						onGetCacheData={handleGetCacheData}
@@ -282,10 +295,7 @@ const App = () => {
 					style={{ flexGrow: sizes.left }}
 				>
 					<VerticalTabs
-						items={[
-							{ key: 'persona', label: 'Persona', icon: PersonaIcon, title: 'Persona Generation' },
-							{ key: 'environment', label: 'Environment', icon: EnvironmentIcon, title: 'Environment Setting' },
-						]}
+						items={CONFIG_TABS}
 						activeKey={activeConfigTab}
 						onChange={setActiveConfigTab}
 						containerClassName="config-vertical-tabs"
@@ -322,7 +332,7 @@ const App = () => {
 				</section>
 			</main>
 			{isCriteriaManagerOpen && (
-				<CriteriaManagerModal onClose={() => setIsCriteriaManagerOpen(false)} />
+				<CriteriaManagerModal onClose={closeCriteriaManager} />
 			)}
 		</div>
 	);

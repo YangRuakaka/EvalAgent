@@ -32,23 +32,32 @@ const TRAJECTORY_COLOR_PALETTE = [
 	'#17becf',
 ];
 
+const RIGHT_PANEL_TABS = [
+	{ key: 'trajectory', label: 'Trajectory', icon: TrajectoryIcon, title: 'Trajectory' },
+	{ key: 'reasoning', label: 'Reasoning', icon: ReasoningIcon, title: 'Reasoning Process' },
+	{ key: 'evaluation', label: 'Evaluation', icon: EvaluationIcon, title: 'Evaluation' },
+];
+
+const createDefaultExperimentState = () => ({
+	selectedCriteriaIds: [],
+	selectedConditionIds: [],
+	trajectoryUseImageHash: true,
+	reasoningEvidenceHighlight: true,
+});
+
 const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun, onCloseRun }) => {
 	const { state: { mappings, criterias, evaluationResponses }, updateEvaluationResponse } = useData();
 	const [activeTab, setActiveTab] = useState('trajectory');
 	const [evaluateModel, setEvaluateModel] = useState('gpt-4o-mini');
 	const [evaluationLoadingByRunId, setEvaluationLoadingByRunId] = useState({});
 	const [reasoningNavigationRequest, setReasoningNavigationRequest] = useState(null);
-	
-	// Store state for each experiment (runId = experimentId): { [experimentId]: { selectedCriteriaIds, selectedConditionIds } }
 	const [experimentStates, setExperimentStates] = useState({});
+	const [evaluationResponse, setEvaluationResponse] = useState(null);
 
-	// Get current experiment state or default values
-	const currentExperimentState = useMemo(() => experimentStates[activeRunId] || {
-		selectedCriteriaIds: [],
-		selectedConditionIds: [],
-		trajectoryUseImageHash: true,
-		reasoningEvidenceHighlight: true,
-	}, [experimentStates, activeRunId]);
+	const currentExperimentState = useMemo(
+		() => experimentStates[activeRunId] || createDefaultExperimentState(),
+		[experimentStates, activeRunId],
+	);
 
 	const {
 		selectedCriteriaIds,
@@ -56,6 +65,7 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 		trajectoryUseImageHash,
 		reasoningEvidenceHighlight,
 	} = currentExperimentState;
+
 	const isEvaluatingCurrentRun = useMemo(() => {
 		if (!activeRunId) {
 			return false;
@@ -63,78 +73,42 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 		return Boolean(evaluationLoadingByRunId[activeRunId]);
 	}, [activeRunId, evaluationLoadingByRunId]);
 
-	// State updaters for current experiment
-	const setSelectedCriteriaIds = useCallback((ids) => {
+	const updateActiveExperimentState = useCallback((nextPartialState) => {
 		if (!activeRunId) {
 			return;
 		}
-		setExperimentStates(prev => ({
-			...prev,
-			[activeRunId]: {
-				...(prev[activeRunId] || {
-					selectedConditionIds: [],
-					selectedCriteriaIds: [],
-					trajectoryUseImageHash: true,
-					reasoningEvidenceHighlight: true,
-				}),
-				selectedCriteriaIds: ids
-			}
-		}));
+
+		setExperimentStates((prev) => {
+			const current = prev[activeRunId] || createDefaultExperimentState();
+			const nextPartial = typeof nextPartialState === 'function'
+				? nextPartialState(current)
+				: nextPartialState;
+
+			return {
+				...prev,
+				[activeRunId]: {
+					...current,
+					...nextPartial,
+				},
+			};
+		});
 	}, [activeRunId]);
+
+	const setSelectedCriteriaIds = useCallback((ids) => {
+		updateActiveExperimentState({ selectedCriteriaIds: ids });
+	}, [updateActiveExperimentState]);
 
 	const setSelectedConditionIds = useCallback((ids) => {
-		if (!activeRunId) return;
-		setExperimentStates(prev => ({
-			...prev,
-			[activeRunId]: {
-				...(prev[activeRunId] || {
-					selectedCriteriaIds: [],
-					selectedConditionIds: [],
-					trajectoryUseImageHash: true,
-					reasoningEvidenceHighlight: true,
-				}),
-				selectedConditionIds: ids
-			}
-		}));
-	}, [activeRunId]);
+		updateActiveExperimentState({ selectedConditionIds: ids });
+	}, [updateActiveExperimentState]);
 
 	const setTrajectoryUseImageHash = useCallback((enabled) => {
-		if (!activeRunId) {
-			return;
-		}
-
-		setExperimentStates((prev) => ({
-			...prev,
-			[activeRunId]: {
-				...(prev[activeRunId] || {
-					selectedCriteriaIds: [],
-					selectedConditionIds: [],
-					trajectoryUseImageHash: true,
-					reasoningEvidenceHighlight: true,
-				}),
-				trajectoryUseImageHash: Boolean(enabled),
-			},
-		}));
-	}, [activeRunId]);
+		updateActiveExperimentState({ trajectoryUseImageHash: Boolean(enabled) });
+	}, [updateActiveExperimentState]);
 
 	const setReasoningEvidenceHighlight = useCallback((enabled) => {
-		if (!activeRunId) {
-			return;
-		}
-
-		setExperimentStates((prev) => ({
-			...prev,
-			[activeRunId]: {
-				...(prev[activeRunId] || {
-					selectedCriteriaIds: [],
-					selectedConditionIds: [],
-					trajectoryUseImageHash: true,
-					reasoningEvidenceHighlight: true,
-				}),
-				reasoningEvidenceHighlight: Boolean(enabled),
-			},
-		}));
-	}, [activeRunId]);
+		updateActiveExperimentState({ reasoningEvidenceHighlight: Boolean(enabled) });
+	}, [updateActiveExperimentState]);
 
 	const handleTrajectoryNavigateToReasoning = useCallback((payload) => {
 		if (!payload) {
@@ -156,9 +130,6 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 		setActiveTab('reasoning');
 	}, []);
 
-	const [evaluationResponse, setEvaluationResponse] = useState(null);
-
-	// When activeRunId changes, load evaluation response from DataContext if available
 	useEffect(() => {
 		if (activeRunId && evaluationResponses && evaluationResponses[activeRunId]) {
 			setEvaluationResponse(evaluationResponses[activeRunId]);
@@ -166,12 +137,6 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 			setEvaluationResponse(null);
 		}
 	}, [activeRunId, evaluationResponses]);
-
-	const rightPanelTabs = [
-		{ key: 'trajectory', label: 'Trajectory', icon: TrajectoryIcon, title: 'Trajectory' },
-		{ key: 'reasoning', label: 'Reasoning', icon: ReasoningIcon, title: 'Reasoning Process' },
-		{ key: 'evaluation', label: 'Evaluation', icon: EvaluationIcon, title: 'Evaluation' },
-	];
 
 	const trajectoryData = useMemo(() => {
 		if (!activeRun) return null;
@@ -184,24 +149,26 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 		let conditionsWithEvaluation = activeRun?.conditions || [];
 		
 		if (evaluationResponse?.conditions) {
-			conditionsWithEvaluation = conditionsWithEvaluation.map(condition => {
+			conditionsWithEvaluation = conditionsWithEvaluation.map((condition) => {
 				const evalData = evaluationResponse.conditions.find(
-					c => {
+					(c) => {
 						if (c.conditionID && condition.id && c.conditionID === condition.id) return true;
 						if (c.id && condition.id && c.id === condition.id) return true;
 						if (c.conditionID && condition.conditionID && c.conditionID === condition.conditionID) return true;
 						
-						const conditionPersonaStr = typeof condition.persona === 'object' 
-							? condition.persona?.value 
+						const conditionPersonaStr = typeof condition.persona === 'object'
+							? condition.persona?.value
 							: condition.persona;
-						const evalPersonaStr = typeof c.persona === 'object' 
-							? c.persona?.value 
+						const evalPersonaStr = typeof c.persona === 'object'
+							? c.persona?.value
 							: c.persona;
 						
-						return (c.model === condition.model && 
-							evalPersonaStr === conditionPersonaStr && 
-							c.run_index === condition.run_index);
-					}
+						return (
+							c.model === condition.model
+							&& evalPersonaStr === conditionPersonaStr
+							&& c.run_index === condition.run_index
+						);
+					},
 				);
 				
 				if (evalData && evalData.criteria) {
@@ -246,7 +213,7 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 		if (!runId) {
 			return;
 		}
-		setEvaluationLoadingByRunId(prev => ({
+		setEvaluationLoadingByRunId((prev) => ({
 			...prev,
 			[runId]: isLoading,
 		}));
@@ -254,7 +221,7 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 
 	const visibleHistoryEntries = useMemo(() => {
 		const counts = {};
-		return historyEntries.map(entry => {
+		return historyEntries.map((entry) => {
 			const primaryRun = entry.runs?.[0] || {};
 			const taskName = primaryRun.metadata?.task?.name || 'Unknown Task';
 			
@@ -270,7 +237,7 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 			
 			return {
 				...entry,
-				label
+				label,
 			};
 		});
 	}, [historyEntries]);
@@ -322,49 +289,31 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 						)}
 					</section>
 					<section className={`visualization-view__panel${activeTab !== 'evaluation' ? ' visualization-view__panel--hidden' : ''}`}>
-							<EvaluationPanel
-								criterias={criterias}
-								conditions={experimentsData?.conditions || []}
-								selectedCriteriaIds={selectedCriteriaIds}
-								selectedConditionIds={selectedConditionIds}
-								evaluateModel={evaluateModel}
-								modelOptions={EVALUATION_MODEL_OPTIONS}
-								onEvaluateModelChange={setEvaluateModel}
-								onCriteriaSelectionChange={setSelectedCriteriaIds}
-								onConditionSelectionChange={setSelectedConditionIds}
-								evaluationResponse={evaluationResponse}
-								isEvaluating={isEvaluatingCurrentRun}
-								onEvaluate={async (config) => {
-									const { criteriaIds, conditionIds, evaluateModel: selectedEvaluateModel } = config;
-									const runIdForRequest = activeRunId;
-									setRunEvaluationLoading(runIdForRequest, true);
-									try {
-									// Get selected conditions data
+						<EvaluationPanel
+							criterias={criterias}
+							conditions={experimentsData?.conditions || []}
+							selectedCriteriaIds={selectedCriteriaIds}
+							selectedConditionIds={selectedConditionIds}
+							evaluateModel={evaluateModel}
+							modelOptions={EVALUATION_MODEL_OPTIONS}
+							onEvaluateModelChange={setEvaluateModel}
+							onCriteriaSelectionChange={setSelectedCriteriaIds}
+							onConditionSelectionChange={setSelectedConditionIds}
+							evaluationResponse={evaluationResponse}
+							isEvaluating={isEvaluatingCurrentRun}
+							onEvaluate={async (config) => {
+								const { criteriaIds, conditionIds, evaluateModel: selectedEvaluateModel } = config;
+								const runIdForRequest = activeRunId;
+								setRunEvaluationLoading(runIdForRequest, true);
+								try {
 									const selectedConditions = experimentsData?.conditions
-										?.filter(cond => conditionIds.includes(cond.id))
+										?.filter((cond) => conditionIds.includes(cond.id))
 										|| [];
 									
-									// Get selected criteria data
 									const selectedCriteria = Object.values(criterias || {})
-										.filter(crit => criteriaIds.includes(crit.id))
+										.filter((crit) => criteriaIds.includes(crit.id))
 										|| [];
-									
-									let experimentIdToUse = activeRun?.originalId;
-									
-									if (!experimentIdToUse && activeRunId) {
-										// Fallback: try to extract from ID if it matches the pattern generated by visualizationDataProcessor
-										// Pattern: originalId-timestamp-suffix
-										// timestamp is usually 13 digits (Date.now())
-										// suffix is usually 9 chars (Math.random().toString(36).substr(2, 9))
-										const match = activeRunId.match(/^(.*)-(\d{13})-([a-z0-9]{9})$/);
-										if (match) {
-											experimentIdToUse = match[1];
-										} else {
-											experimentIdToUse = activeRunId;
-										}
-									}
 
-									// Call API to evaluate experiment
 									const response = await evaluateExperiment(
 										selectedConditions,
 										selectedCriteria,
@@ -372,24 +321,23 @@ const VisualizationView = ({ activeRun, historyEntries, activeRunId, onSelectRun
 									);
 									
 									if (response.ok) {
-									// response.data 已经是评估结果对象，包含 { run_id, conditions: [...] }
-									handleEvaluationResponse(response.data);
-									alert(`Evaluation completed for ${selectedConditions.length} conditions with ${selectedCriteria.length} criteria.`);
+										handleEvaluationResponse(response.data);
+										alert(`Evaluation completed for ${selectedConditions.length} conditions with ${selectedCriteria.length} criteria.`);
 									} else {
-									alert(`Evaluation failed: ${response.status}`);
+										alert(`Evaluation failed: ${response.status}`);
 									}
 								} catch (error) {
 									alert(`Evaluation error: ${error.message}`);
 								} finally {
 									setRunEvaluationLoading(runIdForRequest, false);
 								}
-								}}
-							/>
+							}}
+						/>
 					</section>
 				</div>
 			</section>
 			<VerticalTabs
-				items={rightPanelTabs}
+				items={RIGHT_PANEL_TABS}
 				activeKey={activeTab}
 				onChange={setActiveTab}
 				containerClassName="config-vertical-tabs"

@@ -30,7 +30,10 @@ $Region = "us-central1"
 $BucketName = "evalagent-67802-history-logs" # GCS Bucket for history persistence
 $MountPath = "/app/history_logs"
 $SourcePath = $PSScriptRoot
-$HistoryLogsPath = Join-Path $PSScriptRoot "history_logs"
+$CacheHistoryLogsPath = Join-Path $PSScriptRoot "cache_history_logs"
+$BrowserAgentRunsPath = Join-Path $PSScriptRoot "browser_agent_runs"
+$CacheHistoryLogsDir = "$MountPath/cache_history_logs"
+$BrowserAgentRunOutputDir = "$MountPath/browser_agent_runs"
 $DefaultLLMModel = "gpt-4o"
 $Memory = "4Gi"
 $Cpu = "2"
@@ -126,26 +129,35 @@ if ($DeepSeekApiKey) { Write-Host "DEEPSEEK_API_KEY configured." -ForegroundColo
 if ($AnthropicApiKey) { Write-Host "ANTHROPIC_API_KEY configured." -ForegroundColor Green }
 if ($GeminiApiKey) { Write-Host "GEMINI_API_KEY configured." -ForegroundColor Green }
 
-# --- Sync History Logs ---
-if (Test-Path $HistoryLogsPath) {
-    Write-Host "Syncing local history_logs to GCS Bucket ($BucketName)..." -ForegroundColor Cyan
-    # Use gsutil to sync files. -m for multi-threaded, -r for recursive.
-    # We use Start-Process to ensure it runs correctly across environments or call gsutil directly if in path.
-    
+# --- Sync Cache & Browser Run Folders ---
+if ((Test-Path $CacheHistoryLogsPath) -or (Test-Path $BrowserAgentRunsPath)) {
+    Write-Host "Syncing local cache/browser-run folders to GCS Bucket ($BucketName)..." -ForegroundColor Cyan
+
     $GsutilCommand = "gsutil"
     if ($IsWindows -and (Get-Command "gsutil.cmd" -ErrorAction SilentlyContinue)) {
         $GsutilCommand = "gsutil.cmd"
     }
 
     if (Get-Command $GsutilCommand -ErrorAction SilentlyContinue) {
-        & $GsutilCommand -m cp -r "$HistoryLogsPath\*" "gs://$BucketName/"
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "History logs synced successfully." -ForegroundColor Green
-        } else {
-            Write-Warning "Failed to sync history logs. Continuing with deployment..."
+        if (Test-Path $CacheHistoryLogsPath) {
+            & $GsutilCommand -m rsync -r "$CacheHistoryLogsPath" "gs://$BucketName/cache_history_logs"
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "cache_history_logs synced successfully." -ForegroundColor Green
+            } else {
+                Write-Warning "Failed to sync cache_history_logs. Continuing with deployment..."
+            }
+        }
+
+        if (Test-Path $BrowserAgentRunsPath) {
+            & $GsutilCommand -m rsync -r "$BrowserAgentRunsPath" "gs://$BucketName/browser_agent_runs"
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "browser_agent_runs synced successfully." -ForegroundColor Green
+            } else {
+                Write-Warning "Failed to sync browser_agent_runs. Continuing with deployment..."
+            }
         }
     } else {
-        Write-Warning "gsutil not found. Skipping history logs sync."
+        Write-Warning "gsutil not found. Skipping folder sync."
     }
 }
 
@@ -175,6 +187,9 @@ $gcloudArgs = @(
 # Build environment variables list
 $EnvVars = @(
     "DEFAULT_LLM_MODEL=$DefaultLLMModel",
+    "CACHE_HISTORY_LOGS_DIR=$CacheHistoryLogsDir",
+    "BROWSER_AGENT_RUN_OUTPUT_DIR=$BrowserAgentRunOutputDir",
+    "BROWSER_AGENT_OUTPUT_DIR=$BrowserAgentRunOutputDir",
     "BROWSER_AGENT_MAX_CONCURRENT=$BrowserAgentMaxConcurrent",
     "BROWSER_AGENT_MAX_CONCURRENT_CAP=$BrowserAgentMaxConcurrentCap",
     "BROWSER_AGENT_CONCURRENCY_FALLBACK_ENABLED=$BrowserAgentConcurrencyFallbackEnabled",

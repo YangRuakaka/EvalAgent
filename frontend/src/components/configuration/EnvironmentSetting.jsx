@@ -269,12 +269,15 @@ const EnvironmentSetting = ({
                   value={environmentTaskUrl}
                   onChange={(e) => handleTaskUrlChange(e.target.value)}
                   list="task-url-options"
-                  placeholder="http://localhost:3000/..."
+                  placeholder="http://34.55.136.249:3000/..."
                 />
                 <datalist id="task-url-options">
-                  <option value="http://localhost:3000/riverbuy" label="RiverBuy" />
-                  <option value="http://localhost:3000/zoomcar" label="ZoomCar" />
-                  <option value="http://localhost:3000/dwellio" label="Dwellio" />
+                  <option value="http://34.55.136.249:3000/riverbuy" label="RiverBuy" />
+                  <option value="http://34.55.136.249:3000/flight" label="Flight" />
+                  <option value="http://34.55.136.249:3000/grumble" label="Grumble" />
+                  <option value="http://34.55.136.249:3000/zoomcar" label="Zoomcar" />
+                  <option value="http://34.55.136.249:3000/stayscape" label="StayScape" />
+                  <option value="http://34.55.136.249:3000/dwellio" label="Dwellio" />
                 </datalist>
               </div>
             </div>

@@ -3,22 +3,30 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
 import io
 import json
 import logging
 import os
 import re
 import sys
+import threading
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from ..core.config import get_settings
 from ..core.storage_paths import get_browser_run_output_dir
 
 logger = logging.getLogger(__name__)
+
+_ACTIVE_BROWSER_AGENT_RUN_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "active_browser_agent_run_id",
+    default=None,
+)
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -73,8 +81,31 @@ class _RunUnit:
         return (self.persona_index, self.model_index, self.run_index)
 
 
+class _RunScopedLogHandler(logging.Handler):
+    """Capture log lines for the currently executing browser-agent run."""
+
+    def __init__(self, append_callback: Callable[[str, str], None]) -> None:
+        super().__init__(level=logging.INFO)
+        self._append_callback = append_callback
+
+    def emit(self, record: logging.LogRecord) -> None:
+        run_id = getattr(record, "browser_agent_run_id", None) or _ACTIVE_BROWSER_AGENT_RUN_ID.get()
+        if not run_id:
+            return
+
+        try:
+            message = self.format(record)
+        except Exception:
+            message = record.getMessage()
+
+        self._append_callback(str(run_id), str(message))
+
+
 class BrowserAgentService:
     """High-level service for orchestrating browser agent runs."""
+
+    _LOG_HANDLER_INSTALL_LOCK = threading.Lock()
+    _LOG_HANDLER_INSTALLED = False
 
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -124,17 +155,78 @@ class BrowserAgentService:
         self._run_store: Dict[str, dict] = {}
         self._background_run_tasks: Dict[str, asyncio.Task[None]] = {}
         self._run_runtime_stats: Dict[str, dict] = {}
+        self._run_logs: Dict[str, deque[str]] = {}
+        self._run_logs_lock = threading.Lock()
+        self._run_log_max_entries = max(
+            50,
+            int(getattr(self._settings, "BROWSER_AGENT_STATUS_LOG_BUFFER_SIZE", 500)),
+        )
+        self._run_log_handler = _RunScopedLogHandler(self._append_run_log)
+        self._run_log_handler.setFormatter(
+            logging.Formatter(
+                fmt="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+
+        with self.__class__._LOG_HANDLER_INSTALL_LOCK:
+            if not self.__class__._LOG_HANDLER_INSTALLED:
+                logging.getLogger().addHandler(self._run_log_handler)
+                self.__class__._LOG_HANDLER_INSTALLED = True
 
     def _status_file_path(self, run_id: str) -> Path:
         return self._status_dir / f"{run_id}.json"
 
+    def _reset_run_logs(self, run_id: str) -> None:
+        normalized_run_id = (run_id or "").strip()
+        if not normalized_run_id:
+            return
+        with self._run_logs_lock:
+            self._run_logs[normalized_run_id] = deque(maxlen=self._run_log_max_entries)
+
+    def _append_run_log(self, run_id: str, message: str) -> None:
+        normalized_run_id = (run_id or "").strip()
+        if not normalized_run_id:
+            return
+
+        text = str(message or "").strip()
+        if not text:
+            return
+
+        with self._run_logs_lock:
+            buffer = self._run_logs.get(normalized_run_id)
+            if buffer is None:
+                buffer = deque(maxlen=self._run_log_max_entries)
+                self._run_logs[normalized_run_id] = buffer
+            buffer.append(text)
+            snapshot = list(buffer)
+
+        status_payload = self._run_store.get(normalized_run_id)
+        if isinstance(status_payload, dict):
+            status_payload["logs"] = snapshot
+
+    def _get_run_logs(self, run_id: str) -> List[str]:
+        normalized_run_id = (run_id or "").strip()
+        if not normalized_run_id:
+            return []
+
+        with self._run_logs_lock:
+            buffer = self._run_logs.get(normalized_run_id)
+            if not buffer:
+                return []
+            return list(buffer)
+
     def _write_run_status(self, run_id: str, payload: dict) -> None:
-        self._run_store[run_id] = payload
+        enriched_payload = {
+            **payload,
+            "logs": self._get_run_logs(run_id),
+        }
+        self._run_store[run_id] = enriched_payload
         try:
             status_file = self._status_file_path(run_id)
             status_file.parent.mkdir(parents=True, exist_ok=True)
             status_file.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
+                json.dumps(enriched_payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         except Exception as exc:
@@ -171,6 +263,8 @@ class BrowserAgentService:
         ]
 
     def register_queued_run(self, run_id: str, total_tasks: int) -> None:
+        self._reset_run_logs(run_id)
+        self._append_run_log(run_id, f"Run queued | run_id={run_id} total_tasks={total_tasks}")
         self._write_run_status(run_id, {
             "run_id": run_id,
             "status": "queued",
@@ -180,6 +274,7 @@ class BrowserAgentService:
         })
 
     def mark_run_running(self, run_id: str, total_tasks: int = 0) -> None:
+        self._append_run_log(run_id, f"Run started | run_id={run_id} total_tasks={total_tasks}")
         self._write_run_status(run_id, {
             "run_id": run_id,
             "status": "running",
@@ -190,6 +285,7 @@ class BrowserAgentService:
 
     def mark_run_failed(self, run_id: str, error: str) -> None:
         previous = self.get_run_status(run_id) or {}
+        self._append_run_log(run_id, f"Run failed | run_id={run_id} error={error}")
         self._write_run_status(run_id, {
             "run_id": run_id,
             "status": "failed",
@@ -456,7 +552,9 @@ class BrowserAgentService:
     async def _execute_run_background(self, request: BrowserAgentRunRequest, run_id: str) -> None:
         """Background task: execute agent, post-process results, store in _run_store."""
         timeout = getattr(self._settings, "BROWSER_AGENT_RUN_TIMEOUT", 0)
+        run_context_token = _ACTIVE_BROWSER_AGENT_RUN_ID.set(run_id)
         try:
+            self._append_run_log(run_id, f"Background execution started | run_id={run_id}")
             if timeout and timeout > 0:
                 results = await asyncio.wait_for(
                     self.run(request, run_id=run_id),
@@ -487,6 +585,10 @@ class BrowserAgentService:
                     run_id,
                     len(processed),
                 )
+                self._append_run_log(
+                    run_id,
+                    f"Background execution finished with errors | run_id={run_id} results={len(processed)}",
+                )
             else:
                 previous = self._run_store.get(run_id, {})
                 runtime_stats = self._get_run_runtime_stats(run_id)
@@ -499,6 +601,10 @@ class BrowserAgentService:
                     "runtime": runtime_stats,
                 })
                 logger.info("Background run completed | run_id=%s results=%d", run_id, len(processed))
+                self._append_run_log(
+                    run_id,
+                    f"Background execution completed | run_id={run_id} results={len(processed)}",
+                )
 
         except asyncio.TimeoutError:
             previous = self._run_store.get(run_id, {})
@@ -512,6 +618,7 @@ class BrowserAgentService:
                 "runtime": runtime_stats,
             })
             logger.warning("Background run timed out | run_id=%s timeout=%ds", run_id, timeout)
+            self._append_run_log(run_id, f"Background execution timed out | run_id={run_id} timeout={timeout}s")
 
         except asyncio.CancelledError:
             if self._run_store.get(run_id, {}).get("status") != "cancelled":
@@ -526,6 +633,7 @@ class BrowserAgentService:
                     "runtime": runtime_stats,
                 })
             logger.info("Background run cancelled | run_id=%s", run_id)
+            self._append_run_log(run_id, f"Background execution cancelled | run_id={run_id}")
 
         except Exception as exc:
             previous = self._run_store.get(run_id, {})
@@ -539,17 +647,23 @@ class BrowserAgentService:
                 "runtime": runtime_stats,
             })
             logger.exception("Background run failed | run_id=%s", run_id)
+            self._append_run_log(run_id, f"Background execution exception | run_id={run_id} error={exc}")
 
         finally:
             self._background_run_tasks.pop(run_id, None)
             self._clear_run_runtime_stats(run_id)
+            _ACTIVE_BROWSER_AGENT_RUN_ID.reset(run_context_token)
 
     def get_run_status(self, run_id: str) -> Optional[dict]:
         """Return the current status dict for a run, or None if not found."""
         status = self._run_store.get(run_id)
         if status is not None:
+            status.setdefault("logs", self._get_run_logs(run_id))
             return status
-        return self._read_run_status(run_id)
+        persisted = self._read_run_status(run_id)
+        if persisted is not None:
+            persisted.setdefault("logs", self._get_run_logs(run_id))
+        return persisted
 
     def _post_process_results(
         self, request: BrowserAgentRunRequest, results: List[BrowserAgentRunResult]

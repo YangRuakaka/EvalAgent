@@ -1,14 +1,12 @@
 import logging
 import os
+import stat
 import shutil
 import threading
 import time
 from pathlib import Path
 
 from fastapi import APIRouter
-
-from ..core.config import settings
-from ..core.storage_paths import get_cache_dataset_dir
 
 logger = logging.getLogger(__name__)
 
@@ -37,25 +35,39 @@ async def restart_backend_service():
 
 @router.post(
     "/cleanup-files",
-    summary="Cleanup extra files in cache_history_logs/data1",
+    summary="Cleanup files in browser_agent_runs",
 )
 async def cleanup_backend_files():
     backend_root = Path(__file__).resolve().parents[2]
-    cache_data1_dir = get_cache_dataset_dir(settings, "data1")
-    screenshots_dir = cache_data1_dir / "screenshots"
+    browser_runs_dir = backend_root / "browser_agent_runs"
+    browser_runs_root_resolved = browser_runs_dir.resolve(strict=False)
 
     deleted = []
     skipped = []
     failed = []
 
-    def to_display_path(entry: Path) -> str:
+    def is_reparse_point(entry: Path) -> bool:
         try:
-            return entry.relative_to(backend_root).as_posix()
-        except ValueError:
-            return entry.as_posix()
+            attrs = getattr(entry.lstat(), "st_file_attributes", 0)
+            return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+        except OSError:
+            return False
 
     def safe_remove(entry: Path):
-        relative_name = to_display_path(entry)
+        relative_name = entry.relative_to(backend_root).as_posix()
+        entry_resolved = entry.resolve(strict=False)
+
+        if (
+            entry_resolved != browser_runs_root_resolved
+            and browser_runs_root_resolved not in entry_resolved.parents
+        ):
+            skipped.append(relative_name)
+            return
+
+        if is_reparse_point(entry):
+            skipped.append(relative_name)
+            return
+
         try:
             if entry.is_dir() and not entry.is_symlink():
                 shutil.rmtree(entry)
@@ -66,47 +78,26 @@ async def cleanup_backend_files():
             logger.error("Failed to delete %s: %s", relative_name, exc)
             failed.append({"path": relative_name, "error": str(exc)})
 
-    def is_buy_milk_name(name: str) -> bool:
-        return name.lower().startswith("buy_milk")
-
-    if not cache_data1_dir.exists():
+    if not browser_runs_dir.exists():
         return {
             "ok": True,
             "backend_root": backend_root.as_posix(),
-            "scope": "cache_history_logs/data1",
-            "message": "cache_history_logs/data1 directory does not exist.",
-            "preserved": ["cache_history_logs/data1/screenshots/**", "cache_history_logs/data1/buy_milk*.json"],
+            "scope": "browser_agent_runs",
+            "message": "browser_agent_runs directory does not exist.",
+            "preserved": [],
             "deleted": deleted,
             "skipped": skipped,
             "failed": failed,
         }
 
-    for entry in cache_data1_dir.iterdir():
-        relative_name = to_display_path(entry)
-
-        if entry.name == "screenshots":
-            skipped.append(relative_name)
-            continue
-
-        if is_buy_milk_name(entry.name):
-            skipped.append(relative_name)
-            continue
-
+    for entry in browser_runs_dir.iterdir():
         safe_remove(entry)
-
-    if screenshots_dir.exists() and screenshots_dir.is_dir():
-        for screenshot_entry in screenshots_dir.iterdir():
-            relative_name = to_display_path(screenshot_entry)
-            if is_buy_milk_name(screenshot_entry.name):
-                skipped.append(relative_name)
-                continue
-            safe_remove(screenshot_entry)
 
     return {
         "ok": len(failed) == 0,
         "backend_root": backend_root.as_posix(),
-        "scope": "cache_history_logs/data1",
-        "preserved": ["cache_history_logs/data1/screenshots/buy_milk*/**", "cache_history_logs/data1/buy_milk*"],
+        "scope": "browser_agent_runs",
+        "preserved": [],
         "deleted": deleted,
         "skipped": skipped,
         "failed": failed,

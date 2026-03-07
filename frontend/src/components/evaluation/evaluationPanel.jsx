@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import PanelHeader from '../common/PanelHeader';
-import ActionButton from '../common/ActionButton';
 import CriteriaCard from './CriteriaCard';
 import ConditionCard from './ConditionCard';
 import CriteriaDetailModal from './CriteriaDetailModal';
 import ConditionDetailModal from './ConditionDetailModal';
+import '../configuration/ConfigurationCommon.css';
 import './evaluationPanel.css';
 
 const EvaluationPanel = ({
@@ -18,6 +18,7 @@ const EvaluationPanel = ({
 	onEvaluateModelChange = () => {},
 	onCriteriaSelectionChange = () => {},
 	onConditionSelectionChange = () => {},
+	onManageCriteria,
 	onEvaluate = () => {},
 	evaluationResponse = null,
 	isEvaluating = false,
@@ -230,13 +231,20 @@ const EvaluationPanel = ({
 						<option key={option.value} value={option.value}>{option.label}</option>
 					))}
 				</select>
-				<ActionButton
-					label={isEvaluating ? 'Evaluating...' : 'Evaluate'}
+				<button
+					type="button"
+					className={`config-action-button config-action-button--primary evaluation-panel__evaluate-button${isEvaluating ? ' config-action-button--loading' : ''}`}
 					onClick={handleEvaluate}
 					disabled={!hasSelections || isEvaluating}
-					isLoading={isEvaluating}
-					variant="primary"
-				/>
+					aria-busy={isEvaluating}
+				>
+					{isEvaluating && (
+						<span className="config-action-button__spinner" aria-hidden="true" />
+					)}
+					<span className="btn-label">
+						{isEvaluating ? 'Evaluating...' : 'Evaluate'}
+					</span>
+				</button>
 			</PanelHeader>
 
 			<div className="evaluation-panel__content">
@@ -290,6 +298,17 @@ const EvaluationPanel = ({
 							onDragOver={handleDragOver}
 							onDrop={handleCriteriaDropToUnselected}
 						>
+							{typeof onManageCriteria === 'function' && (
+								<button
+									type="button"
+									className="evaluation-panel__criteria-manage-btn"
+									onClick={onManageCriteria}
+									aria-label="Manage criteria"
+									title="Manage Criteria"
+								>
+									+
+								</button>
+							)}
 							<div className="evaluation-panel__criteria-label">
 								Available ({unselectedCriteriaList.length})
 							</div>
@@ -461,6 +480,7 @@ EvaluationPanel.propTypes = {
 	onEvaluateModelChange: PropTypes.func,
 	onCriteriaSelectionChange: PropTypes.func,
 	onConditionSelectionChange: PropTypes.func,
+	onManageCriteria: PropTypes.func,
 	onEvaluate: PropTypes.func,
 	isEvaluating: PropTypes.bool,
 };
@@ -475,6 +495,7 @@ EvaluationPanel.defaultProps = {
 	onEvaluateModelChange: () => {},
 	onCriteriaSelectionChange: () => {},
 	onConditionSelectionChange: () => {},
+	onManageCriteria: undefined,
 	onEvaluate: () => {},
 	isEvaluating: false,
 };

@@ -22,10 +22,17 @@ async def list_history_logs(
         description="Select cache dataset bucket: data1, data2, or data3.",
         pattern=r"^(data[123]|[123])$",
     ),
+    data_source: str | None = Query(
+        None,
+        alias="data_source",
+        description="Backward-compatible alias for dataset (data1, data2, data3).",
+        pattern=r"^(data[123]|[123])$",
+    ),
 ) -> HistoryLogsListResponse:
     """Return all cached history logs in the new custom format for frontend consumption."""
     try:
-        logs = _service.list_logs(dataset=dataset)
+        selected_dataset = data_source if data_source else dataset
+        logs = _service.list_logs(dataset=selected_dataset)
         results = []
         for log in logs:
             raw_persona = log.metadata.get("persona", "")

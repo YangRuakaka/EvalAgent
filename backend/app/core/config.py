@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     DEFAULT_LLM_TEMPERATURE: float = 0
     PERSONA_LLM_TEMPERATURE: float = 0
     PERSONA_VARIATION_LLM_TEMPERATURE: float = 0
-    CACHE_HISTORY_LOGS_DIR: str = "cache_history_logs"
+    CACHE_HISTORY_LOGS_DIR: str = "history_logs"
     BROWSER_AGENT_RUN_OUTPUT_DIR: str = "browser_agent_runs"
     # Legacy setting kept for backward compatibility with existing deployments.
     BROWSER_AGENT_OUTPUT_DIR: str = "history_logs"

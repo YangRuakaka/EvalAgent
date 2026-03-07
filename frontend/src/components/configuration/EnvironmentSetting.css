@@ -33,6 +33,42 @@
 	gap: 8px;
 }
 
+.config-environment__task-layout {
+	display: grid;
+	grid-template-columns: minmax(240px, 1fr) minmax(280px, 1fr) 120px;
+	gap: 12px;
+	align-items: start;
+	width: 100%;
+}
+
+.config-environment__field--task-name,
+.config-environment__field--task-url,
+.config-environment__field--run-times {
+	min-width: 0;
+}
+
+.config-environment__field--run-times {
+	grid-column: 3;
+	max-width: 84px;
+}
+
+.config-environment__field--run-times .config-environment__select--input {
+	width: 84px;
+}
+
+.config-environment__run-action {
+	grid-column: 3;
+	justify-self: end;
+	align-self: start;
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 4px;
+}
+
+.config-environment__run-button {
+	min-width: 120px;
+}
+
 .config-environment__label {
 	font-size: 0.8rem;
 	font-weight: 600;
@@ -377,6 +413,27 @@
 @media (max-width: 780px) {
 	.config-selection-row {
 		flex-direction: column;
+	}
+
+	.config-environment__task-layout {
+		grid-template-columns: 1fr;
+	}
+
+	.config-environment__field--run-times,
+	.config-environment__run-action {
+		grid-column: 1;
+	}
+
+	.config-environment__field--run-times {
+		max-width: none;
+	}
+
+	.config-environment__field--run-times .config-environment__select--input {
+		width: 100%;
+	}
+
+	.config-environment__run-action {
+		justify-self: end;
 	}
 }
 

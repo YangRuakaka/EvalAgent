@@ -39,22 +39,28 @@ export const generatePersonaVariation = (personaContent, values, model, client =
 	});
 };
 
-export const fetchHistoryLogs = (datasetOrClient = 'data1', maybeClient = defaultClient) => {
-	let dataset = 'data1';
+export const fetchHistoryLogs = (optionsOrClient = {}, maybeClient) => {
+	let options = {};
 	let client = defaultClient;
 
-	if (datasetOrClient && typeof datasetOrClient.get === 'function') {
-		client = datasetOrClient;
+	if (optionsOrClient && typeof optionsOrClient.get === 'function') {
+		client = optionsOrClient;
 	} else {
-		dataset = String(datasetOrClient || 'data1');
+		options = optionsOrClient || {};
 		if (maybeClient && typeof maybeClient.get === 'function') {
 			client = maybeClient;
 		}
 	}
 
-	const requestPath = `${API_ENDPOINTS.historyLogs.root}?dataset=${encodeURIComponent(dataset)}`;
-	console.log('[API] fetchHistoryLogs - Request:', { dataset, requestPath });
-	return client.get(requestPath).then(response => {
+	const dataSource = typeof options?.dataSource === 'string'
+		? options.dataSource.trim().toLowerCase()
+		: '';
+
+	const query = dataSource ? `?data_source=${encodeURIComponent(dataSource)}` : '';
+	const path = `${API_ENDPOINTS.historyLogs.root}${query}`;
+
+	console.log('[API] fetchHistoryLogs - Request:', { dataSource: dataSource || null });
+	return client.get(path).then(response => {
 		console.log('[API] fetchHistoryLogs - Response:', response);
 		return response;
 	});

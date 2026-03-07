@@ -52,6 +52,7 @@ const StepTimeline = ({
 	steps, 
 	selectedStepIndex, 
 	onSelectStep,
+	onViewScreenshot,
 	enrichedSteps = [],        // 融合了evaluation信息的steps
 	report,                     // JudgeEvaluationReport
 	onStepClick,                // step被点击时的callback
@@ -235,6 +236,21 @@ const StepTimeline = ({
 								
 								{/* Evaluation指示器 */}
 								{renderEvaluationIndicators(step, index)}
+
+								{isSelected && step.screenshot && (
+									<button
+										className="step-timeline-view-btn"
+										onClick={(event) => {
+											event.stopPropagation();
+											onViewScreenshot?.(index);
+										}}
+										title={`View Step ${step.stepIndex} screenshot`}
+										aria-label={`View Step ${step.stepIndex} screenshot`}
+										type="button"
+									>
+										👁
+									</button>
+								)}
 							</div>
 						);
 					})}
@@ -261,6 +277,7 @@ StepTimeline.propTypes = {
 	).isRequired,
 	selectedStepIndex: PropTypes.number.isRequired,
 	onSelectStep: PropTypes.func.isRequired,
+	onViewScreenshot: PropTypes.func,
 	enrichedSteps: PropTypes.array,
 	report: PropTypes.shape({
 		task_decomposition: PropTypes.arrayOf(PropTypes.shape({
@@ -279,6 +296,7 @@ StepTimeline.defaultProps = {
 	enrichedSteps: [],
 	report: null,
 	onStepClick: null,
+	onViewScreenshot: null,
 	onClusterClick: null,
 	conditionId: null,
 	showEvidenceHighlights: true,

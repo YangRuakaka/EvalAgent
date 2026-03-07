@@ -49,9 +49,13 @@ const VisualizationView = ({
 	activeRunId,
 	onSelectRun,
 	onCloseRun,
+	onManageCriteria,
 	trajectoryUseImageHashEnabled,
 	reasoningEvidenceHighlightEnabled,
 	onDAGInteraction,
+	showBackendLogs,
+	backendLogs,
+	backendRunStatus,
 }) => {
 	const { state: { mappings, criterias, evaluationResponses }, updateEvaluationResponse } = useData();
 	const [activeTab, setActiveTab] = useState('trajectory');
@@ -73,6 +77,7 @@ const VisualizationView = ({
 
 	const effectiveTrajectoryUseImageHash = trajectoryUseImageHashEnabled !== false;
 	const effectiveReasoningEvidenceHighlight = reasoningEvidenceHighlightEnabled !== false;
+	const shouldShowBackendLogs = showBackendLogs === true;
 
 	const isEvaluatingCurrentRun = useMemo(() => {
 		if (!activeRunId) {
@@ -257,13 +262,16 @@ const VisualizationView = ({
 
 				<div className="visualization-view__content">
 					<section className={`visualization-view__panel${activeTab !== 'trajectory' ? ' visualization-view__panel--hidden' : ''}`}>
-						{trajectoryData ? (
+						{(trajectoryData || shouldShowBackendLogs) ? (
 							<TrajectoryVisualizer 
 								trajectory={trajectoryData}
 								conditions={experimentsData?.conditions || []}
 								useImageHashEnabled={effectiveTrajectoryUseImageHash}
 								onNavigateToReasoning={handleTrajectoryNavigateToReasoning}
 								onDAGInteraction={onDAGInteraction}
+								showBackendLogs={shouldShowBackendLogs}
+								backendLogs={backendLogs}
+								backendRunStatus={backendRunStatus}
 							/>
 						) : (
 							<div style={{ padding: '20px', color: '#999' }}>
@@ -272,14 +280,18 @@ const VisualizationView = ({
 						)}
 					</section>
 					<section className={`visualization-view__panel${activeTab !== 'reasoning' ? ' visualization-view__panel--hidden' : ''}`}>
-						{criteriaData ? (
+						{(criteriaData || shouldShowBackendLogs) ? (
 							<ReasoningPanel 
 								data={criteriaData}
+								conditions={experimentsData?.conditions || []}
 								selectedExperimentId={activeRunId}
 								experimentsMap={experimentsMapByAgentId}
 								evaluationResponse={evaluationResponse}
 								evidenceHighlightEnabled={effectiveReasoningEvidenceHighlight}
 								navigationRequest={reasoningNavigationRequest}
+								showBackendLogs={shouldShowBackendLogs}
+								backendLogs={backendLogs}
+								backendRunStatus={backendRunStatus}
 							/>
 						) : (
 							<div style={{ padding: '20px', color: '#999' }}>
@@ -298,6 +310,7 @@ const VisualizationView = ({
 							onEvaluateModelChange={setEvaluateModel}
 							onCriteriaSelectionChange={setSelectedCriteriaIds}
 							onConditionSelectionChange={setSelectedConditionIds}
+							onManageCriteria={onManageCriteria}
 							evaluationResponse={evaluationResponse}
 							isEvaluating={isEvaluatingCurrentRun}
 							onEvaluate={async (config) => {
@@ -351,17 +364,25 @@ VisualizationView.propTypes = {
 	activeRunId: PropTypes.string,
 	onSelectRun: PropTypes.func.isRequired,
 	onCloseRun: PropTypes.func.isRequired,
+	onManageCriteria: PropTypes.func,
 	trajectoryUseImageHashEnabled: PropTypes.bool,
 	reasoningEvidenceHighlightEnabled: PropTypes.bool,
 	onDAGInteraction: PropTypes.func,
+	showBackendLogs: PropTypes.bool,
+	backendLogs: PropTypes.arrayOf(PropTypes.string),
+	backendRunStatus: PropTypes.string,
 };
 
 VisualizationView.defaultProps = {
 	activeRun: null,
 	activeRunId: null,
+	onManageCriteria: undefined,
 	trajectoryUseImageHashEnabled: undefined,
 	reasoningEvidenceHighlightEnabled: undefined,
 	onDAGInteraction: undefined,
+	showBackendLogs: false,
+	backendLogs: [],
+	backendRunStatus: null,
 };
 
 export default VisualizationView;

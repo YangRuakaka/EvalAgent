@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 
 import PanelHeader from '../common/PanelHeader';
-import { ConfigIcon } from '../common/icons';
 import {
 	generatePersona,
 	generatePersonaVariation,
@@ -119,13 +118,28 @@ const createBrowserAgentRunId = () => {
 	return `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
 
-const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange: externalOnTabChange, onGetCacheData, isCacheLoading }) => {
-	const [activeTab] = useState('persona'); // 'persona' | 'environment'
+const ConfigurationView = ({
+	onAddRun,
+	activeTab: externalActiveTab,
+	onTabChange: externalOnTabChange,
+	onGetCacheData,
+	isCacheLoading,
+	onEnvironmentRunStateChange,
+}) => {
+	const [activeTab, setActiveTab] = useState('persona'); // 'persona' | 'environment'
 	// setActiveTab is reserved for future internal tab switching if external control is not provided
 	
 	// Use external tab state if provided, otherwise use internal state
 	const currentActiveTab = externalActiveTab !== undefined ? externalActiveTab : activeTab;
+	const switchConfigTab = (nextTab) => {
+		if (typeof externalOnTabChange === 'function') {
+			externalOnTabChange(nextTab);
+			return;
+		}
+		setActiveTab(nextTab);
+	};
 	const [isGeneratingVariation, setIsGeneratingVariation] = useState(false);
+	const [hasCompletedVariationGeneration, setHasCompletedVariationGeneration] = useState(false);
 	const [formData, setFormData] = useState(EMPTY_FORM);
 	const [personaModel, setPersonaModel] = useState(ENVIRONMENT_MODEL_OPTIONS[1].value);
 	const [errors, setErrors] = useState({});
@@ -157,6 +171,13 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 	const environmentWaitTimerRef = useRef(null);
 	const activeEnvironmentRunIdRef = useRef(null);
 	const activeEnvironmentAbortRef = useRef(null);
+
+	const emitEnvironmentRunState = (payload) => {
+		if (typeof onEnvironmentRunStateChange !== 'function' || !payload || typeof payload !== 'object') {
+			return;
+		}
+		onEnvironmentRunStateChange(payload);
+	};
 
 	const selectedPersona = useMemo(
 		() => personaGallery.find((persona) => persona.id === selectedPersonaId) || null,
@@ -216,6 +237,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 	useEffect(() => {
 		setEditingVariationId(null);
 		setVariationEditValue('');
+		setHasCompletedVariationGeneration(false);
 	}, [selectedPersonaId]);
 
 	useEffect(() => {
@@ -420,6 +442,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		setVariationEditValue('');
 		setIsValueDropdownOpen(false);
 		setVariationError('');
+		setHasCompletedVariationGeneration(false);
 	};
 
 	const toggleValueDropdown = () => {
@@ -432,6 +455,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		}
 
 		setVariationError('');
+		setHasCompletedVariationGeneration(false);
 
 		setCurrentPersonaVariationState((previousState) => {
 			const isActive = previousState.selectedValues.includes(valueKey);
@@ -603,6 +627,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 	const handlePersonaSelect = (event) => {
 		const { value } = event.target;
 		setSelectedPersonaId(value);
+		setHasCompletedVariationGeneration(false);
 		setIsEditing(false);
 		setEditValue('');
 		setEditingVariationId(null);
@@ -711,6 +736,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				setEditingVariationId(null);
 				setVariationEditValue('');
 				setIsValueDropdownOpen(false);
+				setHasCompletedVariationGeneration(false);
 				setErrors((prev) => {
 					if (!prev.submit) {
 						return prev;
@@ -750,6 +776,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		}
 
 		setVariationError('');
+		setHasCompletedVariationGeneration(false);
 		setIsGeneratingVariation(true);
 		try {
 			const response = await generatePersonaVariation(
@@ -820,6 +847,7 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 			setVariationEditValue('');
 			setIsValueDropdownOpen(false);
 			setVariationError('');
+			setHasCompletedVariationGeneration(true);
 		} catch (error) {
 			setVariationError(
 				error?.message || 'Failed to generate persona variations. Please try again.',
@@ -827,6 +855,10 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		} finally {
 			setIsGeneratingVariation(false);
 		}
+	};
+
+	const handleContinueToEnvironment = () => {
+		switchConfigTab('environment');
 	};
 
 	const handleVariationRegeneration = async (valueKey) => {
@@ -929,6 +961,12 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 			activeEnvironmentRunIdRef.current = null;
 			setIsRunningEnvironment(false);
 			setEnvironmentRunError('Browser agent run was stopped.');
+			emitEnvironmentRunState({
+				runId: activeRunId,
+				status: 'cancelled',
+				isRunning: false,
+				error: 'Browser agent run was stopped.',
+			});
 			return;
 		}
 
@@ -968,6 +1006,13 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		const abortController = new AbortController();
 		activeEnvironmentRunIdRef.current = runId;
 		activeEnvironmentAbortRef.current = abortController;
+		emitEnvironmentRunState({
+			runId,
+			status: 'queued',
+			isRunning: true,
+			logs: [],
+			error: null,
+		});
 
 		if (environmentWaitTimerRef.current) {
 			window.clearInterval(environmentWaitTimerRef.current);
@@ -1017,6 +1062,12 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 						`Failed to start the browser agent for task "${environmentTaskName}".`,
 					);
 				setEnvironmentRunError(message);
+				emitEnvironmentRunState({
+					runId,
+					status: 'failed',
+					isRunning: false,
+					error: message,
+				});
 				return;
 			}
 
@@ -1026,6 +1077,14 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 				const stream = streamBrowserAgentEvents(runId, {
 					onStatus: (data) => {
 						console.info('[browser-agent/events] Status:', data?.status);
+
+						emitEnvironmentRunState({
+							runId,
+							status: data?.status || 'running',
+							isRunning: data?.status === 'queued' || data?.status === 'running',
+							logs: Array.isArray(data?.logs) ? data.logs : undefined,
+							error: data?.error || null,
+						});
 
 						if (data?.status === 'completed') {
 							const runResults = Array.isArray(data.results) ? data.results : [];
@@ -1049,6 +1108,13 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 
 						if (data?.status === 'failed' || data?.status === 'cancelled') {
 							setEnvironmentRunError(data?.error || 'Browser agent run failed.');
+							emitEnvironmentRunState({
+								runId,
+								status: data?.status,
+								isRunning: false,
+								logs: Array.isArray(data?.logs) ? data.logs : undefined,
+								error: data?.error || 'Browser agent run failed.',
+							});
 							if (!settled) {
 								settled = true;
 								stream.close();
@@ -1057,6 +1123,14 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 						}
 					},
 					onEnd: (data) => {
+						emitEnvironmentRunState({
+							runId,
+							status: data?.status || 'completed',
+							isRunning: false,
+							logs: Array.isArray(data?.logs) ? data.logs : undefined,
+							error: data?.error || null,
+						});
+
 						if (settled) {
 							return;
 						}
@@ -1075,12 +1149,24 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 						}
 
 						if (abortController.signal.aborted) {
+							emitEnvironmentRunState({
+								runId,
+								status: 'cancelled',
+								isRunning: false,
+								error: 'Browser agent run was stopped.',
+							});
 							settled = true;
 							stream.close();
 							resolve();
 							return;
 						}
 
+						emitEnvironmentRunState({
+							runId,
+							status: 'failed',
+							isRunning: false,
+							error: streamError?.message || 'Browser agent event stream failed.',
+						});
 						settled = true;
 						stream.close();
 						reject(streamError);
@@ -1103,8 +1189,20 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 		} catch (error) {
 			if (error?.name === 'AbortError') {
 				setEnvironmentRunError('Browser agent run was stopped.');
+				emitEnvironmentRunState({
+					runId,
+					status: 'cancelled',
+					isRunning: false,
+					error: 'Browser agent run was stopped.',
+				});
 				return;
 			}
+			emitEnvironmentRunState({
+				runId,
+				status: 'failed',
+				isRunning: false,
+				error: error?.message || 'Failed to run the browser agent. Please try again later.',
+			});
 			setEnvironmentRunError(
 				error?.message || 'Failed to run the browser agent. Please try again later.',
 			);
@@ -1116,30 +1214,16 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 			activeEnvironmentAbortRef.current = null;
 			activeEnvironmentRunIdRef.current = null;
 			setIsRunningEnvironment(false);
+			emitEnvironmentRunState({
+				runId,
+				isRunning: false,
+			});
 		}
 	};
 
-	let actionButton = null;
-	if (currentActiveTab === 'environment') {
-		actionButton = (
-			<button
-				type="button"
-				className="config-section__action panel__action"
-				onClick={handleEnvironmentRun}
-				disabled={isCacheLoading}
-			>
-				{isRunningEnvironment
-					? `Stop (${environmentWaitSeconds}s)`
-					: (isCacheLoading ? 'Running...' : 'Run')}
-			</button>
-		);
-	}
-
 	return (
 		<div className="configuration-panel">
-			<PanelHeader title="Configuration" icon={<ConfigIcon />}>
-				{actionButton}
-			</PanelHeader>
+			<PanelHeader title="Configuration" />
 			<div className="config-container">
 				{/* Content area */}
 				<div className="panel__body config-content">
@@ -1187,6 +1271,8 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 										handleCancelEdit={handleCancelEdit}
 										handleDiscardPersona={handleDiscardPersona}
 										showSavedToast={showSavedToast}
+										hasCompletedVariationGeneration={hasCompletedVariationGeneration}
+										onContinueToEnvironment={handleContinueToEnvironment}
 									/>
 									{errors.submit && <p className="config-form__error config-form__error--global">{errors.submit}</p>}
 								</form>
@@ -1217,6 +1303,10 @@ const ConfigurationView = ({ onAddRun, activeTab: externalActiveTab, onTabChange
 									handleEnvironmentModelToggle={handleEnvironmentModelToggle}
 									environmentRunError={environmentRunError}
 									environmentRunResult={environmentRunResult}
+									handleEnvironmentRun={handleEnvironmentRun}
+									isRunningEnvironment={isRunningEnvironment}
+									environmentWaitSeconds={environmentWaitSeconds}
+									isCacheLoading={isCacheLoading}
 								/>
 							)}
 						</section>
@@ -1232,6 +1322,7 @@ ConfigurationView.propTypes = {
 	onTabChange: PropTypes.func,
 	onGetCacheData: PropTypes.func,
 	isCacheLoading: PropTypes.bool,
+	onEnvironmentRunStateChange: PropTypes.func,
 };
 
 ConfigurationView.defaultProps = {
@@ -1240,6 +1331,7 @@ ConfigurationView.defaultProps = {
 	onTabChange: undefined,
 	onGetCacheData: undefined,
 	isCacheLoading: false,
+	onEnvironmentRunStateChange: undefined,
 };
 
 export default ConfigurationView;

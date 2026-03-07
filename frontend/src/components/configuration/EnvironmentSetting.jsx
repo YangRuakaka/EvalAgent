@@ -27,7 +27,10 @@ const EnvironmentSetting = ({
   environmentModels,
   handleEnvironmentModelToggle,
   environmentRunError,
-  environmentRunResult,
+  handleEnvironmentRun,
+  isRunningEnvironment,
+  environmentWaitSeconds = 0,
+  isCacheLoading,
 }) => {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editVariation, setEditVariation] = useState(null);
@@ -246,9 +249,8 @@ const EnvironmentSetting = ({
           </div>
 
           <div className="config-panel__body">
-            <span className="config-panel__title">Task</span>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'flex-start' }}>
-              <div className="config-environment__field">
+            <div className="config-environment__task-layout">
+              <div className="config-environment__field config-environment__field--task-name">
                 <label className="config-environment__label" htmlFor="task-name">Task Name</label>
                 <input
                   id="task-name"
@@ -260,7 +262,7 @@ const EnvironmentSetting = ({
                 />
               </div>
 
-              <div className="config-environment__field">
+              <div className="config-environment__field config-environment__field--task-url">
                 <label className="config-environment__label" htmlFor="task-url">Target URL</label>
                 <input
                   id="task-url"
@@ -280,39 +282,50 @@ const EnvironmentSetting = ({
                   <option value="http://34.55.136.249:3000/dwellio" label="Dwellio" />
                 </datalist>
               </div>
+
+              <div className="config-environment__field config-environment__field--run-times">
+                <label className="config-environment__label" htmlFor="environment-run-times">Run Times</label>
+                <input
+                  id="environment-run-times"
+                  type="number"
+                  min="1"
+                  max="10"
+                  step="1"
+                  className="config-environment__select config-environment__select--input"
+                  value={environmentRunTimes}
+                  onChange={handleEnvironmentRunTimesChange}
+                />
+                {environmentErrors.run_times && (
+                  <p className="config-form__error config-form__error--inline">{environmentErrors.run_times}</p>
+                )}
+              </div>
+
+              <div className="config-environment__run-action">
+                <button
+                  type="button"
+                  className={`config-action-button config-action-button--primary config-environment__run-button${(isRunningEnvironment || isCacheLoading) ? ' config-action-button--loading' : ''}`}
+                  onClick={handleEnvironmentRun}
+                  disabled={isCacheLoading && !isRunningEnvironment}
+                  aria-busy={isRunningEnvironment || isCacheLoading}
+                >
+                  {(isRunningEnvironment || isCacheLoading) && (
+                    <span className="config-action-button__spinner" aria-hidden="true" />
+                  )}
+                  <span className="btn-label">
+                    {isRunningEnvironment
+                      ? `Stop (${environmentWaitSeconds}s)`
+                      : (isCacheLoading ? 'Running...' : 'Run')}
+                  </span>
+                </button>
+              </div>
             </div>
             {environmentErrors.tasks && (
               <p className="config-form__error">{environmentErrors.tasks}</p>
             )}
           </div>
 
-          <div className="config-environment__field config-environment__field--inline compact-controls" style={{ marginTop: 12 }}>
-            <div className="config-environment__control">
-              <label className="config-environment__label" htmlFor="environment-run-times">Run Times</label>
-              <input
-                id="environment-run-times"
-                type="number"
-                min="1"
-                max="10"
-                step="1"
-                className="config-environment__select config-environment__select--input"
-                value={environmentRunTimes}
-                onChange={handleEnvironmentRunTimesChange}
-              />
-              {environmentErrors.run_times && (
-                <p className="config-form__error">{environmentErrors.run_times}</p>
-              )}
-            </div>
-          </div>
-
           {environmentRunError && (
             <p className="config-form__error config-form__error--global">{environmentRunError}</p>
-          )}
-          {environmentRunResult && (
-            <div className="config-environment__result">
-              <h5 className="config-environment__result-title">Last Run Response</h5>
-              <pre className="config-environment__result-content">{JSON.stringify(environmentRunResult, null, 2)}</pre>
-            </div>
           )}
         </div>
       </div>

@@ -30,9 +30,9 @@ $Region = "us-central1"
 $BucketName = "evalagent-67802-history-logs" # GCS Bucket for history persistence
 $MountPath = "/app/history_logs"
 $SourcePath = $PSScriptRoot
-$CacheHistoryLogsPath = Join-Path $PSScriptRoot "cache_history_logs"
+$HistoryLogsPath = Join-Path $PSScriptRoot "history_logs"
 $BrowserAgentRunsPath = Join-Path $PSScriptRoot "browser_agent_runs"
-$CacheHistoryLogsDir = "$MountPath/cache_history_logs"
+$HistoryLogsDir = "$MountPath/history_logs"
 $BrowserAgentRunOutputDir = "$MountPath/browser_agent_runs"
 $DefaultLLMModel = "gpt-4o"
 $Memory = "4Gi"
@@ -129,36 +129,62 @@ if ($DeepSeekApiKey) { Write-Host "DEEPSEEK_API_KEY configured." -ForegroundColo
 if ($AnthropicApiKey) { Write-Host "ANTHROPIC_API_KEY configured." -ForegroundColor Green }
 if ($GeminiApiKey) { Write-Host "GEMINI_API_KEY configured." -ForegroundColor Green }
 
-# --- Sync Cache & Browser Run Folders ---
-if ((Test-Path $CacheHistoryLogsPath) -or (Test-Path $BrowserAgentRunsPath)) {
-    Write-Host "Syncing local cache/browser-run folders to GCS Bucket ($BucketName)..." -ForegroundColor Cyan
+# --- Sync history/browser folders ---
+if ((Test-Path $HistoryLogsPath) -or (Test-Path $BrowserAgentRunsPath)) {
+    Write-Host "Syncing local history/browser folders to GCS Bucket ($BucketName)..." -ForegroundColor Cyan
+
+    $GcloudStorageCommand = "gcloud"
+    if ($IsWindows -and (Get-Command "gcloud.cmd" -ErrorAction SilentlyContinue)) {
+        $GcloudStorageCommand = "gcloud.cmd"
+    }
 
     $GsutilCommand = "gsutil"
     if ($IsWindows -and (Get-Command "gsutil.cmd" -ErrorAction SilentlyContinue)) {
         $GsutilCommand = "gsutil.cmd"
     }
 
-    if (Get-Command $GsutilCommand -ErrorAction SilentlyContinue) {
-        if (Test-Path $CacheHistoryLogsPath) {
-            & $GsutilCommand -m rsync -r "$CacheHistoryLogsPath" "gs://$BucketName/cache_history_logs"
+    function Invoke-BucketRsync {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$LocalPath,
+            [Parameter(Mandatory = $true)]
+            [string]$BucketPrefix
+        )
+
+        if (-not (Test-Path $LocalPath)) {
+            return
+        }
+
+        $Destination = "gs://$BucketName/$BucketPrefix"
+        $Synced = $false
+
+        if (Get-Command $GcloudStorageCommand -ErrorAction SilentlyContinue) {
+            & $GcloudStorageCommand storage rsync --recursive "$LocalPath" "$Destination"
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "cache_history_logs synced successfully." -ForegroundColor Green
+                Write-Host "$BucketPrefix synced successfully via gcloud storage." -ForegroundColor Green
+                $Synced = $true
             } else {
-                Write-Warning "Failed to sync cache_history_logs. Continuing with deployment..."
+                Write-Warning "gcloud storage rsync failed for $BucketPrefix. Falling back to gsutil if available..."
             }
         }
 
-        if (Test-Path $BrowserAgentRunsPath) {
-            & $GsutilCommand -m rsync -r "$BrowserAgentRunsPath" "gs://$BucketName/browser_agent_runs"
+        if (-not $Synced -and (Get-Command $GsutilCommand -ErrorAction SilentlyContinue)) {
+            & $GsutilCommand -m rsync -r "$LocalPath" "$Destination"
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "browser_agent_runs synced successfully." -ForegroundColor Green
+                Write-Host "$BucketPrefix synced successfully via gsutil." -ForegroundColor Green
+                $Synced = $true
             } else {
-                Write-Warning "Failed to sync browser_agent_runs. Continuing with deployment..."
+                Write-Warning "gsutil rsync failed for $BucketPrefix. Continuing with deployment..."
             }
         }
-    } else {
-        Write-Warning "gsutil not found. Skipping folder sync."
+
+        if (-not $Synced) {
+            Write-Warning "No available sync command succeeded for $BucketPrefix. Continuing with deployment..."
+        }
     }
+
+    Invoke-BucketRsync -LocalPath $HistoryLogsPath -BucketPrefix "history_logs"
+    Invoke-BucketRsync -LocalPath $BrowserAgentRunsPath -BucketPrefix "browser_agent_runs"
 }
 
 # --- Deployment ---
@@ -187,9 +213,9 @@ $gcloudArgs = @(
 # Build environment variables list
 $EnvVars = @(
     "DEFAULT_LLM_MODEL=$DefaultLLMModel",
-    "CACHE_HISTORY_LOGS_DIR=$CacheHistoryLogsDir",
+    "CACHE_HISTORY_LOGS_DIR=$HistoryLogsDir",
     "BROWSER_AGENT_RUN_OUTPUT_DIR=$BrowserAgentRunOutputDir",
-    "BROWSER_AGENT_OUTPUT_DIR=$BrowserAgentRunOutputDir",
+    "BROWSER_AGENT_OUTPUT_DIR=$HistoryLogsDir",
     "BROWSER_AGENT_MAX_CONCURRENT=$BrowserAgentMaxConcurrent",
     "BROWSER_AGENT_MAX_CONCURRENT_CAP=$BrowserAgentMaxConcurrentCap",
     "BROWSER_AGENT_CONCURRENCY_FALLBACK_ENABLED=$BrowserAgentConcurrencyFallbackEnabled",

@@ -33,6 +33,58 @@
 	-ms-overflow-style: none;
 }
 
+.reasoning-panel__body--logs {
+	padding: 12px;
+	overflow: auto;
+}
+
+.reasoning-log-status {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px 10px;
+	border-radius: 999px;
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	border: 1px solid rgba(37, 99, 235, 0.25);
+	background: rgba(37, 99, 235, 0.1);
+	color: #1d4ed8;
+}
+
+.reasoning-log-viewer {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	height: 100%;
+	min-height: 0;
+	padding: 12px;
+	border-radius: 8px;
+	border: 1px solid rgba(148, 163, 184, 0.35);
+	background: #f8fafc;
+}
+
+.reasoning-log-viewer__hint {
+	margin: 0;
+	font-size: 0.8rem;
+	color: #475569;
+}
+
+.reasoning-log-viewer__content {
+	margin: 0;
+	padding: 12px;
+	border-radius: 6px;
+	background: #0f172a;
+	color: #e2e8f0;
+	font-size: 0.78rem;
+	line-height: 1.45;
+	font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+	white-space: pre-wrap;
+	overflow: auto;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
 .reasoning-panel__body::-webkit-scrollbar {
 	display: none;
 }
@@ -48,7 +100,36 @@
 .reasoning-agent-selector-compact {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 6px;
+	min-width: 0;
+	--agent-color: #6b7280;
+}
+
+.reasoning-agent-selector-label {
+	font-size: 12px;
+	font-weight: 600;
+	color: #6b7280;
+	letter-spacing: 0.03em;
+	text-transform: uppercase;
+}
+
+.reasoning-agent-select-wrapper {
+	position: relative;
+	display: flex;
+	align-items: center;
+	min-width: 0;
+}
+
+.reasoning-agent-select-dot {
+	position: absolute;
+	left: 8px;
+	width: 8px;
+	height: 8px;
+	border-radius: 999px;
+	background-color: var(--agent-color);
+	box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.22);
+	pointer-events: none;
+	z-index: 1;
 }
 
 .reasoning-agent-select-compact {
@@ -68,7 +149,7 @@
 	background-repeat: no-repeat;
 	background-position: right 6px center;
 	padding-right: 24px;
-	max-width: 280px;
+	max-width: 360px;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -195,8 +276,7 @@
 
 .reasoning-info-content {
 	display: grid;
-	grid-template-columns: 1fr 2fr 1fr;
-	grid-template-rows: 1fr 1fr;
+	grid-template-columns: 2fr 1fr;
 	gap: 12px;
 	flex: 1 1 auto;
 	height: 100%;
@@ -205,14 +285,46 @@
 	background: transparent;
 }
 
+.reasoning-info-column {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-height: 0;
+	min-width: 0;
+}
+
+.reasoning-info-column--thinking .reasoning-info-block {
+	flex: 1 1 auto;
+}
+
+.reasoning-info-column--thinking .reasoning-info-text {
+	flex: 1 1 auto;
+}
+
+.reasoning-info-column--details {
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding-right: 2px;
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+}
+
+.reasoning-info-column--details::-webkit-scrollbar {
+	display: none;
+}
+
 .reasoning-info-block {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
 	flex-shrink: 1;
 	min-height: 0;
-	height: 100%;
+	height: auto;
 	overflow: hidden;
+}
+
+.reasoning-info-block--fill {
+	height: 100%;
 }
 
 /* Grid layout positioning using data attributes */
@@ -767,8 +879,14 @@
     gap: 6px;
 }
 
+.action-card-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
 .action-type-badge {
-    align-self: flex-start;
     background: #eff6ff;
     color: #3b82f6;
     border: 1px solid #dbeafe;
@@ -778,6 +896,54 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+
+.action-expand-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	border-radius: 4px;
+	border: 1px solid #dbeafe;
+	background: #eff6ff;
+	color: #2563eb;
+	cursor: pointer;
+	font-size: 12px;
+	line-height: 1;
+	transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+	flex-shrink: 0;
+}
+
+.action-expand-button:hover {
+	background: #dbeafe;
+	border-color: #bfdbfe;
+}
+
+.action-expand-button--expanded {
+	transform: rotate(90deg);
+}
+
+.action-details {
+	display: grid;
+	grid-template-rows: 0fr;
+	opacity: 0;
+	transition: grid-template-rows 0.25s ease, opacity 0.2s ease;
+}
+
+.action-details--expanded {
+	grid-template-rows: 1fr;
+	opacity: 1;
+}
+
+.action-details-inner {
+	overflow: hidden;
+	padding-top: 0;
+	transition: padding-top 0.2s ease;
+}
+
+.action-details--expanded .action-details-inner {
+	padding-top: 6px;
 }
 
 .action-params-grid {

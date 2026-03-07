@@ -7,7 +7,7 @@ from typing import Dict, List
 from .config import Settings
 
 _CACHE_DATASET_KEYS = ("data1", "data2", "data3")
-_LEGACY_CACHE_DIR_NAMES = ("history_logs_cache", "history_logs")
+_LEGACY_CACHE_DIR_NAMES = ("history_logs_cache", "cache_history_logs", "history_logs")
 
 
 def backend_root() -> Path:

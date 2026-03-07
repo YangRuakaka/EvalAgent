@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 
 import PanelHeader from '../common/PanelHeader';
-import { TrajectoryIcon } from '../common/icons';
 import TrajectoryGraph from './TrajectoryGraph';
 import buildTrajectoryGraph from './utils/graphBuilder';
 import ScreenshotPopUp from './ScreenshotPopUp';
@@ -151,6 +150,9 @@ const TrajectoryVisualizer = ({
 	useImageHashEnabled,
 	onNavigateToReasoning,
 	onDAGInteraction,
+	showBackendLogs,
+	backendLogs,
+	backendRunStatus,
 }) => {
 	const [graph, setGraph] = useState(EMPTY_GRAPH);
 	const [isProcessing, setIsProcessing] = useState(false);
@@ -178,6 +180,13 @@ const TrajectoryVisualizer = ({
 
 	const hasTrajectory = Boolean(trajectory?.details);
 	const useImageHash = useImageHashEnabled !== false;
+	const normalizedBackendLogs = Array.isArray(backendLogs) ? backendLogs : [];
+	const backendStatusLabel = typeof backendRunStatus === 'string' && backendRunStatus.trim()
+		? backendRunStatus.trim().toUpperCase()
+		: 'RUNNING';
+	const backendLogText = normalizedBackendLogs.length > 0
+		? normalizedBackendLogs.join('\n')
+		: 'Waiting for backend log output...';
 
 	useEffect(() => {
 		let isMounted = true;
@@ -517,9 +526,25 @@ const TrajectoryVisualizer = ({
 		};
 	}, []);
 
+	if (showBackendLogs) {
+		return (
+			<div className={`trajectory-panel${isFullscreen ? ' is-fullscreen' : ''}`} ref={containerRef}>
+				<PanelHeader title="Trajectory">
+					<span className="trajectory-log-status" aria-label="Backend run status">{backendStatusLabel}</span>
+				</PanelHeader>
+				<div className="trajectory-panel__body trajectory-panel__body--logs">
+					<div className="trajectory-log-viewer" role="status" aria-live="polite">
+						<p className="trajectory-log-viewer__hint">Displaying backend logs while browser agent run is in progress.</p>
+						<pre className="trajectory-log-viewer__content">{backendLogText}</pre>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div className={`trajectory-panel${isFullscreen ? ' is-fullscreen' : ''}`} ref={containerRef}>
-			<PanelHeader title="Trajectory" icon={<TrajectoryIcon />}>
+			<PanelHeader title="Trajectory">
 				<div className="trajectory-filter" aria-label="Trajectory filter controls">
 					<label className="trajectory-filter__label" htmlFor="trajectory-filter-type">Filter</label>
 					<select
@@ -693,6 +718,9 @@ TrajectoryVisualizer.propTypes = {
 	useImageHashEnabled: PropTypes.bool,
 	onNavigateToReasoning: PropTypes.func,
 	onDAGInteraction: PropTypes.func,
+	showBackendLogs: PropTypes.bool,
+	backendLogs: PropTypes.arrayOf(PropTypes.string),
+	backendRunStatus: PropTypes.string,
 };
 
 TrajectoryVisualizer.defaultProps = {
@@ -701,6 +729,9 @@ TrajectoryVisualizer.defaultProps = {
 	useImageHashEnabled: undefined,
 	onNavigateToReasoning: undefined,
 	onDAGInteraction: undefined,
+	showBackendLogs: false,
+	backendLogs: [],
+	backendRunStatus: null,
 };
 
 export default TrajectoryVisualizer;

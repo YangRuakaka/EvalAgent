@@ -160,11 +160,15 @@ const ConfidenceCircle = ({ score, color, children, size = 24 }) => {
 
 const ReasoningPanel = ({ 
 	data, 
+	conditions = [],
 	selectedExperimentId = null,
 	experimentsMap = {},
 	evaluationResponse = null,
 	evidenceHighlightEnabled,
 	navigationRequest,
+	showBackendLogs,
+	backendLogs,
+	backendRunStatus,
 }) => {
 	const { state: { criterias } } = useData();
 	const [selectedStepIndex, setSelectedStepIndex] = useState(0);
@@ -182,24 +186,73 @@ const ReasoningPanel = ({
 	// Get runId from reasoningDetails (will be computed in memoized value)
 	const [runId, setRunId] = useState(null);
 	const isEvidenceHighlightEnabled = evidenceHighlightEnabled !== false;
+	const normalizedBackendLogs = Array.isArray(backendLogs) ? backendLogs : [];
+	const backendStatusLabel = typeof backendRunStatus === 'string' && backendRunStatus.trim()
+		? backendRunStatus.trim().toUpperCase()
+		: 'RUNNING';
+	const backendLogText = normalizedBackendLogs.length > 0
+		? normalizedBackendLogs.join('\n')
+		: 'Waiting for backend log output...';
 
-	// Get all available agents (model + persona combinations)
+	// Get all available agents (value + model + run combinations)
 	const agents = useMemo(() => {
 		if (!data?.details || data.details.length === 0) {
 			return [];
 		}
+
+		const normalizedConditions = Array.isArray(conditions) ? conditions : [];
 		
 		const allAgents = data.details.map((detail, index) => ({
 			index,
 			id: detail.id,
-			model: detail.model,
+			model: detail.model || detail.metadata?.model || 'Unknown Model',
 			value: detail.value || detail.persona?.value || detail.metadata?.value || 'Unknown Value',
-			run_index: detail.run_index || index,
-			label: detail.label || `Run ${detail.run_index || index} - ${detail.model} - ${detail.value || detail.persona?.value || detail.metadata?.value || 'Unknown'}`,
+			persona: detail.persona?.content || detail.persona?.value || detail.metadata?.persona || (typeof detail.persona === 'string' ? detail.persona : 'Unknown Persona'),
+			run_index: detail.run_index ?? index,
+			trajectoryColor: (() => {
+				const detailRunIndex = detail.run_index ?? index;
+				const detailModel = detail.model || detail.metadata?.model || null;
+				const detailValue = detail.value || detail.persona?.value || detail.metadata?.value || null;
+				const detailPersona = detail.persona?.content || detail.persona?.value || detail.metadata?.persona || (typeof detail.persona === 'string' ? detail.persona : null);
+
+				const matchedCondition = normalizedConditions.find((condition) => {
+					if (!condition) return false;
+
+					if (condition.id && detail.id && condition.id === detail.id) {
+						return true;
+					}
+
+					if (condition.conditionID && detail.id && condition.conditionID === detail.id) {
+						return true;
+					}
+
+					const conditionRunIndex = condition.run_index ?? condition.metadata?.run_index;
+					const conditionModel = condition.model || condition.metadata?.model || null;
+					const conditionValue = condition.value || condition.persona?.value || condition.metadata?.value || (typeof condition.persona === 'string' ? condition.persona : null);
+					const conditionPersona = condition.persona?.content || condition.persona?.value || condition.metadata?.persona || (typeof condition.persona === 'string' ? condition.persona : null);
+
+					const runMatches = conditionRunIndex !== undefined
+						&& detailRunIndex !== undefined
+						&& String(conditionRunIndex) === String(detailRunIndex);
+					const modelMatches = conditionModel && detailModel && conditionModel === detailModel;
+					const valueMatches = conditionValue && detailValue && conditionValue === detailValue;
+					const personaMatches = conditionPersona && detailPersona && conditionPersona === detailPersona;
+
+					return runMatches && modelMatches && (valueMatches || personaMatches);
+				});
+
+				return matchedCondition?.trajectoryColor || detail.trajectoryColor || detail.metadata?.trajectoryColor || '#6b7280';
+			})(),
+			label: detail.label || `Run ${detail.run_index ?? index} - ${detail.model || detail.metadata?.model || 'Unknown Model'} - ${detail.value || detail.persona?.value || detail.metadata?.value || 'Unknown Value'}`,
 		}));
 
 		return allAgents;
-	}, [data]);
+	}, [data, conditions]);
+
+	const selectedAgent = useMemo(
+		() => agents.find((agent) => agent.index === selectedAgentIndex) || null,
+		[agents, selectedAgentIndex],
+	);
 
 	// Get current condition ID based on selected agent
 	const currentConditionId = useMemo(() => {
@@ -463,6 +516,21 @@ const ReasoningPanel = ({
 			setShowEvaluationPanel(true);
 		}
 	}, [getClusterEvaluationDetails]);
+
+	const handleViewScreenshot = useCallback((stepIndex) => {
+		const targetStepIndex = Number.isFinite(stepIndex) ? stepIndex : selectedStepIndex;
+		const targetStep = steps[targetStepIndex];
+
+		if (!targetStep?.screenshot) {
+			return;
+		}
+
+		if (targetStepIndex !== selectedStepIndex) {
+			setSelectedStepIndex(targetStepIndex);
+		}
+
+		setShowScreenshotModal(true);
+	}, [selectedStepIndex, steps]);
 
 	// Reset step index when agent changes
 	useEffect(() => {
@@ -829,26 +897,54 @@ const HighlightText = ({ text, highlights, tagName = 'div', className = '', sour
 };
 
 const ActionVisualizer = ({ action, highlights, onHover }) => {
-    if (!action) return null;
-    const actions = Array.isArray(action) ? action : [action];
+	const actions = useMemo(() => {
+		if (!action) {
+			return [];
+		}
+		return Array.isArray(action) ? action : [action];
+	}, [action]);
+	const [expandedActionIndexes, setExpandedActionIndexes] = useState({});
 
-    return (
-        <div className="action-visualizer">
-            {actions.map((act, idx) => {
-                // If action is wrapped in a "root" property, extract it
-                const actualAction = act.root ? act.root : act;
-                const type = Object.keys(actualAction)[0];
-                const params = actualAction[type];
-                const isDone = type === 'done';
+	useEffect(() => {
+		setExpandedActionIndexes({});
+	}, [action]);
 
-                // Check for card-level highlight
-                // We compare the formatted JSON of the action item with highlight text
-                const actJson = JSON.stringify(act, null, 2);
+	const toggleActionDetails = useCallback((index) => {
+		setExpandedActionIndexes((previousState) => ({
+			...previousState,
+			[index]: !previousState[index],
+		}));
+	}, []);
+
+	if (actions.length === 0) return null;
+
+	return (
+		<div className="action-visualizer">
+			{actions.map((act, idx) => {
+				const actualAction = act && act.root ? act.root : act;
+				const isStructuredAction = Boolean(
+					actualAction
+					&& typeof actualAction === 'object'
+					&& !Array.isArray(actualAction)
+					&& Object.keys(actualAction).length > 0
+				);
+				const type = isStructuredAction
+					? Object.keys(actualAction)[0]
+					: String(actualAction || 'action');
+				const params = isStructuredAction ? actualAction[type] : null;
+				const isDone = String(type).toLowerCase() === 'done';
+				const isExpanded = Boolean(expandedActionIndexes[idx]);
+
+				const paramEntries = params && typeof params === 'object' && !Array.isArray(params)
+					? Object.entries(params)
+					: (params !== undefined && params !== null ? [['value', params]] : []);
+
+				const actJson = JSON.stringify(act, null, 2);
 				const cardHighlights = (highlights || []).filter(h => 
-                    h.sourceField && 
-                    h.sourceField.toLowerCase() === 'action' && 
-                    h.text === actJson
-                );
+					h.sourceField && 
+					h.sourceField.toLowerCase() === 'action' && 
+					h.text === actJson
+				);
 				const cardHighlight = cardHighlights[0] || null;
 				const hoverHighlight = cardHighlights.find(h => h.reasoning) || cardHighlight;
 
@@ -858,94 +954,112 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 					return `inset 0 0 0 ${ringWidth}px ${ringColor}`;
 				});
 
-                const cardStyle = cardHighlight ? {
+				const cardStyle = cardHighlight ? {
 					backgroundColor: cardHighlight.verdict && evaluateStatusMap[cardHighlight.verdict.toLowerCase()]
 						? evaluateStatusMap[cardHighlight.verdict.toLowerCase()].bg
 						: cardHighlight.color,
 					border: `1px solid ${cardHighlight.criteriaColor || cardHighlight.color}`,
 					...(extraCardRings.length > 0 ? { boxShadow: extraCardRings.join(', ') } : {}),
-                } : {};
+				} : {};
 
-                return (
-                    <div 
-                        key={idx} 
+				return (
+					<div 
+						key={idx} 
 						className={`action-card ${isDone ? 'action-card--done' : ''} ${hoverHighlight ? 'highlight-interactive' : ''}`}
-                        style={cardStyle}
-                        onMouseEnter={(e) => {
+						style={cardStyle}
+						onMouseEnter={(e) => {
 							if (hoverHighlight && onHover) {
-                                onHover({
-                                    event: e,
+								onHover({
+									event: e,
 									reasoning: hoverHighlight.reasoning,
 									verdict: hoverHighlight.verdict
-                                });
-                            }
-                        }}
-                        onMouseLeave={() => {
+								});
+							}
+						}}
+						onMouseLeave={() => {
 							if (hoverHighlight && onHover) {
-                                onHover(null);
-                            }
-                        }}
-                    >
-                        <div className="action-type-badge">{type}</div>
-                        <div className="action-params-grid">
-                            {Object.entries(params).map(([key, value]) => {
-                                // For 'done' action, display 'text' in a block layout
-                                const isBlockParam = isDone && key === 'text';
-                                
-                                let content = (
-                                    <HighlightText 
-                                        text={typeof value === 'object' ? JSON.stringify(value) : String(value)} 
-                                        highlights={highlights} 
-                                        tagName={isBlockParam ? "div" : "span"}
-                                        sourceField="Action" 
-                                        markdown={isBlockParam}
-                                    />
-                                );
+								onHover(null);
+							}
+						}}
+					>
+						<div className="action-card-header">
+							<div className="action-type-badge">{type}</div>
+							<button
+								type="button"
+								className={`action-expand-button ${isExpanded ? 'action-expand-button--expanded' : ''}`}
+								aria-label={`${isExpanded ? 'Collapse' : 'Expand'} details for action ${idx + 1}`}
+								aria-expanded={isExpanded}
+								onClick={(event) => {
+									event.stopPropagation();
+									toggleActionDetails(idx);
+								}}
+							>
+								▸
+							</button>
+						</div>
 
-                                // Special handling for URL -> clickable link
-                                if (key === 'url' && typeof value === 'string' && (value.startsWith('http') || value.startsWith('www'))) {
-                                    content = (
-                                        <a 
-                                            href={value} 
-                                            target="_blank" 
-                                            rel="noopener noreferrer" 
-                                            style={{ color: '#2563eb', textDecoration: 'underline' }}
-                                            onClick={(e) => e.stopPropagation()}
-                                        >
-                                            {content}
-                                        </a>
-                                    );
-                                }
+						<div className={`action-details ${isExpanded ? 'action-details--expanded' : ''}`} aria-hidden={!isExpanded}>
+							<div className="action-details-inner">
+								<div className="action-params-grid">
+									{paramEntries.length > 0 ? paramEntries.map(([key, value]) => {
+										const isBlockParam = isDone && key === 'text';
 
-                                // Special handling for done.success -> add check/cross icon
-                                if (isDone && key === 'success') {
-                                    const isSuccess = String(value).toLowerCase() === 'true';
-                                    content = (
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                                            {content}
-                                            {isSuccess 
-                                                ? <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span> 
-                                                : <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✕</span>
-                                            }
-                                        </span>
-                                    );
-                                }
+										let content = (
+											<HighlightText 
+												text={typeof value === 'object' ? JSON.stringify(value) : String(value)} 
+												highlights={highlights} 
+												tagName={isBlockParam ? 'div' : 'span'}
+												sourceField="Action" 
+												markdown={isBlockParam}
+											/>
+										);
 
-                                return (
-                                    <div key={key} className={`action-param-item ${isBlockParam ? 'action-param-item--block' : ''}`}>
-                                        <span className="action-param-label">{key}:</span>
-                                        <span className="action-param-value">
-                                            {content}
-                                        </span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
+										if (key === 'url' && typeof value === 'string' && (value.startsWith('http') || value.startsWith('www'))) {
+											content = (
+												<a 
+													href={value} 
+													target="_blank" 
+													rel="noopener noreferrer" 
+													style={{ color: '#2563eb', textDecoration: 'underline' }}
+													onClick={(event) => event.stopPropagation()}
+												>
+													{content}
+												</a>
+											);
+										}
+
+										if (isDone && key === 'success') {
+											const isSuccess = String(value).toLowerCase() === 'true';
+											content = (
+												<span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+													{content}
+													{isSuccess 
+														? <span style={{ color: '#10b981', fontWeight: 'bold' }}>✓</span> 
+														: <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✕</span>
+													}
+												</span>
+											);
+										}
+
+										return (
+											<div key={key} className={`action-param-item ${isBlockParam ? 'action-param-item--block' : ''}`}>
+												<span className="action-param-label">{key}:</span>
+												<span className="action-param-value">
+													{content}
+												</span>
+											</div>
+										);
+									}) : (
+										<p className="reasoning-info-empty">No action details available</p>
+									)}
+								</div>
+							</div>
+						</div>
+					</div>
+				);
+			})}
+		</div>
+	);
 };
 
 	const displayCriteria = useMemo(() => {
@@ -992,6 +1106,27 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 		});
 	}, [currentHighlights]);
 
+	const currentActions = currentStep?.modelOutput?.action;
+	const hasActionContent = Array.isArray(currentActions)
+		? currentActions.length > 0
+		: Boolean(currentActions);
+
+	if (showBackendLogs) {
+		return (
+			<div className="reasoning-panel">
+				<PanelHeader title="Reasoning" variant="panel">
+					<span className="reasoning-log-status" aria-label="Backend run status">{backendStatusLabel}</span>
+				</PanelHeader>
+				<div className="reasoning-panel__body reasoning-panel__body--logs">
+					<div className="reasoning-log-viewer" role="status" aria-live="polite">
+						<p className="reasoning-log-viewer__hint">Displaying backend logs while browser agent run is in progress.</p>
+						<pre className="reasoning-log-viewer__content">{backendLogText}</pre>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	if (!reasoningDetails) {
 		return (
 			<div className="reasoning-panel">
@@ -1008,31 +1143,30 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 			<PanelHeader title="Reasoning" variant="panel">
 				{/* Agent Selector in Header */}
 				{agents.length >= 1 && (
-					<div className="reasoning-agent-selector-compact">
-						<select
-							className="reasoning-agent-select-compact"
-							value={selectedAgentIndex}
-							onChange={(e) => setSelectedAgentIndex(parseInt(e.target.value, 10))}
-							title="Select agent to view reasoning process"
-						>
-						{agents.map((agent) => {
-							const displayLabel = `Run ${agent.run_index} - ${agent.model} - ${agent.value}`;
-							return (
-								<option key={agent.index} value={agent.index}>
-									{displayLabel}
-								</option>
-							);
-						})}
-						</select>
+					<div
+						className="reasoning-agent-selector-compact"
+						style={{ '--agent-color': selectedAgent?.trajectoryColor || '#6b7280' }}
+					>
+						<span className="reasoning-agent-selector-label">Agent:</span>
+						<div className="reasoning-agent-select-wrapper">
+							<select
+								className="reasoning-agent-select-compact"
+								value={selectedAgentIndex}
+								onChange={(e) => setSelectedAgentIndex(parseInt(e.target.value, 10))}
+								title="Select agent to view reasoning process"
+							>
+								{agents.map((agent) => {
+									const displayLabel = `${agent.value} - ${agent.model} - Run ${agent.run_index}`;
+									return (
+										<option key={agent.index} value={agent.index} style={{ color: agent.trajectoryColor }}>
+											{displayLabel}
+										</option>
+									);
+								})}
+							</select>
+						</div>
 					</div>
 				)}
-                <button
-                    className="reasoning-screenshot-btn"
-                    onClick={() => setShowScreenshotModal(true)}
-                    title="View screenshot"
-                >
-                    📷 View Screenshot
-                </button>
 			</PanelHeader>
 			<div className="reasoning-panel__body">
 
@@ -1041,61 +1175,62 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 					<div className="reasoning-info-section">
 
 						<div className="reasoning-info-content">
-						{/* Thinking Process - Middle column, spans both rows */}
-						<div className="reasoning-info-block" data-position="middle">
-							<h4 className="reasoning-info-label">Thinking Process</h4>
-							<div className={`reasoning-info-text${hasHighlightsForField('Thinking Process') ? ' reasoning-info-text--has-highlight' : ''}`}>
-								{currentStep?.modelOutput?.thinking ? (
-									<HighlightText text={currentStep.modelOutput.thinking} highlights={currentHighlights} sourceField="Thinking Process" />
-								) : (
-									<p className="reasoning-info-empty">No thinking process recorded</p>
+							<div className="reasoning-info-column reasoning-info-column--thinking">
+								<div className="reasoning-info-block reasoning-info-block--fill">
+									<h4 className="reasoning-info-label">Thinking Process</h4>
+									<div className={`reasoning-info-text${hasHighlightsForField('Thinking Process') ? ' reasoning-info-text--has-highlight' : ''}`}>
+										{currentStep?.modelOutput?.thinking ? (
+											<HighlightText text={currentStep.modelOutput.thinking} highlights={currentHighlights} sourceField="Thinking Process" />
+										) : (
+											<p className="reasoning-info-empty">No thinking process recorded</p>
+										)}
+									</div>
+								</div>
+							</div>
+
+							<div className="reasoning-info-column reasoning-info-column--details">
+								{currentStep?.modelOutput?.evaluation_previous_goal && (
+									<div className="reasoning-info-block">
+										<h4 className="reasoning-info-label">Pre-step Evaluation</h4>
+										<div className={`reasoning-info-text${hasHighlightsForField('Evaluation') ? ' reasoning-info-text--has-highlight' : ''}`}>
+											<HighlightText text={currentStep.modelOutput.evaluation_previous_goal} highlights={currentHighlights} sourceField="Evaluation" />
+										</div>
+									</div>
+								)}
+
+								{currentStep?.modelOutput?.memory && (
+									<div className="reasoning-info-block">
+										<h4 className="reasoning-info-label">Memory</h4>
+										<div className={`reasoning-info-text${hasHighlightsForField('Memory') ? ' reasoning-info-text--has-highlight' : ''}`}>
+											<HighlightText text={currentStep.modelOutput.memory} highlights={currentHighlights} sourceField="Memory" />
+										</div>
+									</div>
+								)}
+
+								<div className="reasoning-info-block">
+									<h4 className="reasoning-info-label">Next Goal</h4>
+									<div className={`reasoning-info-text${hasHighlightsForField('Next Goal') ? ' reasoning-info-text--has-highlight' : ''}`}>
+										{currentStep?.modelOutput?.next_goal ? (
+											<HighlightText text={currentStep.modelOutput.next_goal} highlights={currentHighlights} sourceField="Next Goal" />
+										) : (
+											<p className="reasoning-info-empty">No next goal available</p>
+										)}
+									</div>
+								</div>
+
+								{hasActionContent && (
+									<div className="reasoning-info-block">
+										<h4 className="reasoning-info-label">Action</h4>
+										<div className={`reasoning-info-text${hasHighlightsForField('Action') ? ' reasoning-info-text--has-highlight' : ''}`}>
+											<ActionVisualizer 
+												action={currentActions} 
+												highlights={currentHighlights}
+												onHover={handleHighlightHover}
+											/>
+										</div>
+									</div>
 								)}
 							</div>
-						</div>							{/* Next Goal - Right column, top */}
-							<div className="reasoning-info-block" data-position="right-top">
-								<h4 className="reasoning-info-label">Next Goal</h4>
-								<div className={`reasoning-info-text${hasHighlightsForField('Next Goal') ? ' reasoning-info-text--has-highlight' : ''}`}>
-									{currentStep?.modelOutput?.next_goal ? (
-										<HighlightText text={currentStep.modelOutput.next_goal} highlights={currentHighlights} sourceField="Next Goal" />
-									) : (
-										<p className="reasoning-info-empty">No next goal available</p>
-									)}
-								</div>
-							</div>
-
-							{/* Evaluation of Previous Goal - Left column, top */}
-							{currentStep?.modelOutput?.evaluation_previous_goal && (
-								<div className="reasoning-info-block" data-position="left-top">
-									<h4 className="reasoning-info-label">Evaluation</h4>
-									<div className={`reasoning-info-text${hasHighlightsForField('Evaluation') ? ' reasoning-info-text--has-highlight' : ''}`}>
-										<HighlightText text={currentStep.modelOutput.evaluation_previous_goal} highlights={currentHighlights} sourceField="Evaluation" />
-									</div>
-								</div>
-							)}
-
-							{/* Memory - Left column, bottom */}
-							{currentStep?.modelOutput?.memory && (
-								<div className="reasoning-info-block" data-position="left-bottom">
-									<h4 className="reasoning-info-label">Memory</h4>
-									<div className={`reasoning-info-text${hasHighlightsForField('Memory') ? ' reasoning-info-text--has-highlight' : ''}`}>
-										<HighlightText text={currentStep.modelOutput.memory} highlights={currentHighlights} sourceField="Memory" />
-									</div>
-								</div>
-							)}
-
-							{/* Actions - Right column, bottom */}
-							{currentStep?.modelOutput?.action && currentStep.modelOutput.action.length > 0 && (
-								<div className="reasoning-info-block" data-position="right-bottom">
-									<h4 className="reasoning-info-label">Action</h4>
-									<div className={`reasoning-info-text${hasHighlightsForField('Action') ? ' reasoning-info-text--has-highlight' : ''}`}>
-										<ActionVisualizer 
-											action={currentStep.modelOutput.action} 
-											highlights={currentHighlights}
-											onHover={handleHighlightHover}
-										/>
-									</div>
-								</div>
-							)}
 						</div>
 					</div>
 
@@ -1225,6 +1360,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
                         selectedStepIndex={selectedStepIndex}
                         onSelectStep={setSelectedStepIndex}
                         onStepClick={handleStepClick}
+						onViewScreenshot={handleViewScreenshot}
                         onClusterClick={handleClusterClick}
                         conditionId={currentConditionId}
                     />
@@ -1311,6 +1447,7 @@ ReasoningPanel.propTypes = {
 			})
 		),
 	}),
+	conditions: PropTypes.arrayOf(PropTypes.object),
 	selectedExperimentId: PropTypes.string,
 	experimentsMap: PropTypes.object,
 	evaluationResponse: PropTypes.object, // New: evaluation response
@@ -1320,15 +1457,22 @@ ReasoningPanel.propTypes = {
 		stepIndex: PropTypes.number,
 		nonce: PropTypes.number,
 	}),
+	showBackendLogs: PropTypes.bool,
+	backendLogs: PropTypes.arrayOf(PropTypes.string),
+	backendRunStatus: PropTypes.string,
 };
 
 ReasoningPanel.defaultProps = {
 	data: null,
+	conditions: [],
 	selectedExperimentId: null,
 	experimentsMap: {},
 	evaluationResponse: null, // New default value
 	evidenceHighlightEnabled: undefined,
 	navigationRequest: null,
+	showBackendLogs: false,
+	backendLogs: [],
+	backendRunStatus: null,
 };
 
 export default ReasoningPanel;

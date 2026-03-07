@@ -157,9 +157,11 @@ class BrowserAgentService:
         self._run_runtime_stats: Dict[str, dict] = {}
         self._run_logs: Dict[str, deque[str]] = {}
         self._run_logs_lock = threading.Lock()
-        self._run_log_max_entries = max(
-            50,
-            int(getattr(self._settings, "BROWSER_AGENT_STATUS_LOG_BUFFER_SIZE", 500)),
+        configured_log_buffer_size = int(
+            getattr(self._settings, "BROWSER_AGENT_STATUS_LOG_BUFFER_SIZE", 0)
+        )
+        self._run_log_max_entries: Optional[int] = (
+            configured_log_buffer_size if configured_log_buffer_size > 0 else None
         )
         self._run_log_handler = _RunScopedLogHandler(self._append_run_log)
         self._run_log_handler.setFormatter(
@@ -182,7 +184,10 @@ class BrowserAgentService:
         if not normalized_run_id:
             return
         with self._run_logs_lock:
-            self._run_logs[normalized_run_id] = deque(maxlen=self._run_log_max_entries)
+            if self._run_log_max_entries is None:
+                self._run_logs[normalized_run_id] = deque()
+            else:
+                self._run_logs[normalized_run_id] = deque(maxlen=self._run_log_max_entries)
 
     def _append_run_log(self, run_id: str, message: str) -> None:
         normalized_run_id = (run_id or "").strip()
@@ -196,7 +201,10 @@ class BrowserAgentService:
         with self._run_logs_lock:
             buffer = self._run_logs.get(normalized_run_id)
             if buffer is None:
-                buffer = deque(maxlen=self._run_log_max_entries)
+                if self._run_log_max_entries is None:
+                    buffer = deque()
+                else:
+                    buffer = deque(maxlen=self._run_log_max_entries)
                 self._run_logs[normalized_run_id] = buffer
             buffer.append(text)
             snapshot = list(buffer)
@@ -1028,7 +1036,7 @@ class BrowserAgentService:
             )
         except Exception as exc:
             import traceback
-            print(f"[ERROR] Exception in _run_single: {exc}\n{traceback.format_exc()}")
+            logger.error("Exception in _run_single: %s\n%s", exc, traceback.format_exc())
             return BrowserAgentRunResult(
                 model=model_name,
                 run_index=run_index,
@@ -1072,9 +1080,9 @@ class BrowserAgentService:
                         await close_result
                 except RuntimeError as e:
                     if "Event loop is closed" not in str(e):
-                        print(f"[WARN] Exception when closing agent ({method_name}): {e}")
+                        logger.warning("Exception when closing agent (%s): %s", method_name, e)
                 except Exception as e:
-                    print(f"[WARN] Exception when closing agent ({method_name}): {e}")
+                    logger.warning("Exception when closing agent (%s): %s", method_name, e)
                 break
 
         browser_session = getattr(agent, "browser_session", None)
@@ -1087,9 +1095,17 @@ class BrowserAgentService:
                             await close_result
                     except RuntimeError as e:
                         if "Event loop is closed" not in str(e):
-                            print(f"[WARN] Exception when closing browser_session ({method_name}): {e}")
+                            logger.warning(
+                                "Exception when closing browser_session (%s): %s",
+                                method_name,
+                                e,
+                            )
                     except Exception as e:
-                        print(f"[WARN] Exception when closing browser_session ({method_name}): {e}")
+                        logger.warning(
+                            "Exception when closing browser_session (%s): %s",
+                            method_name,
+                            e,
+                        )
                     break
 
     def _prepare_run_context(

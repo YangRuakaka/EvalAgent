@@ -134,7 +134,11 @@ class ChatLLMFactory:
 
     def __init__(self) -> None:
         self._settings = get_settings()
-        self._console_callback = ConsoleLLMTraceCallbackHandler()
+        self._console_callback = (
+            ConsoleLLMTraceCallbackHandler()
+            if self._settings.LLM_ENABLE_CONSOLE_TRACE
+            else None
+        )
 
     def create(
         self,
@@ -158,7 +162,9 @@ class ChatLLMFactory:
 
         if target is LLMTarget.LANGCHAIN_CHAT:
             llm = self._create_langchain_chat(config)
-            return llm.with_config({"callbacks": [self._console_callback]})
+            if self._console_callback is not None:
+                return llm.with_config({"callbacks": [self._console_callback]})
+            return llm
 
         if target is LLMTarget.BROWSER_USE:
             return self._create_browser_use_chat(config)

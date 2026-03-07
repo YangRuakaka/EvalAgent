@@ -182,6 +182,7 @@ const ReasoningPanel = ({
 	const [hoveredHighlight, setHoveredHighlight] = useState(null);
 	const skipNextAgentStepResetRef = useRef(false);
 	const lastHandledNavigationNonceRef = useRef(null);
+	const backendLogContentRef = useRef(null);
 
 	// Get runId from reasoningDetails (will be computed in memoized value)
 	const [runId, setRunId] = useState(null);
@@ -193,6 +194,19 @@ const ReasoningPanel = ({
 	const backendLogText = normalizedBackendLogs.length > 0
 		? normalizedBackendLogs.join('\n')
 		: 'Waiting for backend log output...';
+
+	useEffect(() => {
+		if (!showBackendLogs) {
+			return;
+		}
+
+		const logNode = backendLogContentRef.current;
+		if (!logNode) {
+			return;
+		}
+
+		logNode.scrollTop = logNode.scrollHeight;
+	}, [showBackendLogs, normalizedBackendLogs.length]);
 
 	// Get all available agents (value + model + run combinations)
 	const agents = useMemo(() => {
@@ -1120,7 +1134,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 				<div className="reasoning-panel__body reasoning-panel__body--logs">
 					<div className="reasoning-log-viewer" role="status" aria-live="polite">
 						<p className="reasoning-log-viewer__hint">Displaying backend logs while browser agent run is in progress.</p>
-						<pre className="reasoning-log-viewer__content">{backendLogText}</pre>
+						<pre ref={backendLogContentRef} className="reasoning-log-viewer__content">{backendLogText}</pre>
 					</div>
 				</div>
 			</div>

@@ -94,7 +94,7 @@ class HistoryLogsService:
         missing_screenshots: List[str] = []
 
         for path_str in original_screenshot_paths:
-            resolved_path = self._resolve_screenshot_path(path_str)
+            resolved_path = self._resolve_screenshot_path(path_str, json_path=json_path)
             if not resolved_path or not resolved_path.exists() or not resolved_path.is_file():
                 missing_screenshots.append(str(path_str))
                 encoded_screenshots.append(None)
@@ -174,20 +174,46 @@ class HistoryLogsService:
         except Exception:
             return cls._encode_raw_data_uri(image_bytes, path)
 
-    def _resolve_screenshot_path(self, path_str: Any) -> Optional[Path]:
+    def _resolve_screenshot_path(self, path_str: Any, json_path: Optional[Path] = None) -> Optional[Path]:
         if not path_str:
             return None
 
-        # Normalize path separators to forward slashes to handle Windows-generated paths on Linux
-        clean_path = str(path_str).replace("\\", "/")
+        clean_path = str(path_str).replace("\\", "/").strip()
         candidate = Path(clean_path)
-        
+
         if candidate.is_absolute():
             return candidate
 
-        # Treat paths as relative to the project root to support stored relative references.
-        candidate = (self._backend_root / candidate).resolve()
-        return candidate
+        candidates: List[Path] = []
+        candidates.append((self._backend_root / candidate).resolve())
+
+        parts = list(candidate.parts)
+        if json_path is not None and "screenshots" in parts:
+            screenshots_index = parts.index("screenshots")
+            suffix_parts = parts[screenshots_index + 1 :]
+            if suffix_parts:
+                candidates.append((json_path.parent / "screenshots" / Path(*suffix_parts)).resolve())
+
+        if len(parts) >= 2 and parts[0] == "history_logs" and parts[1] == "screenshots":
+            suffix = Path(*parts[2:]) if len(parts) > 2 else None
+            if suffix is not None:
+                for dataset_key in ("data1", "data2", "data3"):
+                    candidates.append((self._cache_root / dataset_key / "screenshots" / suffix).resolve())
+                    candidates.append((self._backend_root / "history_logs" / dataset_key / "screenshots" / suffix).resolve())
+
+        seen: set[Path] = set()
+        deduped_candidates: List[Path] = []
+        for item in candidates:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped_candidates.append(item)
+
+        for item in deduped_candidates:
+            if item.exists() and item.is_file():
+                return item
+
+        return deduped_candidates[0] if deduped_candidates else None
 
 
 class HistoryLogsReader:

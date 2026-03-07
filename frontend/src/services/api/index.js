@@ -114,16 +114,29 @@ export const getBrowserAgentStatus = (runId, client = defaultClient) => {
 
 export const streamBrowserAgentEvents = (
 	runId,
-	{ onStatus, onError, onEnd } = {},
+	{ onStatus, onError, onEnd, onLog } = {},
 ) => {
 	const url = buildEventStreamUrl(
 		`${API_ENDPOINTS.browserAgent.events}/${encodeURIComponent(runId)}`,
 	);
 	const source = new EventSource(url);
 
+	const parseEventData = (event) => {
+		const raw = event?.data;
+		if (typeof raw !== 'string') {
+			return {};
+		}
+
+		try {
+			return JSON.parse(raw || '{}');
+		} catch {
+			return { raw };
+		}
+	};
+
 	source.addEventListener('status', (event) => {
 		try {
-			const payload = JSON.parse(event.data || '{}');
+			const payload = parseEventData(event);
 			if (typeof onStatus === 'function') {
 				onStatus(payload);
 			}
@@ -136,7 +149,7 @@ export const streamBrowserAgentEvents = (
 
 	source.addEventListener('end', (event) => {
 		try {
-			const payload = JSON.parse(event.data || '{}');
+			const payload = parseEventData(event);
 			if (typeof onEnd === 'function') {
 				onEnd(payload);
 			}
@@ -147,8 +160,55 @@ export const streamBrowserAgentEvents = (
 		}
 	});
 
+	source.addEventListener('log', (event) => {
+		if (typeof onLog !== 'function') {
+			return;
+		}
+
+		try {
+			const payload = parseEventData(event);
+			if (typeof payload === 'string') {
+				onLog(payload);
+				return;
+			}
+
+			const line = typeof payload?.line === 'string'
+				? payload.line
+				: (typeof payload?.log === 'string'
+					? payload.log
+					: (typeof payload?.message === 'string' ? payload.message : payload?.raw));
+
+			if (typeof line === 'string' && line.trim()) {
+				onLog(line);
+			}
+		} catch (error) {
+			if (typeof onError === 'function') {
+				onError(error);
+			}
+		}
+	});
+
+	source.onmessage = (event) => {
+		if (typeof onLog !== 'function') {
+			return;
+		}
+
+		const payload = parseEventData(event);
+		const line = typeof payload === 'string'
+			? payload
+			: (typeof payload?.line === 'string'
+				? payload.line
+				: (typeof payload?.log === 'string'
+					? payload.log
+					: (typeof payload?.message === 'string' ? payload.message : payload?.raw)));
+
+		if (typeof line === 'string' && line.trim()) {
+			onLog(line);
+		}
+	};
+
 	source.onerror = (error) => {
-		if (typeof onError === 'function') {
+		if (source.readyState === EventSource.CLOSED && typeof onError === 'function') {
 			onError(error);
 		}
 	};

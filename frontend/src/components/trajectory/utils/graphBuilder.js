@@ -15,7 +15,6 @@ const COLOR_PALETTE = schemeTableau10 || [
 	'#17becf',
 ];
 
-const FIRST_CONDITION_HASH = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
 const DEFAULT_HASH_CONCURRENCY = 8;
 
 const asArray = (value) => {
@@ -368,7 +367,6 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 				sequenceIndex,
 				position,
 				screenshot: screenshots[position],
-				isConditionFirstScreenshot: position === 0,
 			});
 		}
 	});
@@ -377,10 +375,6 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 		hashTasks,
 		hashConcurrency,
 		async (task) => {
-			if (task.isConditionFirstScreenshot) {
-				return { ...task, hash: null };
-			}
-
 			if (!useImageHash) {
 				return { ...task, hash: null };
 			}
@@ -401,23 +395,19 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 		for (let position = 0; position < screenshots.length; position += 1) {
 			const screenshot = screenshots[position];
 			const occurrenceId = `${sequenceIndex}-${position}`;
-			const isConditionFirstScreenshot = position === 0;
 			const hash = hashByOccurrence.get(`${sequenceIndex}-${position}`) || null;
-			const nodeId = isConditionFirstScreenshot
-				? 'node-condition-first'
-				: (useImageHash && hash ? `node-${hash}` : `node-seq-${sequenceIndex}-pos-${position}`);
+			const nodeId = useImageHash && hash
+				? `node-${hash}`
+				: `node-seq-${sequenceIndex}-pos-${position}`;
 
 			if (!nodeMap.has(nodeId)) {
 				nodeMap.set(nodeId, {
 					id: nodeId,
-					hash: isConditionFirstScreenshot
-						? FIRST_CONDITION_HASH
-						: (useImageHash ? hash : `NO_HASH_${sequenceIndex}_${position}`),
+					hash: useImageHash ? hash : `NO_HASH_${sequenceIndex}_${position}`,
 					src: screenshot.src,
 					alt: screenshot.alt,
 					occurrences: [],
 					weight: 0,
-					isConditionFirst: isConditionFirstScreenshot,
 				});
 			}
 

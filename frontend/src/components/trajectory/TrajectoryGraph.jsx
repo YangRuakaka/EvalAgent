@@ -397,6 +397,7 @@ const getActionIcon = (actionType) => {
 const TrajectoryGraph = ({
 	graph,
 	isLoading,
+	enableNodeImages,
 	emptyMessage,
 	containerSize,
 	highlightRequest,
@@ -1121,11 +1122,12 @@ const TrajectoryGraph = ({
 
 		nodesMerged
 			.select('.trajectory-node__image')
-			.attr('href', (node) => node.src)
+			.attr('href', (node) => (enableNodeImages ? node.src : null))
 			.attr('x', (node) => -node.width / 2)
 			.attr('y', (node) => -node.height / 2)
 			.attr('width', (node) => node.width)
-			.attr('height', (node) => node.height);
+			.attr('height', (node) => node.height)
+			.style('display', enableNodeImages ? 'block' : 'none');
 
 		nodesMerged.each(function (node) {
 			const outlineColors = Array.isArray(node.__linkBorderColors) && node.__linkBorderColors.length
@@ -1450,7 +1452,7 @@ const TrajectoryGraph = ({
 		return () => {
 			simulation.stop();
 		};
-	}, [data, width, height, onNodeClick, onLinkClick]);
+	}, [data, width, height, enableNodeImages, onNodeClick, onLinkClick]);
 
 	useEffect(() => {
 		const highlight = highlightRequest;
@@ -1732,6 +1734,7 @@ TrajectoryGraph.propTypes = {
 		),
 	}),
 	isLoading: PropTypes.bool,
+	enableNodeImages: PropTypes.bool,
 	emptyMessage: PropTypes.string,
 	containerSize: PropTypes.shape({
 		width: PropTypes.number,
@@ -1765,6 +1768,7 @@ TrajectoryGraph.propTypes = {
 TrajectoryGraph.defaultProps = {
 	graph: { nodes: [], links: [], clusters: [] },
 	isLoading: false,
+	enableNodeImages: true,
 	emptyMessage: 'Select a run to explore its screenshot trajectory.',
 	containerSize: null,
 	highlightRequest: null,

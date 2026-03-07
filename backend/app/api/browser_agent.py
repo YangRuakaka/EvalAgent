@@ -146,9 +146,21 @@ async def get_run_status(run_id: str):
 async def stream_run_events(run_id: str, request: Request):
     """Stream status updates for a browser-agent run using Server-Sent Events."""
     async def event_generator():
+        def _compute_overlap(previous: list[str], current: list[str]) -> int:
+            max_overlap = min(len(previous), len(current))
+            for overlap in range(max_overlap, 0, -1):
+                if previous[-overlap:] == current[:overlap]:
+                    return overlap
+            return 0
+
         last_payload = None
+        last_logs: list[str] = []
         missing_count = 0
-        max_missing_before_error = 120
+        poll_interval_seconds = max(
+            0.1,
+            float(getattr(settings, "BROWSER_AGENT_EVENTS_POLL_INTERVAL_SECONDS", 0.25)),
+        )
+        max_missing_before_error = max(30, int(120 / poll_interval_seconds))
         while True:
             if await request.is_disconnected():
                 break
@@ -160,10 +172,29 @@ async def stream_run_events(run_id: str, request: Request):
                     yield "event: error\ndata: {\"error\": \"Run not found\"}\n\n"
                     break
                 yield "event: ping\ndata: {}\n\n"
-                await asyncio.sleep(1)
+                await asyncio.sleep(poll_interval_seconds)
                 continue
 
             missing_count = 0
+
+            current_logs_raw = current_status.get("logs")
+            current_logs = [str(item) for item in current_logs_raw] if isinstance(current_logs_raw, list) else []
+            overlap = _compute_overlap(last_logs, current_logs) if last_logs else 0
+            new_logs = current_logs if not last_logs else current_logs[overlap:]
+
+            for offset, line in enumerate(new_logs):
+                log_index = overlap + offset
+                log_payload = json.dumps(
+                    {
+                        "run_id": run_id,
+                        "index": log_index,
+                        "line": line,
+                    },
+                    ensure_ascii=False,
+                )
+                yield f"event: log\ndata: {log_payload}\n\n"
+
+            last_logs = current_logs
 
             payload = json.dumps(current_status, ensure_ascii=False)
             if payload != last_payload:
@@ -176,7 +207,7 @@ async def stream_run_events(run_id: str, request: Request):
                 yield f"event: end\ndata: {payload}\n\n"
                 break
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(poll_interval_seconds)
 
     return StreamingResponse(
         event_generator(),

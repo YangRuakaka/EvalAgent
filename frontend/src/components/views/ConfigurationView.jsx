@@ -1003,11 +1003,13 @@ const ConfigurationView = ({
 		setIsRunningEnvironment(true);
 		setEnvironmentWaitSeconds(0);
 		const runId = createBrowserAgentRunId();
+		const taskNameForRun = environmentTaskName.trim();
 		const abortController = new AbortController();
 		activeEnvironmentRunIdRef.current = runId;
 		activeEnvironmentAbortRef.current = abortController;
 		emitEnvironmentRunState({
 			runId,
+			taskName: taskNameForRun,
 			status: 'queued',
 			isRunning: true,
 			logs: [],
@@ -1064,6 +1066,7 @@ const ConfigurationView = ({
 				setEnvironmentRunError(message);
 				emitEnvironmentRunState({
 					runId,
+					taskName: taskNameForRun,
 					status: 'failed',
 					isRunning: false,
 					error: message,
@@ -1080,6 +1083,7 @@ const ConfigurationView = ({
 
 						emitEnvironmentRunState({
 							runId,
+							taskName: taskNameForRun,
 							status: data?.status || 'running',
 							isRunning: data?.status === 'queued' || data?.status === 'running',
 							logs: Array.isArray(data?.logs) ? data.logs : undefined,
@@ -1094,7 +1098,7 @@ const ConfigurationView = ({
 							} else {
 								setEnvironmentRunResult(runResults);
 								if (typeof onAddRun === 'function') {
-									onAddRun({ results: runResults });
+									onAddRun({ results: runResults }, { activate: false });
 								}
 							}
 
@@ -1110,6 +1114,7 @@ const ConfigurationView = ({
 							setEnvironmentRunError(data?.error || 'Browser agent run failed.');
 							emitEnvironmentRunState({
 								runId,
+								taskName: taskNameForRun,
 								status: data?.status,
 								isRunning: false,
 								logs: Array.isArray(data?.logs) ? data.logs : undefined,
@@ -1125,6 +1130,7 @@ const ConfigurationView = ({
 					onEnd: (data) => {
 						emitEnvironmentRunState({
 							runId,
+							taskName: taskNameForRun,
 							status: data?.status || 'completed',
 							isRunning: false,
 							logs: Array.isArray(data?.logs) ? data.logs : undefined,
@@ -1151,6 +1157,7 @@ const ConfigurationView = ({
 						if (abortController.signal.aborted) {
 							emitEnvironmentRunState({
 								runId,
+								taskName: taskNameForRun,
 								status: 'cancelled',
 								isRunning: false,
 								error: 'Browser agent run was stopped.',
@@ -1163,6 +1170,7 @@ const ConfigurationView = ({
 
 						emitEnvironmentRunState({
 							runId,
+							taskName: taskNameForRun,
 							status: 'failed',
 							isRunning: false,
 							error: streamError?.message || 'Browser agent event stream failed.',
@@ -1170,6 +1178,20 @@ const ConfigurationView = ({
 						settled = true;
 						stream.close();
 						reject(streamError);
+					},
+					onLog: (line) => {
+						if (settled || typeof line !== 'string' || !line.trim()) {
+							return;
+						}
+
+						emitEnvironmentRunState({
+							runId,
+							taskName: taskNameForRun,
+							status: 'running',
+							isRunning: true,
+							appendLogs: [line],
+							error: null,
+						});
 					},
 				});
 
@@ -1191,6 +1213,7 @@ const ConfigurationView = ({
 				setEnvironmentRunError('Browser agent run was stopped.');
 				emitEnvironmentRunState({
 					runId,
+					taskName: taskNameForRun,
 					status: 'cancelled',
 					isRunning: false,
 					error: 'Browser agent run was stopped.',
@@ -1199,6 +1222,7 @@ const ConfigurationView = ({
 			}
 			emitEnvironmentRunState({
 				runId,
+				taskName: taskNameForRun,
 				status: 'failed',
 				isRunning: false,
 				error: error?.message || 'Failed to run the browser agent. Please try again later.',
@@ -1216,6 +1240,7 @@ const ConfigurationView = ({
 			setIsRunningEnvironment(false);
 			emitEnvironmentRunState({
 				runId,
+				taskName: taskNameForRun,
 				isRunning: false,
 			});
 		}

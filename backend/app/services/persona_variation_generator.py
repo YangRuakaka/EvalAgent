@@ -1,4 +1,5 @@
 """Persona variation generation service for integrating personas with values."""
+import asyncio
 from typing import List, Dict, Any
 import logging
 
@@ -130,6 +131,30 @@ class PersonaVariationGeneratorService:
             raise ValueError(str(exc)) from exc
 
         self.template = PersonaVariationTemplate()
+        self.max_concurrency = max(1, settings.PERSONA_VARIATION_MAX_CONCURRENCY)
+        self._llm_by_model: Dict[str, Any] = {
+            self.model.strip().lower(): self.llm,
+        }
+
+    def _resolve_llm(self, model: str | None = None) -> Any:
+        """Resolve and cache LLM instances by model to reduce repeated initialization overhead."""
+        if not model or not model.strip():
+            return self.llm
+
+        model_name = model.strip()
+        cache_key = model_name.lower()
+        cached = self._llm_by_model.get(cache_key)
+        if cached is not None:
+            return cached
+
+        resolved_llm = get_chat_llm(
+            api_key=self.api_key,
+            model=model_name,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+        )
+        self._llm_by_model[cache_key] = resolved_llm
+        return resolved_llm
 
     async def generate_persona_variation_prompt(
         self, persona: str | None = None, values: List[str] | None = None
@@ -148,12 +173,7 @@ class PersonaVariationGeneratorService:
                 values=values,
             )
 
-            print("\n" + "="*80)
-            print("[PersonaVariationGeneratorService.generate_persona_variation_prompt]")
-            print("="*80)
-            print("[PROMPT SENT TO LLM]:")
-            print(generation_prompt)
-            print("="*80)
+            logger.debug("Persona variation prompt payload: %s", generation_prompt)
 
             message = HumanMessage(content=generation_prompt)
 
@@ -161,10 +181,7 @@ class PersonaVariationGeneratorService:
             response = await self.llm.ainvoke([message])
 
             persona_variation = response.content.strip()
-            
-            print("[RESPONSE FROM LLM]:")
-            print(persona_variation)
-            print("="*80 + "\n")
+            logger.debug("Generated persona variation prompt result: %s", persona_variation)
 
             logger.info("Successfully generated persona variation prompt")
             return {
@@ -189,62 +206,100 @@ class PersonaVariationGeneratorService:
     ) -> Dict[str, Any]:
         """Generate persona variations for each provided value using few-shot prompting."""
         try:
-            logger.info("Starting persona variation generation for %d values", len(values))
+            logger.info(
+                "Starting persona variation generation for %d values (max_concurrency=%d)",
+                len(values),
+                self.max_concurrency,
+            )
 
-            llm = self.llm
-            if model:
-                llm = get_chat_llm(
-                    api_key=self.api_key,
-                    model=model,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                )
+            llm = self._resolve_llm(model)
 
-            variations = []
-            for value in values:
+            prepared_inputs: List[tuple[str, str]] = []
+            for raw_value in values:
+                normalized_value = (raw_value or "").strip()
+                if normalized_value:
+                    prepared_inputs.append((raw_value, normalized_value))
+
+            if not prepared_inputs:
+                return {
+                    "variations": None,
+                    "success": False,
+                    "error_message": "No valid non-empty values provided for variation generation.",
+                }
+
+            unique_normalized_values = list(dict.fromkeys(value for _, value in prepared_inputs))
+            semaphore = asyncio.Semaphore(min(self.max_concurrency, len(unique_normalized_values)))
+
+            async def _generate_for_value(target_value: str) -> Dict[str, Any]:
                 try:
-                    logger.info("Generating persona variation for value: %s", value)
-
+                    logger.info("Generating persona variation for value: %s", target_value)
                     variation_prompt = self.template.build_variation_prompt(
                         persona=persona,
-                        value=value,
+                        value=target_value,
                     )
-
-                    print("\n" + "="*80)
-                    print(f"[PersonaVariationGeneratorService.generate_persona_variations - Value: {value}]")
-                    print("="*80)
-                    print("[PROMPT SENT TO LLM]:")
-                    print(variation_prompt)
-                    print("="*80)
+                    logger.debug(
+                        "Variation prompt payload for value '%s': %s",
+                        target_value,
+                        variation_prompt,
+                    )
 
                     message = HumanMessage(content=variation_prompt)
-
-                    response = await llm.ainvoke([message])
+                    async with semaphore:
+                        response = await llm.ainvoke([message])
 
                     varied_persona = response.content.strip()
-                    
-                    print("[RESPONSE FROM LLM]:")
-                    print(varied_persona)
-                    print("="*80 + "\n")
-
-                    variations.append({
-                        "value": value,
+                    logger.debug(
+                        "Generated variation result for value '%s': %s",
+                        target_value,
+                        varied_persona,
+                    )
+                    logger.info("Generated persona variation for value: %s", target_value)
+                    return {
+                        "value": target_value,
                         "varied_persona": varied_persona,
-                    })
-
-                    logger.info("Generated persona variation for value: %s", value)
-
+                    }
                 except Exception as exc:  # pylint: disable=broad-except
                     error_str = str(exc)
-                    logger.error("Error generating variation for value '%s': %s", value, error_str)
+                    logger.error(
+                        "Error generating variation for value '%s': %s",
+                        target_value,
+                        error_str,
+                    )
+                    return {
+                        "value": target_value,
+                        "varied_persona": None,
+                        "error": f"Failed to generate variation: {error_str}",
+                    }
 
+            per_value_results = await asyncio.gather(
+                *[_generate_for_value(value) for value in unique_normalized_values]
+            )
+            result_by_value = {item["value"]: item for item in per_value_results}
+
+            variations: List[Dict[str, Any]] = []
+            for original_value, normalized_value in prepared_inputs:
+                resolved = result_by_value.get(normalized_value)
+                if resolved and resolved.get("varied_persona"):
                     variations.append(
                         {
-                            "value": value,
-                            "varied_persona": None,
-                            "error": f"Failed to generate variation: {error_str}",
+                            "value": original_value,
+                            "varied_persona": resolved["varied_persona"],
                         }
                     )
+                    continue
+
+                error_message = (
+                    resolved.get("error")
+                    if resolved is not None
+                    else "Failed to generate variation: unexpected empty result"
+                )
+                variations.append(
+                    {
+                        "value": original_value,
+                        "varied_persona": None,
+                        "error": error_message,
+                    }
+                )
 
             logger.info(
                 "Completed persona variation generation: %d successful, %d failed",

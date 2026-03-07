@@ -23,8 +23,10 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     FALLBACK_LLM_MODEL: str = "llama3.2"  # Default free model for Ollama
     DEFAULT_LLM_TEMPERATURE: float = 0
+    LLM_ENABLE_CONSOLE_TRACE: bool = False
     PERSONA_LLM_TEMPERATURE: float = 0
     PERSONA_VARIATION_LLM_TEMPERATURE: float = 0
+    PERSONA_VARIATION_MAX_CONCURRENCY: int = 4
     CACHE_HISTORY_LOGS_DIR: str = "history_logs"
     BROWSER_AGENT_RUN_OUTPUT_DIR: str = "browser_agent_runs"
     # Legacy setting kept for backward compatibility with existing deployments.
@@ -47,6 +49,8 @@ class Settings(BaseSettings):
     BROWSER_AGENT_MAX_SCREENSHOTS: int = 0  # 0 means no limit: persist all available screenshots
     BROWSER_AGENT_INCLUDE_SCREENSHOTS_IN_RUN_RESPONSE: bool = False
     BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD: bool = True
+    BROWSER_AGENT_STATUS_LOG_BUFFER_SIZE: int = 0  # 0 means unlimited (keep all captured logs)
+    BROWSER_AGENT_EVENTS_POLL_INTERVAL_SECONDS: float = 0.25
     
     # Persona Generation Settings
     MAX_KEYWORDS_PER_REQUEST: int = 10

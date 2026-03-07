@@ -208,7 +208,7 @@ const StepTimeline = ({
 						return (
 							<div
 								key={step.id}
-								className={`step-timeline-node-wrapper ${hasEvaluations ? 'has-evaluations' : ''}`}
+								className={`step-timeline-node-wrapper ${hasEvaluations ? 'has-evaluations' : ''} ${isSelected ? 'step-timeline-node-wrapper--selected' : ''}`}
 							>
 								<button
 									className={`step-timeline-node ${

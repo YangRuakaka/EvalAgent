@@ -100,6 +100,28 @@ class PersonaGeneratorService:
 
         self.llm = llm
         self.prompt_template = PersonaPromptTemplate()
+        self._llm_by_model: Dict[str, Any] = {
+            settings.DEFAULT_LLM_MODEL.strip().lower(): llm,
+        }
+
+    def _resolve_llm(self, model: Optional[str] = None) -> Any:
+        """Resolve and cache LLM instances by model name to avoid repeated client creation."""
+        if not model or not model.strip():
+            return self.llm
+
+        model_name = model.strip()
+        cache_key = model_name.lower()
+        cached = self._llm_by_model.get(cache_key)
+        if cached is not None:
+            return cached
+
+        resolved_llm = get_chat_llm(
+            model=model_name,
+            max_tokens=settings.DEFAULT_MAX_TOKENS,
+            temperature=settings.PERSONA_LLM_TEMPERATURE,
+        )
+        self._llm_by_model[cache_key] = resolved_llm
+        return resolved_llm
         
     async def generate_persona(
         self,
@@ -116,35 +138,19 @@ class PersonaGeneratorService:
         Returns:
             Dictionary containing generation results
         """
-        logger.info(f"Starting persona generation with demographic: {demographic}, model: {model}")
+        logger.info("Starting persona generation with model: %s", model or settings.DEFAULT_LLM_MODEL)
         
         # Build the prompt using prompt engineering logic (all handled in backend)
         prompt = self.prompt_template.build_prompt(demographic=demographic)
         
         try:
-            # Determine which LLM instance to use
-            if model:
-                # Create a temporary LLM instance for this specific model request
-                llm = get_chat_llm(model=model)
-            else:
-                # Use the default configured instance
-                llm = self.llm
+            llm = self._resolve_llm(model)
+            logger.debug("Persona prompt: %s", prompt)
 
-            # Generate persona using configured LLM
-            print("\n" + "="*80)
-            print("[PersonaGeneratorService.generate_persona]")
-            print("="*80)
-            print("[PROMPT SENT TO LLM]:")
-            print(prompt)
-            print("="*80)
-            
             message = HumanMessage(content=prompt)
             response = await llm.ainvoke([message])
             generated_persona = response.content.strip()
-            
-            print("[RESPONSE FROM LLM]:")
-            print(generated_persona)
-            print("="*80 + "\n")
+            logger.debug("Generated persona content: %s", generated_persona)
             
             # Return results
             return {

@@ -256,6 +256,49 @@
 	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
+.trajectory-build-status {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px 10px;
+	border-radius: 999px;
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	border: 1px solid rgba(22, 163, 74, 0.28);
+	background: rgba(22, 163, 74, 0.08);
+	color: #166534;
+	margin-right: 8px;
+}
+
+.trajectory-image-toggle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 28px;
+	padding: 0 10px;
+	margin-right: 8px;
+	border: 1px solid rgba(59, 130, 246, 0.28);
+	border-radius: 6px;
+	background: rgba(59, 130, 246, 0.1);
+	color: #1d4ed8;
+	font-size: 0.75rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.trajectory-image-toggle:hover:not(:disabled) {
+	background: rgba(59, 130, 246, 0.16);
+	border-color: rgba(37, 99, 235, 0.4);
+	color: #1e40af;
+}
+
+.trajectory-image-toggle:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
 .panel--trajectory.is-fullscreen {
 	background: #f8fafc;
 	padding: 0;

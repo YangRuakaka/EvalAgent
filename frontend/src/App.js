@@ -28,7 +28,7 @@ const MIN_CENTER = 1;
 
 const CONFIG_TABS = [
 	{ key: 'persona', label: 'Persona', icon: PersonaIcon, title: 'Persona Generation' },
-	{ key: 'environment', label: 'Enviroenment', icon: EnvironmentIcon, title: 'Environment Setting' },
+	{ key: 'environment', label: 'Task', icon: EnvironmentIcon, title: 'Environment Setting' },
 ];
 
 const DATA_SOURCE_OPTIONS = [
@@ -47,7 +47,7 @@ const SYSTEM_VARIANT_OPTIONS = [
 	{
 		value: 'B',
 		label: 'B',
-		trajectoryUseImageHashEnabled: false,
+		trajectoryUseImageHashEnabled: true,
 		reasoningEvidenceHighlightEnabled: true,
 	},
 	{
@@ -70,58 +70,148 @@ const getResponseErrorDetail = (response) => {
 	return response.data?.detail || `HTTP ${response.status}`;
 };
 
+const normalizeLogEntries = (value) => {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+
+	return value
+		.map((item) => (typeof item === 'string' ? item : (item === null || item === undefined ? '' : String(item))))
+		.map((item) => item.trim())
+		.filter(Boolean);
+};
+
+const computeSuffixPrefixOverlap = (existing, incoming) => {
+	if (!Array.isArray(existing) || !Array.isArray(incoming) || existing.length === 0 || incoming.length === 0) {
+		return 0;
+	}
+
+	const maxOverlap = Math.min(existing.length, incoming.length);
+	for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+		let isMatch = true;
+		for (let index = 0; index < overlap; index += 1) {
+			if (existing[existing.length - overlap + index] !== incoming[index]) {
+				isMatch = false;
+				break;
+			}
+		}
+
+		if (isMatch) {
+			return overlap;
+		}
+	}
+
+	return 0;
+};
+
+const mergeRunLogs = ({ existingLogs, snapshotLogs, appendLogs }) => {
+	let merged = Array.isArray(existingLogs) ? existingLogs : [];
+
+	if (Array.isArray(snapshotLogs) && snapshotLogs.length > 0) {
+		const overlap = computeSuffixPrefixOverlap(merged, snapshotLogs);
+		if (overlap < snapshotLogs.length) {
+			merged = merged.concat(snapshotLogs.slice(overlap));
+		}
+	}
+
+	if (Array.isArray(appendLogs) && appendLogs.length > 0) {
+		const overlap = computeSuffixPrefixOverlap(merged, appendLogs);
+		if (overlap < appendLogs.length) {
+			merged = merged.concat(appendLogs.slice(overlap));
+		}
+	}
+
+	return merged;
+};
+
 const App = () => {
 	const { state: { experiments }, addExperiment, removeExperiment } = useData();
-	
-	// Derive historyEntries from context for compatibility
-	const historyEntries = useMemo(() => Object.values(experiments), [experiments]);
-	const historyEntryCount = historyEntries.length;
-	const [pendingEnvironmentRunState, setPendingEnvironmentRunState] = useState({
-		runId: null,
-		status: null,
-		isRunning: false,
-		logs: [],
-		error: null,
-	});
+	const experimentEntries = useMemo(() => Object.values(experiments), [experiments]);
+	const historyEntryCount = experimentEntries.length;
+	const [environmentRunTabs, setEnvironmentRunTabs] = useState({});
+
+	const environmentRunTabEntries = useMemo(
+		() => Object.values(environmentRunTabs).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)),
+		[environmentRunTabs],
+	);
+
+	const historyEntries = useMemo(
+		() => [...experimentEntries, ...environmentRunTabEntries],
+		[experimentEntries, environmentRunTabEntries],
+	);
 
 	const handleEnvironmentRunStateChange = useCallback((nextState) => {
-		if (!nextState || typeof nextState !== 'object') {
+		if (!nextState || typeof nextState !== 'object' || !nextState.runId) {
 			return;
 		}
 
-		setPendingEnvironmentRunState((prev) => {
-			const hasIncomingLogs = Array.isArray(nextState.logs);
-			const mergedLogs = hasIncomingLogs
-				? nextState.logs
-				: (prev.runId && nextState.runId && prev.runId === nextState.runId ? prev.logs : []);
+		const { runId } = nextState;
+		let shouldActivateNewTab = false;
+
+		setEnvironmentRunTabs((prev) => {
+			const currentCount = Object.keys(prev).length;
+			const existing = prev[runId];
+
+			if (!existing) {
+				shouldActivateNewTab = true;
+			}
+
+			const incomingSnapshotLogs = normalizeLogEntries(nextState.logs);
+			const incomingAppendLogs = normalizeLogEntries(nextState.appendLogs);
+			const mergedLogs = mergeRunLogs({
+				existingLogs: existing?.logs || [],
+				snapshotLogs: incomingSnapshotLogs,
+				appendLogs: incomingAppendLogs,
+			});
+
+			const taskName = typeof nextState.taskName === 'string' && nextState.taskName.trim()
+				? nextState.taskName.trim()
+				: (existing?.taskName || '');
+
+			const status = nextState.status ?? existing?.status ?? null;
 
 			return {
-				runId: nextState.runId ?? prev.runId,
-				status: nextState.status ?? prev.status,
-				isRunning: typeof nextState.isRunning === 'boolean' ? nextState.isRunning : prev.isRunning,
-				logs: mergedLogs,
-				error: nextState.error !== undefined ? nextState.error : prev.error,
+				...prev,
+				[runId]: {
+					id: runId,
+					createdAt: existing?.createdAt || Date.now(),
+					taskName,
+					label: taskName || existing?.label || `Environment Run ${currentCount + (existing ? 0 : 1)}`,
+					description: typeof status === 'string' && status.trim()
+						? status.trim().toUpperCase()
+						: undefined,
+					status,
+					isRunning: typeof nextState.isRunning === 'boolean'
+						? nextState.isRunning
+						: Boolean(existing?.isRunning),
+					logs: mergedLogs,
+					error: nextState.error !== undefined ? nextState.error : (existing?.error || null),
+				},
 			};
 		});
+
+		if (shouldActivateNewTab) {
+			setActiveRunId(runId);
+		}
 	}, []);
 
-	const handleAddRunEntry = useCallback((runPayload) => {
+	const handleAddRunEntry = useCallback((runPayload, options = {}) => {
+		const { activate = true } = options;
 		const index = historyEntryCount;
 		const nextEntry = processVisualizationData(runPayload, index);
 		
 		addExperiment(nextEntry);
-		setActiveRunId(nextEntry.id);
-		setPendingEnvironmentRunState({
-			runId: null,
-			status: null,
-			isRunning: false,
-			logs: [],
-			error: null,
-		});
+
+		if (activate) {
+			setActiveRunId(nextEntry.id);
+		}
+
+		return nextEntry;
 	}, [historyEntryCount, addExperiment]);
 
 	const containerRef = useRef(null);
 	const dragStateRef = useRef(null);
+	const cacheRunsByDataSourceRef = useRef(new Map());
 
 	const [sizes, setSizes] = useState({
 		left: 50,
@@ -136,8 +226,13 @@ const App = () => {
 	const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
 
 	const activeRun = useMemo(
-		() => historyEntries.find((item) => item.id === activeRunId) ?? null,
-		[historyEntries, activeRunId],
+		() => experimentEntries.find((item) => item.id === activeRunId) ?? null,
+		[experimentEntries, activeRunId],
+	);
+
+	const activeEnvironmentRunTab = useMemo(
+		() => environmentRunTabs[activeRunId] || null,
+		[environmentRunTabs, activeRunId],
 	);
 
 	const activeSystemVariant = useMemo(
@@ -203,6 +298,12 @@ const App = () => {
 	const handleGetCacheData = useCallback(async () => {
 		setIsFetchingCache(true);
 
+		const cachedRun = cacheRunsByDataSourceRef.current.get(selectedDataSource);
+		if (cachedRun?.id) {
+			addExperiment(cachedRun);
+			setActiveRunId(cachedRun.id);
+		}
+
 		try {
 			const response = await fetchHistoryLogs({ dataSource: selectedDataSource });
 
@@ -212,17 +313,17 @@ const App = () => {
 				throw error;
 			}
 			
-			const processedData = processVisualizationData(response.data);
-
-			addExperiment(processedData);
-			setActiveRunId(processedData.id);
+			const nextEntry = handleAddRunEntry(response.data, { activate: true });
+			if (nextEntry?.id) {
+				cacheRunsByDataSourceRef.current.set(selectedDataSource, nextEntry);
+			}
 
 		} catch (error) {
 			alert(`Get cache data failed: ${error?.message || 'unknown error'}`);
 		} finally {
 			setIsFetchingCache(false);
 		}
-	}, [addExperiment, selectedDataSource]);
+	}, [addExperiment, handleAddRunEntry, selectedDataSource]);
 
 	const runConfirmedServerAction = useCallback(async ({
 		confirmMessage,
@@ -253,13 +354,15 @@ const App = () => {
 
 	const handleCleanupServerFiles = useCallback(async () => {
 		await runConfirmedServerAction({
-			confirmMessage: 'This will clean extra files in backend/history_logs, and only keep buy_milk* items (including screenshots/buy_milk*). Continue?',
+			confirmMessage: 'This will preserve everything under history_logs/ and delete other server-side files. Continue?',
 			setLoading: setIsCleaningServerFiles,
 			action: cleanupServerFiles,
 			onSuccess: (response) => {
 				const deletedCount = Array.isArray(response.data.deleted) ? response.data.deleted.length : 0;
+				const preservedCount = Array.isArray(response.data.preserved) ? response.data.preserved.length : 0;
+				const skippedCount = Array.isArray(response.data.skipped) ? response.data.skipped.length : 0;
 				const failedCount = Array.isArray(response.data.failed) ? response.data.failed.length : 0;
-				alert(`History logs cleanup completed. Deleted: ${deletedCount}, Failed: ${failedCount}`);
+				alert(`Server cleanup completed. Deleted: ${deletedCount}, Preserved: ${preservedCount}, Skipped: ${skippedCount}, Failed: ${failedCount}`);
 			},
 			onFailurePrefix: 'Cleanup failed',
 		});
@@ -318,13 +421,24 @@ const App = () => {
 	}, [historyEntries, activeRunId]);
 
 	const handleCloseTab = useCallback((id) => {
-		removeExperiment(id);
-		
-		// Calculate next active ID
 		const index = historyEntries.findIndex((item) => item.id === id);
 		if (index === -1) {
 			return;
 		}
+
+		if (experiments[id]) {
+			removeExperiment(id);
+		}
+
+		setEnvironmentRunTabs((prev) => {
+			if (!prev[id]) {
+				return prev;
+			}
+
+			const next = { ...prev };
+			delete next[id];
+			return next;
+		});
 
 		const nextItems = [...historyEntries.slice(0, index), ...historyEntries.slice(index + 1)];
 		
@@ -340,7 +454,7 @@ const App = () => {
 			const fallbackIndex = index >= nextItems.length ? nextItems.length - 1 : index;
 			return nextItems[fallbackIndex].id;
 		});
-	}, [historyEntries, removeExperiment]);
+	}, [historyEntries, experiments, removeExperiment]);
 
 	const handleDataSourceChange = useCallback((event) => {
 		setSelectedDataSource(event.target.value);
@@ -436,9 +550,9 @@ const App = () => {
 						onManageCriteria={openCriteriaManager}
 						trajectoryUseImageHashEnabled={activeSystemVariant.trajectoryUseImageHashEnabled}
 						reasoningEvidenceHighlightEnabled={activeSystemVariant.reasoningEvidenceHighlightEnabled}
-						showBackendLogs={pendingEnvironmentRunState.isRunning}
-						backendLogs={pendingEnvironmentRunState.logs}
-						backendRunStatus={pendingEnvironmentRunState.status}
+						showBackendLogs={Boolean(activeEnvironmentRunTab)}
+						backendLogs={activeEnvironmentRunTab?.logs || []}
+						backendRunStatus={activeEnvironmentRunTab?.status || null}
 					/>
 				</section>
 			</main>

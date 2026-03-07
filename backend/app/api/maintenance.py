@@ -8,6 +8,9 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
+from ..core.config import get_settings
+from ..core.storage_paths import get_browser_run_output_dir, get_cache_history_root
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
@@ -35,14 +38,37 @@ async def restart_backend_service():
 
 @router.post(
     "/cleanup-files",
-    summary="Cleanup files in browser_agent_runs",
+    summary="Cleanup server files while preserving history_logs",
 )
 async def cleanup_backend_files():
+    settings = get_settings()
     backend_root = Path(__file__).resolve().parents[2]
-    browser_runs_dir = backend_root / "browser_agent_runs"
-    browser_runs_root_resolved = browser_runs_dir.resolve(strict=False)
+    backend_root_resolved = backend_root.resolve(strict=False)
+
+    browser_runs_dir = get_browser_run_output_dir(settings).resolve(strict=False)
+    cache_history_root = get_cache_history_root(settings).resolve(strict=False)
+
+    use_shared_storage_cleanup = (
+        browser_runs_dir.is_absolute()
+        and cache_history_root.is_absolute()
+        and browser_runs_dir.parent == cache_history_root.parent
+        and browser_runs_dir.parent != backend_root_resolved
+    )
+
+    if use_shared_storage_cleanup:
+        cleanup_root = browser_runs_dir.parent
+        preserved_roots = [cache_history_root]
+        scope = "storage_root_except_history_logs"
+    else:
+        cleanup_root = browser_runs_dir
+        preserved_roots = []
+        scope = "browser_agent_runs"
+
+    cleanup_root_resolved = cleanup_root.resolve(strict=False)
+    preserved_roots_resolved = [path.resolve(strict=False) for path in preserved_roots]
 
     deleted = []
+    preserved = []
     skipped = []
     failed = []
 
@@ -54,15 +80,20 @@ async def cleanup_backend_files():
             return False
 
     def safe_remove(entry: Path):
-        relative_name = entry.relative_to(backend_root).as_posix()
+        relative_name = entry.relative_to(cleanup_root).as_posix()
         entry_resolved = entry.resolve(strict=False)
 
         if (
-            entry_resolved != browser_runs_root_resolved
-            and browser_runs_root_resolved not in entry_resolved.parents
+            entry_resolved != cleanup_root_resolved
+            and cleanup_root_resolved not in entry_resolved.parents
         ):
             skipped.append(relative_name)
             return
+
+        for preserve_root in preserved_roots_resolved:
+            if entry_resolved == preserve_root or entry_resolved in preserve_root.parents:
+                preserved.append(relative_name)
+                return
 
         if is_reparse_point(entry):
             skipped.append(relative_name)
@@ -78,26 +109,28 @@ async def cleanup_backend_files():
             logger.error("Failed to delete %s: %s", relative_name, exc)
             failed.append({"path": relative_name, "error": str(exc)})
 
-    if not browser_runs_dir.exists():
+    if not cleanup_root.exists():
         return {
             "ok": True,
             "backend_root": backend_root.as_posix(),
-            "scope": "browser_agent_runs",
-            "message": "browser_agent_runs directory does not exist.",
-            "preserved": [],
+            "cleanup_root": cleanup_root.as_posix(),
+            "scope": scope,
+            "message": "Cleanup target directory does not exist.",
+            "preserved": preserved,
             "deleted": deleted,
             "skipped": skipped,
             "failed": failed,
         }
 
-    for entry in browser_runs_dir.iterdir():
+    for entry in cleanup_root.iterdir():
         safe_remove(entry)
 
     return {
         "ok": len(failed) == 0,
         "backend_root": backend_root.as_posix(),
-        "scope": "browser_agent_runs",
-        "preserved": [],
+        "cleanup_root": cleanup_root.as_posix(),
+        "scope": scope,
+        "preserved": preserved,
         "deleted": deleted,
         "skipped": skipped,
         "failed": failed,

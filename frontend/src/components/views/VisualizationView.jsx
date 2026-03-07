@@ -143,11 +143,6 @@ const VisualizationView = ({
 		}
 	}, [activeRunId, evaluationResponses]);
 
-	const trajectoryData = useMemo(() => {
-		if (!activeRun) return null;
-		return activeRun?.trajectory || null;
-	}, [activeRun]);
-
 	const experimentsData = useMemo(() => {
 		if (!activeRun) return null;
 		
@@ -227,8 +222,11 @@ const VisualizationView = ({
 	const visibleHistoryEntries = useMemo(() => {
 		const counts = {};
 		return historyEntries.map((entry) => {
+			const entryLabel = typeof entry.label === 'string' && entry.label.trim()
+				? entry.label.trim()
+				: 'Unknown Task';
 			const primaryRun = entry.runs?.[0] || {};
-			const taskName = primaryRun.metadata?.task?.name || 'Unknown Task';
+			const taskName = primaryRun.metadata?.task?.name || entryLabel;
 			
 			if (counts[taskName] === undefined) {
 				counts[taskName] = 0;
@@ -247,6 +245,23 @@ const VisualizationView = ({
 		});
 	}, [historyEntries]);
 
+	const effectiveActiveRunId = activeRunId || visibleHistoryEntries[0]?.id || null;
+
+	const trajectoryConditionsByRunId = useMemo(() => {
+		const next = {};
+
+		visibleHistoryEntries.forEach((entry) => {
+			const entryConditions = Array.isArray(entry?.conditions) ? entry.conditions : [];
+
+			next[entry.id] = entryConditions.map((condition, index) => ({
+				...condition,
+				trajectoryColor: condition.trajectoryColor || TRAJECTORY_COLOR_PALETTE[index % TRAJECTORY_COLOR_PALETTE.length],
+			}));
+		});
+
+		return next;
+	}, [visibleHistoryEntries]);
+
 	return (
 		<>
 			<section className="visualization-view">
@@ -262,17 +277,37 @@ const VisualizationView = ({
 
 				<div className="visualization-view__content">
 					<section className={`visualization-view__panel${activeTab !== 'trajectory' ? ' visualization-view__panel--hidden' : ''}`}>
-						{(trajectoryData || shouldShowBackendLogs) ? (
-							<TrajectoryVisualizer 
-								trajectory={trajectoryData}
-								conditions={experimentsData?.conditions || []}
-								useImageHashEnabled={effectiveTrajectoryUseImageHash}
-								onNavigateToReasoning={handleTrajectoryNavigateToReasoning}
-								onDAGInteraction={onDAGInteraction}
-								showBackendLogs={shouldShowBackendLogs}
-								backendLogs={backendLogs}
-								backendRunStatus={backendRunStatus}
-							/>
+						{visibleHistoryEntries.length > 0 ? (
+							visibleHistoryEntries.map((entry) => {
+								const isActiveEntry = entry.id === effectiveActiveRunId;
+								const showLogsForEntry = shouldShowBackendLogs && isActiveEntry;
+								const entryTrajectory = entry?.trajectory || null;
+								const entryConditions = trajectoryConditionsByRunId[entry.id] || [];
+
+								return (
+									<div
+										key={entry.id}
+										className={`visualization-view__run-panel${!isActiveEntry ? ' visualization-view__run-panel--hidden' : ''}`}
+									>
+										{(entryTrajectory || showLogsForEntry) ? (
+											<TrajectoryVisualizer
+												trajectory={entryTrajectory}
+												conditions={entryConditions}
+												useImageHashEnabled={effectiveTrajectoryUseImageHash}
+												onNavigateToReasoning={handleTrajectoryNavigateToReasoning}
+												onDAGInteraction={onDAGInteraction}
+												showBackendLogs={showLogsForEntry}
+												backendLogs={showLogsForEntry ? backendLogs : []}
+												backendRunStatus={showLogsForEntry ? backendRunStatus : null}
+											/>
+										) : (
+											<div style={{ padding: '20px', color: '#999' }}>
+												No trajectory data available
+											</div>
+										)}
+									</div>
+								);
+							})
 						) : (
 							<div style={{ padding: '20px', color: '#999' }}>
 								No trajectory data available

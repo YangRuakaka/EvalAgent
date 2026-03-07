@@ -10,6 +10,21 @@ import useResizeObserver from '../../hooks/useResizeObserver';
 import './TrajectoryVisualizer.css';
 
 const EMPTY_GRAPH = Object.freeze({ nodes: [], links: [], clusters: [], meta: {} });
+const HASH_REFINEMENT_IDLE_TIMEOUT = 600;
+
+const scheduleIdleWork = (callback, timeout = 500) => {
+	if (typeof callback !== 'function') {
+		return () => {};
+	}
+
+	if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+		const idleId = window.requestIdleCallback(callback, { timeout });
+		return () => window.cancelIdleCallback(idleId);
+	}
+
+	const timerId = window.setTimeout(callback, Math.min(timeout, 600));
+	return () => window.clearTimeout(timerId);
+};
 
 const PersonaPopUp = ({ entry, onClose }) => {
 	if (!entry) return null;
@@ -165,8 +180,11 @@ const TrajectoryVisualizer = ({
 	const [selectedLink, setSelectedLink] = useState(null);
 	const [viewingPersonaEntry, setViewingPersonaEntry] = useState(null);
 	const [isFullscreen, setIsFullscreen] = useState(false);
+	const [isRefiningGraph, setIsRefiningGraph] = useState(false);
 	const graphShellRef = useRef(null);
 	const containerRef = useRef(null);
+	const conditionsRef = useRef(Array.isArray(conditions) ? conditions : []);
+	const backendLogContentRef = useRef(null);
 
 	const { width: shellWidth, height: shellHeight } = useResizeObserver(graphShellRef);
 
@@ -180,6 +198,25 @@ const TrajectoryVisualizer = ({
 
 	const hasTrajectory = Boolean(trajectory?.details);
 	const useImageHash = useImageHashEnabled !== false;
+	const shouldRenderNodeImages = true;
+	const conditionsSignature = useMemo(() => {
+		if (!Array.isArray(conditions) || !conditions.length) {
+			return 'empty';
+		}
+
+		return conditions
+			.map((item, index) => {
+				const id = item?.id || `idx-${index}`;
+				const model = item?.model || '';
+				const runIndex = item?.run_index ?? '';
+				return `${id}|${model}|${runIndex}`;
+			})
+			.join('||');
+	}, [conditions]);
+
+	useEffect(() => {
+		conditionsRef.current = Array.isArray(conditions) ? conditions : [];
+	}, [conditionsSignature, conditions]);
 	const normalizedBackendLogs = Array.isArray(backendLogs) ? backendLogs : [];
 	const backendStatusLabel = typeof backendRunStatus === 'string' && backendRunStatus.trim()
 		? backendRunStatus.trim().toUpperCase()
@@ -189,48 +226,113 @@ const TrajectoryVisualizer = ({
 		: 'Waiting for backend log output...';
 
 	useEffect(() => {
+		if (!showBackendLogs) {
+			return;
+		}
+
+		const logNode = backendLogContentRef.current;
+		if (!logNode) {
+			return;
+		}
+
+		logNode.scrollTop = logNode.scrollHeight;
+	}, [showBackendLogs, normalizedBackendLogs.length]);
+
+	useEffect(() => {
 		let isMounted = true;
+		let cancelRefinement = () => {};
+
+		const safeSetGraph = (nextGraph) => {
+			if (!isMounted) {
+				return;
+			}
+
+			setGraph(nextGraph);
+		};
 
 		if (!hasTrajectory) {
 			setGraph(EMPTY_GRAPH);
 			setError(null);
 			setIsProcessing(false);
+			setIsRefiningGraph(false);
 			return () => {
 				isMounted = false;
+				cancelRefinement();
 			};
 		}
 
 		setIsProcessing(true);
 		setError(null);
+		setIsRefiningGraph(false);
 
-		buildTrajectoryGraph(trajectory, {
+		const buildPreviewGraph = () => buildTrajectoryGraph(trajectory, {
+			hash: { hashSize: 16 },
+			hashConcurrency: 8,
+			useImageHash: false,
+			conditions: conditionsRef.current,
+		});
+
+		const buildTargetGraph = () => buildTrajectoryGraph(trajectory, {
 			hash: { hashSize: 16 },
 			hashConcurrency: 8,
 			useImageHash,
-			conditions: conditions || [],
-		})
-			.then((result) => {
-				if (isMounted) {
-					setGraph(result);
+			conditions: conditionsRef.current,
+		});
+
+		buildPreviewGraph()
+			.then((previewGraph) => {
+				if (!isMounted) {
+					return;
 				}
+
+				safeSetGraph(previewGraph);
+				setIsProcessing(false);
+
+				if (!useImageHash) {
+					return;
+				}
+
+				setIsRefiningGraph(true);
+				cancelRefinement = scheduleIdleWork(() => {
+					buildTargetGraph()
+						.then((result) => {
+							if (!isMounted) {
+								return;
+							}
+
+							safeSetGraph(result);
+						})
+						.catch((err) => {
+							if (!isMounted) {
+								return;
+							}
+
+							console.error('[trajectory] Failed to refine graph', err);
+						})
+						.finally(() => {
+							if (!isMounted) {
+								return;
+							}
+
+							setIsRefiningGraph(false);
+						});
+				}, HASH_REFINEMENT_IDLE_TIMEOUT);
 			})
 			.catch((err) => {
 				if (isMounted) {
 					console.error('[trajectory] Failed to build graph', err);
 					setGraph(EMPTY_GRAPH);
 					setError(err);
-				}
-			})
-			.finally(() => {
-				if (isMounted) {
 					setIsProcessing(false);
+					setIsRefiningGraph(false);
 				}
 			});
 
 		return () => {
 			isMounted = false;
+			cancelRefinement();
 		};
-	}, [hasTrajectory, trajectory, conditions, useImageHash]);
+	}, [hasTrajectory, trajectory, conditionsSignature, useImageHash]);
 
 
 	const legendEntries = useMemo(() => {
@@ -535,7 +637,7 @@ const TrajectoryVisualizer = ({
 				<div className="trajectory-panel__body trajectory-panel__body--logs">
 					<div className="trajectory-log-viewer" role="status" aria-live="polite">
 						<p className="trajectory-log-viewer__hint">Displaying backend logs while browser agent run is in progress.</p>
-						<pre className="trajectory-log-viewer__content">{backendLogText}</pre>
+						<pre ref={backendLogContentRef} className="trajectory-log-viewer__content">{backendLogText}</pre>
 					</div>
 				</div>
 			</div>
@@ -576,6 +678,10 @@ const TrajectoryVisualizer = ({
 						))}
 					</select>
 				</div>
+
+				{isRefiningGraph && (
+					<span className="trajectory-build-status" aria-live="polite">Refining graph…</span>
+				)}
 
 				<button
 					type="button"
@@ -661,6 +767,7 @@ const TrajectoryVisualizer = ({
 					<TrajectoryGraph
 						graph={filteredGraph}
 						isLoading={isProcessing}
+						enableNodeImages={shouldRenderNodeImages}
 						containerSize={graphSize}
 						emptyMessage={hasTrajectory ? 'Preparing visualization…' : 'Select a run to explore its screenshot trajectory.'}
 						highlightRequest={highlightRequest}

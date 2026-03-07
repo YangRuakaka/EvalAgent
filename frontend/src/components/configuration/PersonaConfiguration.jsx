@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { PersonaIcon, VariationIcon } from '../common/icons';
 
 import './ConfigurationCommon.css';
 import './PersonaConfiguration.css';
@@ -205,7 +204,6 @@ const PersonaConfiguration = ({
             aria-busy={isGenerating}
           >
             {isGenerating && <span className="config-action-button__spinner" aria-hidden="true" />}
-            <PersonaIcon />
             <span className="btn-label">
               {isGenerating ? 'Generating...' : 'Generate Persona'}
             </span>
@@ -370,7 +368,6 @@ const PersonaConfiguration = ({
             aria-busy={isGeneratingVariation}
           >
             {isGeneratingVariation && <span className="config-action-button__spinner" aria-hidden="true" />}
-            <VariationIcon />
             <span className="btn-label">
               {isGeneratingVariation ? 'Generating...' : 'Generate Variations'}
             </span>

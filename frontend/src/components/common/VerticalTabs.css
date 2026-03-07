@@ -25,12 +25,12 @@
 	border-radius: 0;
 	background-color: transparent;
 	color: #6b7280;
-	font-size: 0.65rem;
+	font-size: 0.58rem;
 	font-weight: 500;
 	cursor: pointer;
 	transition: all 0.2s ease;
-	white-space: normal;
-	word-break: break-word;
+	white-space: nowrap;
+	word-break: normal;
 	min-height: auto;
 	text-align: center;
 	line-height: 1.1;
@@ -66,7 +66,12 @@
 .vertical-tabs__label,
 .config-vertical-tabs__label {
 	display: block;
-	line-height: 1.2;
+	line-height: 1.1;
+	font-size: 0.58rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 100%;
 }
 
 /* Positioning logic based on parent panel area */

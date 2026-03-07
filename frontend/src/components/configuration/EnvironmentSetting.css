@@ -35,7 +35,7 @@
 
 .config-environment__task-layout {
 	display: grid;
-	grid-template-columns: minmax(240px, 1fr) minmax(280px, 1fr) 120px;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(84px, auto);
 	gap: 12px;
 	align-items: start;
 	width: 100%;
@@ -57,16 +57,19 @@
 }
 
 .config-environment__run-action {
-	grid-column: 3;
+	grid-column: 1 / -1;
 	justify-self: end;
 	align-self: start;
 	display: flex;
 	justify-content: flex-end;
+	width: 100%;
+	min-width: 0;
 	margin-top: 4px;
 }
 
 .config-environment__run-button {
 	min-width: 120px;
+	max-width: 100%;
 }
 
 .config-environment__label {

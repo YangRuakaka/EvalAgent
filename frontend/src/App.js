@@ -28,7 +28,7 @@ const MIN_CENTER = 1;
 
 const CONFIG_TABS = [
 	{ key: 'persona', label: 'Persona', icon: PersonaIcon, title: 'Persona Generation' },
-	{ key: 'environment', label: 'Environment', icon: EnvironmentIcon, title: 'Environment Setting' },
+	{ key: 'environment', label: 'Enviroenment', icon: EnvironmentIcon, title: 'Environment Setting' },
 ];
 
 const DATA_SOURCE_OPTIONS = [

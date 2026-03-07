@@ -7,6 +7,7 @@ import json
 import mimetypes
 from pathlib import Path
 from typing import Any, Iterable, List, Optional
+from urllib.parse import quote
 
 from PIL import Image
 
@@ -41,13 +42,29 @@ class HistoryLogsService:
             resolve_backend_path(path, self._backend_root)
             for path in get_legacy_data1_dirs(self._settings)
         ]
+        self._allowed_screenshot_roots = [
+            self._cache_root.resolve(),
+            (self._backend_root / "history_logs").resolve(),
+            *[path.resolve() for path in self._legacy_data1_dirs],
+        ]
 
-    def list_logs(self, dataset: str = "data1") -> List[HistoryLogPayload]:
+    def list_logs(
+        self,
+        dataset: str = "data1",
+        screenshot_mode: str = "inline",
+        screenshot_url_prefix: str = "",
+    ) -> List[HistoryLogPayload]:
         """Return all cached history logs with inline screenshot payloads."""
         try:
             dataset_key = normalize_cache_dataset(dataset)
         except ValueError as exc:
             raise HistoryLogsServiceError(str(exc)) from exc
+
+        mode = (screenshot_mode or "inline").strip().lower()
+        if mode not in {"inline", "proxy", "none"}:
+            raise HistoryLogsServiceError(
+                f"Unsupported screenshot_mode '{screenshot_mode}'. Use one of: inline, proxy, none."
+            )
 
         cache_dir = self._resolve_dataset_dir(dataset_key)
 
@@ -57,7 +74,14 @@ class HistoryLogsService:
         logs: List[HistoryLogPayload] = []
         for json_path in sorted(cache_dir.glob("*.json")):
             try:
-                logs.append(self._load_single_log(json_path))
+                logs.append(
+                    self._load_single_log(
+                        json_path,
+                        dataset_key=dataset_key,
+                        screenshot_mode=mode,
+                        screenshot_url_prefix=screenshot_url_prefix,
+                    )
+                )
             except Exception as exc:
                 print(f"Warning: Skipping corrupted or invalid log file '{json_path.name}': {exc}")
                 continue
@@ -81,7 +105,13 @@ class HistoryLogsService:
 
         return dataset_dir
 
-    def _load_single_log(self, json_path: Path) -> HistoryLogPayload:
+    def _load_single_log(
+        self,
+        json_path: Path,
+        dataset_key: str,
+        screenshot_mode: str,
+        screenshot_url_prefix: str,
+    ) -> HistoryLogPayload:
         raw_payload = self._read_json(json_path)
 
         if not isinstance(raw_payload, dict):
@@ -93,19 +123,31 @@ class HistoryLogsService:
         encoded_screenshots: List[Optional[str]] = []
         missing_screenshots: List[str] = []
 
-        for path_str in original_screenshot_paths:
-            resolved_path = self._resolve_screenshot_path(path_str, json_path=json_path)
-            if not resolved_path or not resolved_path.exists() or not resolved_path.is_file():
-                missing_screenshots.append(str(path_str))
-                encoded_screenshots.append(None)
-                continue
+        if screenshot_mode == "inline":
+            for path_str in original_screenshot_paths:
+                resolved_path = self._resolve_screenshot_path(path_str, json_path=json_path)
+                if not resolved_path or not resolved_path.exists() or not resolved_path.is_file():
+                    missing_screenshots.append(str(path_str))
+                    encoded_screenshots.append(None)
+                    continue
 
-            try:
-                image_bytes = resolved_path.read_bytes()
-                encoded_screenshots.append(self._encode_screenshot_data_uri(image_bytes, resolved_path))
-            except Exception as exc:  # pragma: no cover - IO failure edge case
-                missing_screenshots.append(str(path_str))
-                encoded_screenshots.append(None)
+                try:
+                    image_bytes = resolved_path.read_bytes()
+                    encoded_screenshots.append(self._encode_screenshot_data_uri(image_bytes, resolved_path))
+                except Exception:  # pragma: no cover - IO failure edge case
+                    missing_screenshots.append(str(path_str))
+                    encoded_screenshots.append(None)
+        elif screenshot_mode == "proxy":
+            encoded_screenshots = [
+                self._build_proxy_screenshot_url(
+                    path_str=path_str,
+                    dataset_key=dataset_key,
+                    screenshot_url_prefix=screenshot_url_prefix,
+                )
+                for path_str in original_screenshot_paths
+            ]
+        else:
+            encoded_screenshots = []
 
         preserved_fields = {
             "screenshots",
@@ -132,6 +174,26 @@ class HistoryLogsService:
             summary=dict(raw_payload.get("summary") or {}),
             details=details,
         )
+
+    @staticmethod
+    def _build_proxy_screenshot_url(
+        path_str: Any,
+        dataset_key: str,
+        screenshot_url_prefix: str,
+    ) -> Optional[str]:
+        if path_str is None:
+            return None
+
+        clean_path = str(path_str).replace("\\", "/").strip()
+        if not clean_path:
+            return None
+
+        prefix = screenshot_url_prefix.strip()
+        if not prefix:
+            prefix = "/api/v1/history-logs/screenshot"
+
+        encoded_path = quote(clean_path, safe="")
+        return f"{prefix}?dataset={dataset_key}&path={encoded_path}"
 
     @staticmethod
     def _read_json(json_path: Path) -> Any:
@@ -173,6 +235,40 @@ class HistoryLogsService:
                 return f"data:image/webp;base64,{webp_payload}"
         except Exception:
             return cls._encode_raw_data_uri(image_bytes, path)
+
+    def resolve_screenshot_file(self, path_str: Any, dataset: str = "data1") -> Optional[Path]:
+        """Resolve a screenshot path for direct file serving."""
+        try:
+            dataset_key = normalize_cache_dataset(dataset)
+        except ValueError:
+            return None
+
+        resolved_path = self._resolve_screenshot_path(path_str)
+        if not resolved_path or not resolved_path.exists() or not resolved_path.is_file():
+            return None
+
+        if not self._is_allowed_screenshot_file(resolved_path, dataset_key):
+            return None
+
+        return resolved_path
+
+    def _is_allowed_screenshot_file(self, path: Path, dataset_key: str) -> bool:
+        try:
+            resolved = path.resolve()
+        except Exception:
+            return False
+
+        dataset_root = self._resolve_dataset_dir(dataset_key).resolve()
+        roots = [dataset_root, *self._allowed_screenshot_roots]
+
+        for root in roots:
+            try:
+                resolved.relative_to(root)
+                return True
+            except Exception:
+                continue
+
+        return False
 
     def _resolve_screenshot_path(self, path_str: Any, json_path: Optional[Path] = None) -> Optional[Path]:
         if not path_str:

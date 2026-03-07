@@ -91,7 +91,13 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## 6) History Logs API
 - **Path:** `GET /api/v1/history-logs`
-- **Description:** Streams every JSON payload cached under `history_logs/` and inlines any referenced screenshots as base64 strings so the consumer can render them immediately.
+- **Description:** Streams every JSON payload cached under `history_logs/`.
+- **Query params:**
+	- `data_source` / `dataset`: `data1 | data2 | data3`
+	- `screenshot_mode`: `inline | proxy | none`
+		- `inline` (default): inline screenshot as data URI (`base64`)
+		- `proxy`: return screenshot URL (`/api/v1/history-logs/screenshot?...`) for direct frontend loading
+		- `none`: skip screenshot payload conversion
 - **Response snapshot:**
 	```json
 	[
@@ -108,3 +114,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 	]
 	```
 - Screenshots that are no longer present on disk are returned as `null` entries in `details.screenshots`, and their original paths are listed under `details.missing_screenshots` for troubleshooting.
+
+- **Path:** `GET /api/v1/history-logs/screenshot`
+- **Description:** Serve a screenshot file directly by `path` (optionally with `dataset` / `data_source`), suitable for `<img src="...">`.

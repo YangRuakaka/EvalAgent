@@ -114,6 +114,21 @@ async def run_browser_agent(request: BrowserAgentRunRequest) -> BrowserAgentRunS
     if _worker_queue is None:
         raise HTTPException(status_code=500, detail="Worker queue is not initialized")
 
+    existing_status = _service.get_run_status(run_id)
+    if existing_status is not None:
+        existing_state = str(existing_status.get("status") or "queued")
+        existing_total = int(existing_status.get("total_tasks") or total_tasks)
+        logger.info(
+            "Browser-agent duplicate run request ignored | run_id=%s existing_status=%s",
+            run_id,
+            existing_state,
+        )
+        return BrowserAgentRunStartResponse(
+            run_id=run_id,
+            status=existing_state,
+            total_tasks=existing_total,
+        )
+
     _service.register_queued_run(run_id=run_id, total_tasks=total_tasks)
     await _worker_queue.put((run_id, request, total_tasks))
 

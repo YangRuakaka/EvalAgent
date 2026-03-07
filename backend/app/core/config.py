@@ -5,6 +5,7 @@ from typing import Optional, List
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Value Agent Backend"
     API_V1_PREFIX: str = "/api/v1"
+    PUBLIC_API_BASE_URL: Optional[str] = None
     
     # LLM Configuration
     OPENAI_API_KEY: Optional[str] = None
@@ -50,6 +51,9 @@ class Settings(BaseSettings):
     BROWSER_AGENT_INCLUDE_SCREENSHOTS_IN_RUN_RESPONSE: bool = False
     BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD: bool = True
     BROWSER_AGENT_STATUS_LOG_BUFFER_SIZE: int = 0  # 0 means unlimited (keep all captured logs)
+    BROWSER_AGENT_STATUS_LOG_LEVEL: str = "INFO"  # Log level captured into run-status logs (e.g. INFO/DEBUG)
+    BROWSER_AGENT_EXTERNAL_LOG_LEVEL: str = "INFO"  # Source logger level for browser_use/cdp_use capture
+    BROWSER_AGENT_STREAM_RUN_LOGS_TO_STDOUT: bool = True  # Mirror per-run logs to server stdout
     BROWSER_AGENT_EVENTS_POLL_INTERVAL_SECONDS: float = 0.25
     
     # Persona Generation Settings

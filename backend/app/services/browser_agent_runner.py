@@ -27,6 +27,22 @@ _ACTIVE_BROWSER_AGENT_RUN_ID: contextvars.ContextVar[Optional[str]] = contextvar
     "active_browser_agent_run_id",
     default=None,
 )
+_ACTIVE_BROWSER_AGENT_THREAD_STATE = threading.local()
+
+
+def _resolve_logging_level(value: Any, default: int = logging.INFO) -> int:
+    if isinstance(value, int):
+        return value
+    if value is None:
+        return default
+
+    try:
+        candidate = str(value).strip().upper()
+    except Exception:
+        return default
+
+    resolved = getattr(logging, candidate, None)
+    return resolved if isinstance(resolved, int) else default
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -89,7 +105,11 @@ class _RunScopedLogHandler(logging.Handler):
         self._append_callback = append_callback
 
     def emit(self, record: logging.LogRecord) -> None:
-        run_id = getattr(record, "browser_agent_run_id", None) or _ACTIVE_BROWSER_AGENT_RUN_ID.get()
+        run_id = (
+            getattr(record, "browser_agent_run_id", None)
+            or _ACTIVE_BROWSER_AGENT_RUN_ID.get()
+            or getattr(_ACTIVE_BROWSER_AGENT_THREAD_STATE, "run_id", None)
+        )
         if not run_id:
             return
 
@@ -163,18 +183,71 @@ class BrowserAgentService:
         self._run_log_max_entries: Optional[int] = (
             configured_log_buffer_size if configured_log_buffer_size > 0 else None
         )
+        status_log_level = _resolve_logging_level(
+            getattr(self._settings, "BROWSER_AGENT_STATUS_LOG_LEVEL", "INFO"),
+            default=logging.INFO,
+        )
         self._run_log_handler = _RunScopedLogHandler(self._append_run_log)
+        self._run_log_handler.setLevel(status_log_level)
         self._run_log_handler.setFormatter(
             logging.Formatter(
                 fmt="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
         )
+        self._stream_run_logs_to_stdout = bool(
+            getattr(self._settings, "BROWSER_AGENT_STREAM_RUN_LOGS_TO_STDOUT", True)
+        )
+        self._stdout_run_logger: Optional[logging.Logger] = None
+
+        self._configure_external_log_sources()
 
         with self.__class__._LOG_HANDLER_INSTALL_LOCK:
             if not self.__class__._LOG_HANDLER_INSTALLED:
                 logging.getLogger().addHandler(self._run_log_handler)
                 self.__class__._LOG_HANDLER_INSTALLED = True
+
+        if self._stream_run_logs_to_stdout:
+            self._stdout_run_logger = self._get_stdout_run_logger(status_log_level)
+
+    def _configure_external_log_sources(self) -> None:
+        source_level = _resolve_logging_level(
+            getattr(self._settings, "BROWSER_AGENT_EXTERNAL_LOG_LEVEL", "INFO"),
+            default=logging.INFO,
+        )
+        source_logger_names = (
+            "app.services.browser_agent_runner",
+            "browser_use",
+            "browser_use.agent",
+            "browser_use.agent.service",
+            "browser_use.browser",
+            "cdp_use",
+            "cdp_use.client",
+        )
+
+        for logger_name in source_logger_names:
+            source_logger = logging.getLogger(logger_name)
+            source_logger.setLevel(source_level)
+            source_logger.propagate = True
+
+    def _get_stdout_run_logger(self, log_level: int) -> logging.Logger:
+        stdout_logger = logging.getLogger("app.browser_agent.runlog")
+        stdout_logger.setLevel(log_level)
+        stdout_logger.propagate = False
+
+        if not any(getattr(handler, "_browser_agent_runlog_stdout", False) for handler in stdout_logger.handlers):
+            stream_handler = logging.StreamHandler(stream=sys.stdout)
+            stream_handler.setLevel(log_level)
+            stream_handler.setFormatter(
+                logging.Formatter(
+                    fmt="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            setattr(stream_handler, "_browser_agent_runlog_stdout", True)
+            stdout_logger.addHandler(stream_handler)
+
+        return stdout_logger
 
     def _status_file_path(self, run_id: str) -> Path:
         return self._status_dir / f"{run_id}.json"
@@ -212,6 +285,12 @@ class BrowserAgentService:
         status_payload = self._run_store.get(normalized_run_id)
         if isinstance(status_payload, dict):
             status_payload["logs"] = snapshot
+
+        if self._stdout_run_logger is not None:
+            try:
+                self._stdout_run_logger.info("[%s] %s", normalized_run_id, text)
+            except Exception:
+                pass
 
     def _get_run_logs(self, run_id: str) -> List[str]:
         normalized_run_id = (run_id or "").strip()
@@ -1149,6 +1228,7 @@ class BrowserAgentService:
                     self._run_agent_in_proactor_loop,
                     agent,
                     max_steps,
+                    _ACTIVE_BROWSER_AGENT_RUN_ID.get(),
                 )
 
             proactor_cls = getattr(asyncio, "ProactorEventLoop", None)
@@ -1175,6 +1255,7 @@ class BrowserAgentService:
                     self._run_agent_in_proactor_loop,
                     agent,
                     max_steps,
+                    _ACTIVE_BROWSER_AGENT_RUN_ID.get(),
                 )
 
             try:
@@ -1186,8 +1267,13 @@ class BrowserAgentService:
 
         return await agent.run(max_steps=max_steps)
 
-    def _run_agent_in_proactor_loop(self, agent: Any, max_steps: int) -> Any:
+    def _run_agent_in_proactor_loop(self, agent: Any, max_steps: int, run_id: Optional[str] = None) -> Any:
         """Run the async agent in a dedicated Proactor event loop (Windows-only)."""
+
+        normalized_run_id = (run_id or "").strip()
+        previous_run_id = getattr(_ACTIVE_BROWSER_AGENT_THREAD_STATE, "run_id", None)
+        if normalized_run_id:
+            _ACTIVE_BROWSER_AGENT_THREAD_STATE.run_id = normalized_run_id
 
         policy = asyncio.WindowsProactorEventLoopPolicy()
         loop = policy.new_event_loop()
@@ -1201,6 +1287,11 @@ class BrowserAgentService:
                 pass
             asyncio.set_event_loop(None)
             loop.close()
+            if previous_run_id is None:
+                if hasattr(_ACTIVE_BROWSER_AGENT_THREAD_STATE, "run_id"):
+                    delattr(_ACTIVE_BROWSER_AGENT_THREAD_STATE, "run_id")
+            else:
+                _ACTIVE_BROWSER_AGENT_THREAD_STATE.run_id = previous_run_id
 
     def _save_screenshots(self, history: Any, context: _RunContext) -> List[_ScreenshotArtifact]:
         """Persist screenshots from the agent history and return saved artifacts."""

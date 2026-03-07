@@ -1,8 +1,12 @@
 """API routes exposing cached history logs."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+import mimetypes
 
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse
+
+from ..core.config import settings
 from ..core.normalizers import to_bool, to_float, to_int, to_str, to_str_list
 from ..schemas.history_logs import HistoryLogsListResponse
 from ..services.history_logs_reader import HistoryLogsService, HistoryLogsServiceError
@@ -11,12 +15,24 @@ router = APIRouter(prefix="/history-logs", tags=["history-logs"])
 _service = HistoryLogsService()
 
 
+def _build_screenshot_url_prefix(request: Request) -> str:
+    configured_base = (settings.PUBLIC_API_BASE_URL or "").strip()
+    if configured_base:
+        normalized_base = configured_base.rstrip("/")
+        if normalized_base.endswith(settings.API_V1_PREFIX):
+            return f"{normalized_base}/history-logs/screenshot"
+        return f"{normalized_base}{settings.API_V1_PREFIX}/history-logs/screenshot"
+
+    return str(request.url_for("get_history_log_screenshot"))
+
+
 @router.get(
     "",
     response_model=HistoryLogsListResponse,
     summary="List cached history log payloads (custom format)",
 )
 async def list_history_logs(
+    request: Request,
     dataset: str = Query(
         "data1",
         description="Select cache dataset bucket: data1, data2, or data3.",
@@ -28,11 +44,21 @@ async def list_history_logs(
         description="Backward-compatible alias for dataset (data1, data2, data3).",
         pattern=r"^(data[123]|[123])$",
     ),
+    screenshot_mode: str = Query(
+        "inline",
+        description="Screenshot payload mode: inline (base64 data URI), proxy (URL), or none.",
+        pattern=r"^(inline|proxy|none)$",
+    ),
 ) -> HistoryLogsListResponse:
     """Return all cached history logs in the new custom format for frontend consumption."""
     try:
         selected_dataset = data_source if data_source else dataset
-        logs = _service.list_logs(dataset=selected_dataset)
+        screenshot_url_prefix = _build_screenshot_url_prefix(request)
+        logs = _service.list_logs(
+            dataset=selected_dataset,
+            screenshot_mode=screenshot_mode,
+            screenshot_url_prefix=screenshot_url_prefix,
+        )
         results = []
         for log in logs:
             raw_persona = log.metadata.get("persona", "")
@@ -90,4 +116,40 @@ async def list_history_logs(
             results.append(result)
         return HistoryLogsListResponse(results=results)
     except HistoryLogsServiceError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get(
+    "/screenshot",
+    summary="Serve cached screenshot file",
+)
+async def get_history_log_screenshot(
+    path: str = Query(..., description="Screenshot path from history payload."),
+    dataset: str = Query(
+        "data1",
+        description="Select cache dataset bucket: data1, data2, or data3.",
+        pattern=r"^(data[123]|[123])$",
+    ),
+    data_source: str | None = Query(
+        None,
+        alias="data_source",
+        description="Backward-compatible alias for dataset (data1, data2, data3).",
+        pattern=r"^(data[123]|[123])$",
+    ),
+):
+    try:
+        selected_dataset = data_source if data_source else dataset
+        screenshot_file = _service.resolve_screenshot_file(path_str=path, dataset=selected_dataset)
+        if not screenshot_file:
+            raise HTTPException(status_code=404, detail="Screenshot not found")
+
+        media_type, _ = mimetypes.guess_type(str(screenshot_file))
+        return FileResponse(
+            path=screenshot_file,
+            media_type=media_type or "application/octet-stream",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

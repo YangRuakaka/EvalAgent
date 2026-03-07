@@ -305,7 +305,10 @@ const App = () => {
 		}
 
 		try {
-			const response = await fetchHistoryLogs({ dataSource: selectedDataSource });
+			const response = await fetchHistoryLogs({
+				dataSource: selectedDataSource,
+				screenshotMode: 'proxy',
+			});
 
 			if (!response.ok) {
 				const error = new Error(`Failed to fetch history logs (status ${response.status})`);

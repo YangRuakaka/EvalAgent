@@ -55,11 +55,25 @@ export const fetchHistoryLogs = (optionsOrClient = {}, maybeClient) => {
 	const dataSource = typeof options?.dataSource === 'string'
 		? options.dataSource.trim().toLowerCase()
 		: '';
+	const screenshotMode = typeof options?.screenshotMode === 'string'
+		? options.screenshotMode.trim().toLowerCase()
+		: '';
 
-	const query = dataSource ? `?data_source=${encodeURIComponent(dataSource)}` : '';
+	const params = [];
+	if (dataSource) {
+		params.push(`data_source=${encodeURIComponent(dataSource)}`);
+	}
+	if (screenshotMode) {
+		params.push(`screenshot_mode=${encodeURIComponent(screenshotMode)}`);
+	}
+
+	const query = params.length > 0 ? `?${params.join('&')}` : '';
 	const path = `${API_ENDPOINTS.historyLogs.root}${query}`;
 
-	console.log('[API] fetchHistoryLogs - Request:', { dataSource: dataSource || null });
+	console.log('[API] fetchHistoryLogs - Request:', {
+		dataSource: dataSource || null,
+		screenshotMode: screenshotMode || null,
+	});
 	return client.get(path).then(response => {
 		console.log('[API] fetchHistoryLogs - Response:', response);
 		return response;
@@ -80,10 +94,19 @@ export const runBrowserAgent = (payload, optionsOrClient, maybeClient) => {
 	}
 
 	console.log('[API] runBrowserAgent - Request:', payload);
+	const retryOnNetworkError = typeof requestOptions.retryOnNetworkError === 'boolean'
+		? requestOptions.retryOnNetworkError
+		: false;
+	const maxRetries = Number.isFinite(requestOptions.maxRetries)
+		? Number(requestOptions.maxRetries)
+		: 0;
+	const retryDelayMs = Number.isFinite(requestOptions.retryDelayMs)
+		? Number(requestOptions.retryDelayMs)
+		: 1000;
 	return client.post(API_ENDPOINTS.browserAgent.run, payload, {
-		retryOnNetworkError:	true,
-		maxRetries:		2,
-		retryDelayMs:		1000,
+		retryOnNetworkError,
+		maxRetries,
+		retryDelayMs,
 		signal: requestOptions.signal,
 		...(requestOptions.headers ? { headers: requestOptions.headers } : {}),
 	}).then(response => {

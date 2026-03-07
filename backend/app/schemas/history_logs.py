@@ -12,8 +12,8 @@ class HistoryLogDetails(BaseModel):
     screenshots: List[Optional[str]] = Field(
         default_factory=list,
         description=(
-            "Ordered screenshot payloads as data URI strings (preferably image/webp;base64). "
-            "Entries may be null when the original file could not be located."
+            "Ordered screenshot references. Values may be inline data URIs, proxy URLs, "
+            "or null when the original file could not be located."
         ),
     )
     screenshot_paths: List[str] = Field(

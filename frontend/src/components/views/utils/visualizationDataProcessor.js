@@ -51,6 +51,7 @@ const normalizeHistoryPayload = (run) => {
 		return {
 			screenshots: toArray(details.screenshots),
 			screenshot_paths: toArray(details.screenshot_paths),
+			screenshot_hashes: toArray(details.screenshot_hashes),
 			step_descriptions: toArray(details.step_descriptions),
 			model_outputs: details.model_outputs || null,
 			last_action: details.last_action || null,
@@ -113,6 +114,7 @@ export const processVisualizationData = (payload) => {
 		
 		// Extract heavy data
 		const screenshots = run.history_payload?.screenshots || run.screenshots || run.details?.screenshots || [];
+		const screenshot_hashes = run.history_payload?.screenshot_hashes || run.screenshot_hashes || run.details?.screenshot_hashes || [];
 		const model_outputs = run.history_payload?.model_outputs || run.model_outputs || run.details?.model_outputs || [];
 		const trajectory = run.trajectory || run.history_payload?.trajectory || run.details?.trajectory || null;
 
@@ -123,6 +125,7 @@ export const processVisualizationData = (payload) => {
 			id,
 			label,
 			screenshots,
+			screenshot_hashes,
 			model_outputs,
 			trajectory
 		};

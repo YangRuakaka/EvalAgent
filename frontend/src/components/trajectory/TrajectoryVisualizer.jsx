@@ -198,6 +198,49 @@ const TrajectoryVisualizer = ({
 
 	const hasTrajectory = Boolean(trajectory?.details);
 	const useImageHash = useImageHashEnabled !== false;
+	const preferDirectHashBuild = useMemo(() => {
+		if (!useImageHash) {
+			return false;
+		}
+
+		const details = Array.isArray(trajectory?.details) ? trajectory.details : [];
+		if (!details.length) {
+			return false;
+		}
+
+		let hasAnyScreenshot = false;
+
+		for (const entry of details) {
+			const screenshots = Array.isArray(entry?.screenshots)
+				? entry.screenshots
+				: (Array.isArray(entry?.history_payload?.screenshots) ? entry.history_payload.screenshots : []);
+			if (!screenshots.length) {
+				continue;
+			}
+
+			hasAnyScreenshot = true;
+			const hashes = Array.isArray(entry?.screenshot_hashes)
+				? entry.screenshot_hashes
+				: (Array.isArray(entry?.history_payload?.screenshot_hashes) ? entry.history_payload.screenshot_hashes : []);
+
+			if (hashes.length < screenshots.length) {
+				return false;
+			}
+
+			for (let index = 0; index < screenshots.length; index += 1) {
+				if (!screenshots[index]) {
+					continue;
+				}
+
+				const hash = hashes[index];
+				if (typeof hash !== 'string' || !hash.trim()) {
+					return false;
+				}
+			}
+		}
+
+		return hasAnyScreenshot;
+	}, [trajectory, useImageHash]);
 	const shouldRenderNodeImages = true;
 	const conditionsSignature = useMemo(() => {
 		if (!Array.isArray(conditions) || !conditions.length) {
@@ -279,6 +322,32 @@ const TrajectoryVisualizer = ({
 			conditions: conditionsRef.current,
 		});
 
+		if (preferDirectHashBuild) {
+			buildTargetGraph()
+				.then((result) => {
+					if (!isMounted) {
+						return;
+					}
+
+					safeSetGraph(result);
+					setIsProcessing(false);
+				})
+				.catch((err) => {
+					if (isMounted) {
+						console.error('[trajectory] Failed to build graph', err);
+						setGraph(EMPTY_GRAPH);
+						setError(err);
+						setIsProcessing(false);
+						setIsRefiningGraph(false);
+					}
+				});
+
+			return () => {
+				isMounted = false;
+				cancelRefinement();
+			};
+		}
+
 		buildPreviewGraph()
 			.then((previewGraph) => {
 				if (!isMounted) {
@@ -332,7 +401,7 @@ const TrajectoryVisualizer = ({
 			isMounted = false;
 			cancelRefinement();
 		};
-	}, [hasTrajectory, trajectory, conditionsSignature, useImageHash]);
+	}, [hasTrajectory, trajectory, conditionsSignature, useImageHash, preferDirectHashBuild]);
 
 
 	const legendEntries = useMemo(() => {

@@ -20,6 +20,10 @@ class HistoryLogDetails(BaseModel):
         default_factory=list,
         description="Relative paths to the screenshots as recorded in the history file.",
     )
+    screenshot_hashes: List[Optional[str]] = Field(
+        default_factory=list,
+        description="Per-screenshot stable hashes aligned by index with screenshots.",
+    )
     missing_screenshots: List[str] = Field(
         default_factory=list,
         description="List of screenshot paths that were referenced but not found on disk.",
@@ -53,6 +57,7 @@ class HistoryLogMetadata(BaseModel):
 class HistoryLogHistoryPayload(BaseModel):
     screenshots: List[Optional[str]]
     screenshot_paths: List[str]
+    screenshot_hashes: List[Optional[str]]
     step_descriptions: List[str]
     model_outputs: Any
     last_action: Any

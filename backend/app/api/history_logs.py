@@ -95,6 +95,7 @@ async def list_history_logs(
             history_payload = {
                 "screenshots": details.get("screenshots", []),
                 "screenshot_paths": details.get("screenshot_paths", []),
+                "screenshot_hashes": details.get("screenshot_hashes", []),
                 "step_descriptions": to_str_list(details.get("step_descriptions", [])),
                 "model_outputs": details.get("model_outputs", None),
                 "last_action": details.get("last_action", None)

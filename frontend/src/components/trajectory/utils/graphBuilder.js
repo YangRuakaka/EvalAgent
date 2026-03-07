@@ -189,6 +189,7 @@ const normalizeScreenshot = (raw, metadata) => {
 	// 后端只返回 base64 string，无需处理 object 格式
 	if (typeof raw === 'string') {
 		const src = resolveImageSource(raw, null, normalizedMetadata);
+		const imageHash = coerceText(normalizedMetadata.imageHash);
 
 		if (!src) {
 			return null;
@@ -197,6 +198,7 @@ const normalizeScreenshot = (raw, metadata) => {
 		return {
 			src,
 			alt: normalizedMetadata.alt || undefined,
+			imageHash: imageHash || null,
 			raw,
 			...normalizedMetadata,
 		};
@@ -254,6 +256,8 @@ const extractScreenshotSequences = (trajectory) => {
 			const stepDescriptions = asArray(entry?.step_descriptions);
 			// Get model outputs array from entry (matches screenshot indices)
 			const modelOutputs = asArray(entry?.model_outputs || entry?.history_payload?.model_outputs);
+			// Get precomputed screenshot hashes array from entry (matches screenshot indices)
+			const screenshotHashes = asArray(entry?.screenshot_hashes || entry?.history_payload?.screenshot_hashes);
 			
 			const screenshotsRaw = asArray(entry?.screenshots)
 				.map((item, screenshotIndex) => {
@@ -274,6 +278,7 @@ const extractScreenshotSequences = (trajectory) => {
 						timestamp: entry?.timestamp || entry?.created_at,
 						label: baseLabel,
 						persona: screenshotPersona || entryPersona || conditionPersona || null,
+						imageHash: screenshotHashes[screenshotIndex] || null,
 						description: stepDescription,
 						model_output: specificModelOutput || entry?.model_output || entry,
 					});
@@ -377,6 +382,10 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 		async (task) => {
 			if (!useImageHash) {
 				return { ...task, hash: null };
+			}
+
+			if (typeof task?.screenshot?.imageHash === 'string' && task.screenshot.imageHash.trim()) {
+				return { ...task, hash: task.screenshot.imageHash.trim() };
 			}
 
 			const hash = await computeImageHash(task.screenshot.src, options.hash);

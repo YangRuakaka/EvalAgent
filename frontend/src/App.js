@@ -47,7 +47,7 @@ const SYSTEM_VARIANT_OPTIONS = [
 	{
 		value: 'B',
 		label: 'B',
-		trajectoryUseImageHashEnabled: true,
+		trajectoryUseImageHashEnabled: false,
 		reasoningEvidenceHighlightEnabled: true,
 	},
 	{

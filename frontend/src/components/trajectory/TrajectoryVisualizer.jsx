@@ -198,6 +198,31 @@ const TrajectoryVisualizer = ({
 
 	const hasTrajectory = Boolean(trajectory?.details);
 	const useImageHash = useImageHashEnabled !== false;
+	const shouldUsePreviewImage = useMemo(() => {
+		const details = Array.isArray(trajectory?.details) ? trajectory.details : [];
+		for (const entry of details) {
+			const screenshots = Array.isArray(entry?.screenshots)
+				? entry.screenshots
+				: (Array.isArray(entry?.history_payload?.screenshots) ? entry.history_payload.screenshots : []);
+			for (const shot of screenshots) {
+				if (typeof shot !== 'string') {
+					continue;
+				}
+				const trimmed = shot.trim();
+				if (!trimmed) {
+					continue;
+				}
+				if (trimmed.startsWith('data:')) {
+					return true;
+				}
+				if (/^(https?:\/\/|\/)/i.test(trimmed)) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}, [trajectory]);
 	const preferDirectHashBuild = useMemo(() => {
 		if (!useImageHash) {
 			return false;
@@ -312,6 +337,7 @@ const TrajectoryVisualizer = ({
 			hash: { hashSize: 16 },
 			hashConcurrency: 8,
 			useImageHash: false,
+			usePreviewImage: shouldUsePreviewImage,
 			conditions: conditionsRef.current,
 		});
 
@@ -319,6 +345,7 @@ const TrajectoryVisualizer = ({
 			hash: { hashSize: 16 },
 			hashConcurrency: 8,
 			useImageHash,
+			usePreviewImage: shouldUsePreviewImage,
 			conditions: conditionsRef.current,
 		});
 
@@ -401,7 +428,7 @@ const TrajectoryVisualizer = ({
 			isMounted = false;
 			cancelRefinement();
 		};
-	}, [hasTrajectory, trajectory, conditionsSignature, useImageHash, preferDirectHashBuild]);
+	}, [hasTrajectory, trajectory, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage]);
 
 
 	const legendEntries = useMemo(() => {

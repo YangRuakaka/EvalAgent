@@ -7,9 +7,9 @@ REGION="us-central1"
 BUCKET_NAME="evalagent-67802-history-logs"
 MOUNT_PATH="/app/history_logs"
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CACHE_HISTORY_LOGS_PATH="${SCRIPT_ROOT}/cache_history_logs"
+HISTORY_LOGS_PATH="${SCRIPT_ROOT}/history_logs"
 BROWSER_AGENT_RUNS_PATH="${SCRIPT_ROOT}/browser_agent_runs"
-CACHE_HISTORY_LOGS_DIR="${MOUNT_PATH}/cache_history_logs"
+HISTORY_LOGS_DIR="${MOUNT_PATH}/history_logs"
 BROWSER_AGENT_RUN_OUTPUT_DIR="${MOUNT_PATH}/browser_agent_runs"
 
 DEFAULT_LLM_MODEL="gpt-4o"
@@ -158,15 +158,15 @@ fi
 [[ -n "$ANTHROPIC_API_KEY_VALUE" ]] && echo_success "ANTHROPIC_API_KEY configured."
 [[ -n "$GEMINI_API_KEY_VALUE" ]] && echo_success "GEMINI_API_KEY configured."
 
-if [[ -d "$CACHE_HISTORY_LOGS_PATH" || -d "$BROWSER_AGENT_RUNS_PATH" ]]; then
+if [[ -d "$HISTORY_LOGS_PATH" || -d "$BROWSER_AGENT_RUNS_PATH" ]]; then
   echo_info "Syncing local cache/browser-run folders to GCS Bucket (${BUCKET_NAME})..."
 
   if command -v gsutil >/dev/null 2>&1; then
-    if [[ -d "$CACHE_HISTORY_LOGS_PATH" ]]; then
-      if gsutil -m rsync -r "$CACHE_HISTORY_LOGS_PATH" "gs://${BUCKET_NAME}/cache_history_logs"; then
-        echo_success "cache_history_logs synced successfully."
+    if [[ -d "$HISTORY_LOGS_PATH" ]]; then
+      if gsutil -m rsync -r "$HISTORY_LOGS_PATH" "gs://${BUCKET_NAME}/history_logs"; then
+        echo_success "history_logs synced successfully."
       else
-        echo_warn "Failed to sync cache_history_logs. Continuing with deployment..."
+        echo_warn "Failed to sync history_logs. Continuing with deployment..."
       fi
     fi
 
@@ -203,7 +203,7 @@ GCLOUD_ARGS=(
 
 ENV_VARS=(
   "DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL}"
-  "CACHE_HISTORY_LOGS_DIR=${CACHE_HISTORY_LOGS_DIR}"
+  "CACHE_HISTORY_LOGS_DIR=${HISTORY_LOGS_DIR}"
   "BROWSER_AGENT_RUN_OUTPUT_DIR=${BROWSER_AGENT_RUN_OUTPUT_DIR}"
   "BROWSER_AGENT_OUTPUT_DIR=${BROWSER_AGENT_RUN_OUTPUT_DIR}"
   "BROWSER_AGENT_MAX_CONCURRENT=${BROWSER_AGENT_MAX_CONCURRENT}"

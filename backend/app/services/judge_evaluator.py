@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -108,6 +109,327 @@ class JudgeEvaluatorService:
         }
         return mapping.get(lowered, "UNABLE_TO_EVALUATE")
 
+    def _normalize_binary_verdict(self, verdict: Any) -> str:
+        return "PASS" if self._normalize_verdict(verdict) == "PASS" else "FAIL"
+
+    def _clip_confidence(self, value: Any) -> float:
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except Exception:
+            return 0.0
+
+    def _collect_logprob_values(self, node: Any, sink: List[float]) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                key_lower = str(key).lower()
+                if key_lower in {"logprob", "token_logprob"} and isinstance(value, (int, float)):
+                    sink.append(float(value))
+                else:
+                    self._collect_logprob_values(value, sink)
+            return
+
+        if isinstance(node, list):
+            for item in node:
+                self._collect_logprob_values(item, sink)
+
+    def _extract_token_prediction_confidence(self, response_obj: Any) -> Optional[float]:
+        if response_obj is None:
+            return None
+
+        logprobs: List[float] = []
+        metadata_sources: List[Any] = []
+        if hasattr(response_obj, "response_metadata"):
+            metadata_sources.append(getattr(response_obj, "response_metadata"))
+        if hasattr(response_obj, "additional_kwargs"):
+            metadata_sources.append(getattr(response_obj, "additional_kwargs"))
+
+        for source in metadata_sources:
+            self._collect_logprob_values(source, logprobs)
+
+        if not logprobs:
+            return None
+
+        clipped = [max(-20.0, min(0.0, value)) for value in logprobs]
+        probs = [math.exp(value) for value in clipped]
+        if not probs:
+            return None
+        return self._clip_confidence(sum(probs) / len(probs))
+
+    def _calculate_reasoning_specificity(self, reasoning: str) -> float:
+        text = (reasoning or "").strip().lower()
+        if not text:
+            return 0.0
+
+        marker_hits = 0
+        for marker in [
+            "because",
+            "therefore",
+            "however",
+            "tradeoff",
+            "constraint",
+            "risk",
+            "evidence",
+            "step",
+            "phase",
+            "contradict",
+        ]:
+            if marker in text:
+                marker_hits += 1
+
+        marker_score = min(1.0, marker_hits / 4.0)
+        length_score = min(1.0, len(text) / 260.0)
+        return self._clip_confidence(0.6 * marker_score + 0.4 * length_score)
+
+    def _calculate_evidence_quality(
+        self,
+        evidence_list: List[EvidenceCitation],
+        step_scope: List[int],
+    ) -> float:
+        if not evidence_list:
+            return 0.0
+
+        valid_scope = sorted({idx for idx in step_scope if isinstance(idx, int)})
+        scope_size = max(1, len(valid_scope))
+
+        unique_steps = {int(item.step_index) for item in evidence_list if isinstance(item.step_index, int)}
+        unique_fields = {
+            item.source_field.value if hasattr(item.source_field, "value") else str(item.source_field)
+            for item in evidence_list
+        }
+        unique_verdicts = {
+            str(item.verdict.value if hasattr(item.verdict, "value") else item.verdict).lower()
+            for item in evidence_list
+            if item.verdict
+        }
+
+        avg_reasoning_len = 0.0
+        if evidence_list:
+            avg_reasoning_len = sum(len((item.reasoning or "").strip()) for item in evidence_list) / len(evidence_list)
+
+        density = min(1.0, len(evidence_list) / max(3.0, scope_size * 0.8))
+        coverage = min(1.0, len(unique_steps) / scope_size)
+        source_diversity = min(1.0, len(unique_fields) / 4.0)
+        reasoning_depth = min(1.0, avg_reasoning_len / 120.0)
+        polarity_signal = 1.0 if len(unique_verdicts) >= 2 else (0.65 if len(unique_verdicts) == 1 else 0.45)
+
+        return self._clip_confidence(
+            0.30 * density
+            + 0.28 * coverage
+            + 0.18 * source_diversity
+            + 0.14 * reasoning_depth
+            + 0.10 * polarity_signal
+        )
+
+    def _calculate_dimension_alignment(
+        self,
+        dimension_assessments: List[Dict[str, Any]],
+        verdict: str,
+    ) -> float:
+        if not dimension_assessments:
+            return 0.55
+
+        score_map = {
+            "pass": 1.0,
+            "fail": 0.0,
+            "partial": 0.45,
+            "unable_to_evaluate": 0.4,
+            "unknown": 0.4,
+        }
+        dim_scores: List[float] = []
+        for item in dimension_assessments:
+            if not isinstance(item, dict):
+                continue
+            status = str(item.get("status", "")).strip().lower()
+            dim_scores.append(score_map.get(status, 0.45))
+
+        if not dim_scores:
+            return 0.55
+
+        mean_score = sum(dim_scores) / len(dim_scores)
+        variance = sum((value - mean_score) ** 2 for value in dim_scores) / len(dim_scores)
+        std = math.sqrt(max(0.0, variance))
+
+        target_score = 1.0 if self._normalize_verdict(verdict) == "PASS" else 0.0
+        alignment = 1.0 - abs(mean_score - target_score)
+        coherence = 1.0 - min(1.0, std)
+        return self._clip_confidence(0.65 * alignment + 0.35 * coherence)
+
+    def _calculate_phase_verdict_agreement(self, phase_results: List[EvaluationResult]) -> float:
+        if not phase_results:
+            return 0.0
+
+        buckets = {"PASS": 0, "FAIL": 0, "PARTIAL": 0, "UNABLE_TO_EVALUATE": 0}
+        for item in phase_results:
+            buckets[self._normalize_verdict(item.verdict)] += 1
+
+        counts = [count for count in buckets.values() if count > 0]
+        if len(counts) <= 1:
+            return 1.0
+
+        total = sum(counts)
+        entropy = 0.0
+        for count in counts:
+            probability = count / total
+            entropy -= probability * math.log(probability)
+
+        max_entropy = math.log(len(counts)) if len(counts) > 1 else 1.0
+        if max_entropy <= 0:
+            return 1.0
+        return self._clip_confidence(1.0 - (entropy / max_entropy))
+
+    def _build_evidence_coverage_lenses(
+        self,
+        criterion_name: str,
+        criterion_assertion: str,
+        phase_summary: str,
+        existing_evidence: List[EvidenceCitation],
+    ) -> List[str]:
+        observed_steps = sorted(
+            {
+                int(item.step_index)
+                for item in existing_evidence
+                if isinstance(item.step_index, int)
+            }
+        )
+        observed_hint = f"already covered steps: {observed_steps}" if observed_steps else "no stable anchors yet"
+
+        return [
+            f"Intent anchor: where agent explicitly interprets {criterion_name} / '{criterion_assertion}'.",
+            "Decision pivot: where agent chooses between alternatives or tradeoffs.",
+            "Constraint handling: where risk, limits, cost, or safety constraints appear.",
+            "Outcome verification: where the agent checks or validates whether goal/criterion is satisfied.",
+            f"Coverage gap lens: {observed_hint}; find complementary non-duplicative snippets tied to phase summary '{phase_summary[:140]}'.",
+        ]
+
+    def _is_evidence_coverage_sufficient(
+        self,
+        evidence_list: List[EvidenceCitation],
+        step_indices: List[int],
+    ) -> bool:
+        if not evidence_list:
+            return False
+
+        unique_steps = {
+            int(item.step_index)
+            for item in evidence_list
+            if isinstance(item.step_index, int)
+        }
+        scope = max(1, len({idx for idx in step_indices if isinstance(idx, int)}))
+        min_step_coverage = max(2, math.ceil(scope * 0.45))
+        has_step_coverage = len(unique_steps) >= min_step_coverage
+        has_signal_depth = len(evidence_list) >= max(3, min(6, scope))
+        return has_step_coverage and has_signal_depth
+
+    def _score_evidence_item(self, evidence: EvidenceCitation) -> float:
+        text = (evidence.highlighted_text or "").strip()
+        reasoning = (evidence.reasoning or "").strip()
+        text_length_score = min(1.0, max(0.0, len(text) - 8) / 180.0)
+        reasoning_score = min(1.0, len(reasoning) / 140.0)
+        signal_bonus = 0.25 if self._is_high_signal_evidence(evidence) else 0.0
+        verdict_bonus = 0.10 if evidence.verdict else 0.0
+        return self._clip_confidence(0.35 + 0.30 * text_length_score + 0.25 * reasoning_score + signal_bonus + verdict_bonus)
+
+    def _curate_story_evidence(
+        self,
+        evidence_list: List[EvidenceCitation],
+        step_indices: List[int],
+        max_items: int = 9,
+    ) -> List[EvidenceCitation]:
+        if not evidence_list:
+            return []
+
+        ranked = sorted(evidence_list, key=self._score_evidence_item, reverse=True)
+        selected: List[EvidenceCitation] = []
+        per_step_count: Dict[int, int] = {}
+
+        for item in ranked:
+            step_idx = int(item.step_index)
+            if per_step_count.get(step_idx, 0) >= 2:
+                continue
+
+            if step_idx not in per_step_count:
+                selected.append(item)
+                per_step_count[step_idx] = 1
+            if len(selected) >= max_items:
+                break
+
+        if len(selected) < max_items:
+            for item in ranked:
+                if item in selected:
+                    continue
+                step_idx = int(item.step_index)
+                if per_step_count.get(step_idx, 0) >= 3:
+                    continue
+                selected.append(item)
+                per_step_count[step_idx] = per_step_count.get(step_idx, 0) + 1
+                if len(selected) >= max_items:
+                    break
+
+        scope = {idx for idx in step_indices if isinstance(idx, int)}
+        if scope:
+            selected = [item for item in selected if int(item.step_index) in scope] or selected
+        return selected
+
+    def _calibrate_phase_confidence(
+        self,
+        raw_confidence: float,
+        verdict: str,
+        evidence_list: List[EvidenceCitation],
+        relevant_steps: List[int],
+        phase_step_indices: List[int],
+        dimension_assessments: List[Dict[str, Any]],
+        reasoning: str,
+        token_prediction_confidence: Optional[float],
+    ) -> float:
+        scope_steps = sorted(
+            {
+                idx for idx in (phase_step_indices or relevant_steps)
+                if isinstance(idx, int)
+            }
+        )
+        evidence_quality = self._calculate_evidence_quality(evidence_list, scope_steps)
+        dimension_alignment = self._calculate_dimension_alignment(dimension_assessments, verdict)
+        reasoning_specificity = self._calculate_reasoning_specificity(reasoning)
+        token_component = token_prediction_confidence if token_prediction_confidence is not None else 0.50
+
+        return self._clip_confidence(
+            0.30 * self._clip_confidence(raw_confidence)
+            + 0.28 * evidence_quality
+            + 0.22 * dimension_alignment
+            + 0.12 * reasoning_specificity
+            + 0.08 * token_component
+        )
+
+    def _calibrate_criterion_confidence(
+        self,
+        raw_confidence: float,
+        verdict: str,
+        aggregated_evidence: List[EvidenceCitation],
+        phase_results: List[EvaluationResult],
+        all_steps: List[Dict[str, Any]],
+        reasoning: str,
+        token_prediction_confidence: Optional[float],
+    ) -> float:
+        step_scope = list(range(len(all_steps)))
+        evidence_quality = self._calculate_evidence_quality(aggregated_evidence, step_scope)
+        phase_agreement = self._calculate_phase_verdict_agreement(phase_results)
+        reasoning_specificity = self._calculate_reasoning_specificity(reasoning)
+        token_component = token_prediction_confidence if token_prediction_confidence is not None else 0.50
+
+        pass_ratio = 0.0
+        if phase_results:
+            pass_ratio = sum(1 for item in phase_results if self._normalize_verdict(item.verdict) == "PASS") / len(phase_results)
+        verdict_alignment = pass_ratio if self._normalize_verdict(verdict) == "PASS" else (1.0 - pass_ratio)
+
+        return self._clip_confidence(
+            0.24 * self._clip_confidence(raw_confidence)
+            + 0.26 * evidence_quality
+            + 0.20 * phase_agreement
+            + 0.16 * verdict_alignment
+            + 0.08 * reasoning_specificity
+            + 0.06 * token_component
+        )
+
     def _format_steps_for_unified_segmentation(self, all_steps: List[Dict[str, Any]]) -> str:
         lines: List[str] = []
         for idx, step in enumerate(all_steps):
@@ -198,6 +520,7 @@ class JudgeEvaluatorService:
 
         response = await asyncio.to_thread(chain.invoke, invoke_dict)
         response_text = response.content if hasattr(response, "content") else str(response)
+        token_prediction_confidence = self._extract_token_prediction_confidence(response)
         response_data = self._extract_json_object(response_text) or {}
 
         phases = self._sanitize_phase_output(
@@ -504,6 +827,31 @@ class JudgeEvaluatorService:
             all_steps=all_steps,
             model_name=model_name,
         )
+        dimension_assessments: List[Dict[str, Any]] = []
+        if isinstance(result.model_extra, dict):
+            raw_dimensions = result.model_extra.get("dimension_assessments", [])
+            if isinstance(raw_dimensions, list):
+                dimension_assessments = [item for item in raw_dimensions if isinstance(item, dict)]
+
+        calibrated_confidence = self._calibrate_phase_confidence(
+            raw_confidence=float(result.confidence_score or 0.0),
+            verdict=result.verdict,
+            evidence_list=result.highlighted_evidence or [],
+            relevant_steps=[s for s in (result.relevant_steps or []) if isinstance(s, int)],
+            phase_step_indices=step_indices,
+            dimension_assessments=dimension_assessments,
+            reasoning=result.reasoning,
+            token_prediction_confidence=token_prediction_confidence,
+        )
+
+        update_payload: Dict[str, Any] = {
+            "confidence_score": calibrated_confidence,
+            "highlighted_evidence": self._curate_story_evidence(result.highlighted_evidence or [], step_indices),
+        }
+        if token_prediction_confidence is not None:
+            update_payload["llm_token_prediction_confidence"] = token_prediction_confidence
+
+        result = result.model_copy(update=update_payload)
         result.used_granularity = Granularity.PHASE_LEVEL
         return result
 
@@ -644,6 +992,7 @@ class JudgeEvaluatorService:
                 f"Segmentation reasoning: {segmentation.get('segmentation_reasoning', '')}"
             )[:500]
             final.used_granularity = Granularity.PHASE_LEVEL
+            final = final.model_copy(update={"verdict": self._normalize_binary_verdict(final.verdict)})
             return final
         except Exception as exc:
             logger.error("Unified criterion evaluation failed for '%s': %s", criterion_name, exc)
@@ -979,9 +1328,12 @@ class JudgeEvaluatorService:
         model_name: Optional[str],
     ) -> List[EvidenceCitation]:
         current_evidence = list(base_evidence or [])
-        curated_current = self._keep_high_signal_evidence(current_evidence)
+        curated_current = self._curate_story_evidence(
+            self._keep_high_signal_evidence(current_evidence),
+            step_indices,
+        )
 
-        if curated_current:
+        if curated_current and self._is_evidence_coverage_sufficient(curated_current, step_indices):
             return curated_current
         if not all_steps or not step_indices:
             return curated_current
@@ -1006,6 +1358,16 @@ class JudgeEvaluatorService:
                 "phase_summary": phase_summary,
                 "phase_steps_context": self._build_phase_steps_context(all_steps, step_indices),
                 "existing_evidence_json": json.dumps(existing_evidence_payload, ensure_ascii=False, indent=2),
+                "coverage_lenses": json.dumps(
+                    self._build_evidence_coverage_lenses(
+                        criterion_name=criterion_name,
+                        criterion_assertion=criterion_assertion,
+                        phase_summary=phase_summary,
+                        existing_evidence=curated_current,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
             }
 
             response = await asyncio.to_thread(chain.invoke, invoke_dict)
@@ -1024,7 +1386,10 @@ class JudgeEvaluatorService:
                 criterion_name=criterion_name,
                 model_name=model_name,
             )
-            return self._keep_high_signal_evidence(grounded)
+            return self._curate_story_evidence(
+                self._keep_high_signal_evidence(grounded),
+                step_indices,
+            )
         except Exception as exc:
             logger.debug("Phase evidence expansion failed for %s: %s", phase_id, exc)
             return curated_current
@@ -1055,6 +1420,18 @@ class JudgeEvaluatorService:
             )
             highlighted_evidence = self._keep_high_signal_evidence(highlighted_evidence)
 
+        phase_scope: List[int] = []
+        if isinstance(aggregated_steps.step_mapping, dict):
+            for value in aggregated_steps.step_mapping.values():
+                if isinstance(value, list):
+                    phase_scope.extend([idx for idx in value if isinstance(idx, int)])
+        phase_scope = sorted(set(phase_scope))
+        highlighted_evidence = self._curate_story_evidence(highlighted_evidence, phase_scope)
+
+        dimension_assessments = response_data.get("dimension_assessments", [])
+        if not isinstance(dimension_assessments, list):
+            dimension_assessments = []
+
         return EvaluationResult(
             criterion_name=criterion_name,
             verdict=self._normalize_verdict(response_data.get("verdict", "UNABLE_TO_EVALUATE")),
@@ -1065,6 +1442,7 @@ class JudgeEvaluatorService:
             used_granularity=aggregated_steps.granularity,
             supporting_evidence=response_data.get("supporting_evidence", ""),
             highlighted_evidence=highlighted_evidence,
+            dimension_assessments=dimension_assessments,
         )
 
     async def _synthesize_overall_from_phase_results_async(
@@ -1142,6 +1520,7 @@ class JudgeEvaluatorService:
             }
             response = await asyncio.to_thread(chain.invoke, invoke_dict)
             response_text = response.content if hasattr(response, "content") else str(response)
+            token_prediction_confidence = self._extract_token_prediction_confidence(response)
             response_data = self._extract_json_object(response_text)
             if not response_data:
                 return self._simple_merge_results(phase_results, criterion_name, Granularity.PHASE_LEVEL)
@@ -1163,16 +1542,32 @@ class JudgeEvaluatorService:
                     }
                 )
 
+            aggregated_evidence = self._curate_story_evidence(aggregated_evidence, relevant_steps)
+
+            reasoning_text = str(response_data.get("reasoning", ""))
+            raw_confidence = float(response_data.get("confidence_score", 0.5))
+            normalized_verdict = self._normalize_binary_verdict(response_data.get("verdict", "FAIL"))
+            calibrated_confidence = self._calibrate_criterion_confidence(
+                raw_confidence=raw_confidence,
+                verdict=normalized_verdict,
+                aggregated_evidence=aggregated_evidence,
+                phase_results=phase_results,
+                all_steps=all_steps,
+                reasoning=reasoning_text,
+                token_prediction_confidence=token_prediction_confidence,
+            )
+
             return EvaluationResult(
                 criterion_name=criterion_name,
-                verdict=self._normalize_verdict(response_data.get("verdict", "UNABLE_TO_EVALUATE")),
-                reasoning=str(response_data.get("reasoning", "")),
-                confidence_score=float(response_data.get("confidence_score", 0.5)),
+                verdict=normalized_verdict,
+                reasoning=reasoning_text,
+                confidence_score=calibrated_confidence,
                 relevant_steps=relevant_steps,
                 aggregated_step_summary=str(response_data.get("aggregation_summary", ""))[:500],
                 used_granularity=Granularity.PHASE_LEVEL,
                 supporting_evidence=str(response_data.get("supporting_evidence", "")),
                 highlighted_evidence=aggregated_evidence,
+                llm_token_prediction_confidence=token_prediction_confidence,
             )
         except Exception as exc:
             logger.warning("Phase overall synthesis failed: %s", exc)

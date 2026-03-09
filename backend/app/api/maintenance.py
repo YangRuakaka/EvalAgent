@@ -6,7 +6,7 @@ import threading
 import time
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from ..core.config import get_settings
 from ..core.storage_paths import get_browser_run_output_dir, get_cache_history_root
@@ -38,7 +38,7 @@ async def restart_backend_service():
 
 @router.post(
     "/cleanup-files",
-    summary="Cleanup server files while preserving history_logs",
+    summary="Cleanup browser-agent temporary files only",
 )
 async def cleanup_backend_files():
     settings = get_settings()
@@ -48,24 +48,42 @@ async def cleanup_backend_files():
     browser_runs_dir = get_browser_run_output_dir(settings).resolve(strict=False)
     cache_history_root = get_cache_history_root(settings).resolve(strict=False)
 
-    use_shared_storage_cleanup = (
-        browser_runs_dir.is_absolute()
-        and cache_history_root.is_absolute()
-        and browser_runs_dir.parent == cache_history_root.parent
-        and browser_runs_dir.parent != backend_root_resolved
-    )
+    cleanup_root = browser_runs_dir
+    scope = "browser_agent_runs_contents_only"
+    preserved_top_level_dirs = {"screenshots"}
+    screenshots_dir = cleanup_root / "screenshots"
+    screenshots_marker = screenshots_dir / ".keep"
 
-    if use_shared_storage_cleanup:
-        cleanup_root = browser_runs_dir.parent
-        preserved_roots = [cache_history_root]
-        scope = "storage_root_except_history_logs"
-    else:
-        cleanup_root = browser_runs_dir
-        preserved_roots = []
-        scope = "browser_agent_runs"
+    protected_roots = {
+        cache_history_root,
+        (backend_root_resolved / "history_logs").resolve(strict=False),
+    }
+
+    def overlaps_with_protected(candidate: Path, protected: Path) -> bool:
+        return (
+            candidate == protected
+            or candidate in protected.parents
+        )
+
+    overlapping_protected = [
+        protected.as_posix()
+        for protected in protected_roots
+        if overlaps_with_protected(cleanup_root, protected)
+    ]
+
+    if overlapping_protected:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Cleanup blocked because cleanup target overlaps protected history_logs paths.",
+                "backend_root": backend_root.as_posix(),
+                "cleanup_root": cleanup_root.as_posix(),
+                "scope": scope,
+                "protected_paths": overlapping_protected,
+            },
+        )
 
     cleanup_root_resolved = cleanup_root.resolve(strict=False)
-    preserved_roots_resolved = [path.resolve(strict=False) for path in preserved_roots]
 
     deleted = []
     preserved = []
@@ -90,11 +108,6 @@ async def cleanup_backend_files():
             skipped.append(relative_name)
             return
 
-        for preserve_root in preserved_roots_resolved:
-            if entry_resolved == preserve_root or entry_resolved in preserve_root.parents:
-                preserved.append(relative_name)
-                return
-
         if is_reparse_point(entry):
             skipped.append(relative_name)
             return
@@ -110,12 +123,15 @@ async def cleanup_backend_files():
             failed.append({"path": relative_name, "error": str(exc)})
 
     if not cleanup_root.exists():
+        cleanup_root.mkdir(parents=True, exist_ok=True)
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+        screenshots_marker.write_text("", encoding="utf-8")
         return {
             "ok": True,
             "backend_root": backend_root.as_posix(),
             "cleanup_root": cleanup_root.as_posix(),
             "scope": scope,
-            "message": "Cleanup target directory does not exist.",
+            "message": "Cleanup target directory did not exist and has been recreated.",
             "preserved": preserved,
             "deleted": deleted,
             "skipped": skipped,
@@ -123,7 +139,19 @@ async def cleanup_backend_files():
         }
 
     for entry in cleanup_root.iterdir():
+        if entry.is_dir() and entry.name in preserved_top_level_dirs:
+            preserved.append(entry.relative_to(cleanup_root).as_posix())
+            for nested_entry in entry.iterdir():
+                safe_remove(nested_entry)
+            continue
         safe_remove(entry)
+
+    try:
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+        screenshots_marker.write_text("", encoding="utf-8")
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Failed to ensure screenshots folder marker: %s", exc)
+        failed.append({"path": screenshots_dir.relative_to(cleanup_root).as_posix(), "error": str(exc)})
 
     return {
         "ok": len(failed) == 0,

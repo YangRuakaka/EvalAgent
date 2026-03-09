@@ -4,7 +4,6 @@ from typing import List, Dict, Any
 import logging
 
 from langchain_core.messages import HumanMessage
-from langchain_core.prompts import FewShotPromptTemplate, PromptTemplate
 
 from ..core.config import get_settings
 from .llm_factory import get_chat_llm, LLMConfigurationError
@@ -14,28 +13,9 @@ settings = get_settings()
 
 
 class PersonaVariationTemplate:
-    """Template helper for constructing persona variations via few-shot prompting."""
+    """Template helper for constructing persona variations via direct prompting."""
 
-    example_prompt = PromptTemplate(
-        input_variables=["persona", "value", "varied_persona"],
-        template="BASE PERSONA: {persona}\nTARGET VALUE: {value}\nVARIED PERSONA: {varied_persona}",
-    )
-
-    # Few-shot examples for persona variation generation
-    examples = [
-        {
-            "persona": "Emma Johnson is a 32-year-old marketing manager in Seattle who brings strategic thinking from her MBA to both her professional and personal decisions. Her passion for sustainable living influences her purchasing choices, leading her to favor brands that demonstrate authentic environmental commitment. She finds balance through regular yoga practice and enjoys experimenting with plant-based recipes in her kitchen. Living in Seattle's eco-conscious community, Emma researches thoroughly before making decisions and values transparency and quality over flashy marketing, seeking products that align with her mindful lifestyle.",
-            "value": "Frugality",
-            "varied_persona": "Emma Johnson is a 32-year-old marketing manager in Seattle who brings strategic thinking from her MBA to both her professional and personal decisions, <VALUE>now filtering every choice through a lens of financial prudence and resource optimization</VALUE>. <VALUE>Her passion for sustainable living aligns perfectly with frugality, as she meticulously compares prices, seeks out second-hand options, and favors durable goods that offer long-term value over disposable alternatives</VALUE>. She finds balance through <VALUE>free yoga sessions in local parks and community centers</VALUE>, and experiments with plant-based recipes <VALUE>by planning meals around seasonal produce sales and bulk purchases to minimize food waste and costs</VALUE>. Living in Seattle's eco-conscious community, Emma researches thoroughly before making decisions, <VALUE>using spreadsheets to track spending, setting strict budgets for each category, and celebrating the satisfaction of finding quality items at discounted prices</VALUE>. <VALUE>She values transparency in pricing and seeks brands that offer honest value without premium markups, often choosing lesser-known brands that deliver equivalent quality at lower costs</VALUE>.",
-        },
-        {
-            "persona": "Lucas Chen is a 28-year-old software engineer deeply embedded in Austin's thriving tech ecosystem, where he channels his computer science background into solving complex problems daily. His evenings are split between competitive gaming sessions, researching the latest in AI and hardware innovations, and discovering new craft breweries around the city. Lucas approaches purchasing decisions with an engineer's mindset, prioritizing performance metrics, technical specifications, and genuine innovation over marketing claims. His lifestyle reflects a blend of digital-native efficiency and appreciation for artisanal quality, making him drawn to brands that deliver authentic value and cutting-edge functionality.",
-            "value": "Tradition",
-            "varied_persona": "Lucas Chen is a 28-year-old software engineer deeply embedded in Austin's thriving tech ecosystem, where he channels his computer science background into solving complex problems daily <VALUE>while maintaining deep respect for foundational programming principles and time-tested architectural patterns established by computing pioneers</VALUE>. His evenings are split between <VALUE>studying classic algorithms and design patterns, appreciating the craftsmanship of legacy codebases</VALUE>, and discovering <VALUE>long-established breweries with multi-generational recipes and heritage brewing techniques</VALUE>. Lucas approaches purchasing decisions with an engineer's mindset, <VALUE>now prioritizing products from companies with proven track records, established reputations, and decades of refinement over fleeting trends</VALUE>. <VALUE>He values brands that honor their heritage, maintain consistent quality standards, and preserve traditional manufacturing methods while incorporating modern efficiency</VALUE>. His lifestyle reflects a blend of <VALUE>respect for historical computing knowledge—often referencing seminal texts and papers—and appreciation for artisanal quality rooted in generational expertise</VALUE>, making him drawn to <VALUE>brands that demonstrate continuity, reliability, and commitment to preserving craftsmanship across time</VALUE>.",
-        },
-    ]
-
-    variation_suffix = """
+    VARIATION_DIRECT_TEMPLATE = """
 You are an expert in persona development and behavioral psychology. Generate a VARIED PERSONA based on the source persona with specific emphasis on the target value.
 
 BASE PERSONA: {persona}
@@ -51,13 +31,6 @@ INSTRUCTIONS:
 7. **CRITICAL**: Wrap ALL phrases, sentences, or descriptions that relate to or emphasize the TARGET VALUE with <VALUE> and </VALUE> tags (MUST be uppercase, not <value> or </value>). For example: "Dan values <VALUE>efficiency</VALUE> in all aspects of his life" or "He relies on <VALUE>digital tools to streamline his schedule</VALUE>". Multiple value-related phrases should each be wrapped individually. Always use uppercase: <VALUE>text</VALUE>.
 
 VARIED PERSONA:"""
-
-    few_shot_variation_prompt = FewShotPromptTemplate(
-        examples=examples,
-        example_prompt=example_prompt,
-        suffix=variation_suffix,
-        input_variables=["persona", "value"],
-    )
 
     PERSONA_VARIATION_TEMPLATE = """
 You are an elite persona variation architect. Generate a production-ready PERSONA VARIATION for a WebAgent with a highly personalized, value-aligned behavior profile.
@@ -103,11 +76,11 @@ BEGIN NOW.
 
     @classmethod
     def build_variation_prompt(cls, persona: str, value: str) -> str:
-        """Create a few-shot prompt for a single value-focused persona variation."""
-        return cls.few_shot_variation_prompt.format(
+        """Create a direct prompt for a single value-focused persona variation."""
+        return cls.VARIATION_DIRECT_TEMPLATE.format(
             persona=persona.strip(),
             value=value.strip(),
-        )
+        ).strip()
 
 
 class PersonaVariationGeneratorService:
@@ -204,7 +177,7 @@ class PersonaVariationGeneratorService:
         values: List[str],
         model: str | None = None,
     ) -> Dict[str, Any]:
-        """Generate persona variations for each provided value using few-shot prompting."""
+        """Generate persona variations for each provided value using direct prompting."""
         try:
             logger.info(
                 "Starting persona variation generation for %d values (max_concurrency=%d)",

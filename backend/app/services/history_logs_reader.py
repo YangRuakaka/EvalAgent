@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import io
 import json
 import mimetypes
@@ -48,7 +47,6 @@ class HistoryLogsService:
             (self._backend_root / "history_logs").resolve(),
             *[path.resolve() for path in self._legacy_data1_dirs],
         ]
-        self._screenshot_hash_cache: dict[str, str] = {}
 
     def list_logs(
         self,
@@ -121,20 +119,19 @@ class HistoryLogsService:
 
         details_data = dict(raw_payload.get("details") or {})
         original_screenshot_paths = list(self._ensure_iterable(details_data.get("screenshots")))
-        resolved_screenshot_paths = [
-            self._resolve_screenshot_path(path_str, json_path=json_path)
-            for path_str in original_screenshot_paths
-        ]
+        should_resolve_screenshots = screenshot_mode == "inline"
+        resolved_screenshot_paths = (
+            [
+                self._resolve_screenshot_path(path_str, json_path=json_path)
+                for path_str in original_screenshot_paths
+            ]
+            if should_resolve_screenshots
+            else [None for _ in original_screenshot_paths]
+        )
 
         encoded_screenshots: List[Optional[str]] = []
         screenshot_hashes: List[Optional[str]] = []
         missing_screenshots: List[str] = []
-
-        for resolved_path in resolved_screenshot_paths:
-            if not resolved_path or not resolved_path.exists() or not resolved_path.is_file():
-                screenshot_hashes.append(None)
-                continue
-            screenshot_hashes.append(self._compute_screenshot_hash(resolved_path))
 
         if screenshot_mode == "inline":
             for path_str, resolved_path in zip(original_screenshot_paths, resolved_screenshot_paths):
@@ -250,28 +247,6 @@ class HistoryLogsService:
                 return f"data:image/webp;base64,{webp_payload}"
         except Exception:
             return cls._encode_raw_data_uri(image_bytes, path)
-
-    def _compute_screenshot_hash(self, path: Path) -> Optional[str]:
-        try:
-            resolved = path.resolve()
-            stat = resolved.stat()
-            cache_key = f"{resolved}|{stat.st_mtime_ns}|{stat.st_size}"
-            cached = self._screenshot_hash_cache.get(cache_key)
-            if cached:
-                return cached
-
-            hasher = hashlib.sha1()
-            with resolved.open("rb") as file:
-                for chunk in iter(lambda: file.read(1024 * 1024), b""):
-                    if not chunk:
-                        break
-                    hasher.update(chunk)
-
-            digest = f"sha1:{hasher.hexdigest()}"
-            self._screenshot_hash_cache[cache_key] = digest
-            return digest
-        except Exception:
-            return None
 
     def resolve_screenshot_file(self, path_str: Any, dataset: str = "data1") -> Optional[Path]:
         """Resolve a screenshot path for direct file serving."""

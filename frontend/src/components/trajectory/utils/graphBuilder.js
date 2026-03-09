@@ -1,6 +1,7 @@
 import { schemeTableau10 } from 'd3-scale-chromatic';
 
 import { computeImageHash } from './imageHash';
+import { generatePreviewImage } from './imagePreview';
 
 const COLOR_PALETTE = schemeTableau10 || [
 	'#1f77b4',
@@ -329,6 +330,11 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const sequences = extractScreenshotSequences(trajectory);
 	const conditions = Array.isArray(options.conditions) ? options.conditions : [];
 	const useImageHash = options.useImageHash !== false;
+	const usePreviewImage = options.usePreviewImage !== false;
+	const previewConcurrency = Number.isFinite(options.previewConcurrency) && options.previewConcurrency > 0
+		? Math.floor(options.previewConcurrency)
+		: 4;
+	const previewOptions = options.preview || {};
 	
 	// 构建条件数据映射：sequenceIndex -> {model, persona, run_index}
 	const conditionMap = new Map();
@@ -382,10 +388,6 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 		async (task) => {
 			if (!useImageHash) {
 				return { ...task, hash: null };
-			}
-
-			if (typeof task?.screenshot?.imageHash === 'string' && task.screenshot.imageHash.trim()) {
-				return { ...task, hash: task.screenshot.imageHash.trim() };
 			}
 
 			const hash = await computeImageHash(task.screenshot.src, options.hash);
@@ -462,6 +464,25 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	nodes.forEach((node) => {
 		node.radius = 18 + Math.log2(node.weight + 1) * 12;
 	});
+
+	if (usePreviewImage && nodes.length > 0) {
+		const previewTasks = await runWithConcurrencyLimit(
+			nodes,
+			previewConcurrency,
+			async (node) => {
+				const previewSrc = await generatePreviewImage(node.src, previewOptions);
+				return {
+					id: node.id,
+					previewSrc,
+				};
+			},
+		);
+
+		const previewByNodeId = new Map(previewTasks.map((entry) => [entry.id, entry.previewSrc]));
+		nodes.forEach((node) => {
+			node.previewSrc = previewByNodeId.get(node.id) || node.src;
+		});
+	}
 
 	const linksMap = new Map();
 

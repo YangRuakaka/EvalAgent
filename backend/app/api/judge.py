@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Any
 
@@ -146,12 +147,15 @@ async def _generate_overall_assessment(
             json_str = response_text[json_start:json_end]
             response_data = json.loads(json_str)
             
-            overall_assessment = response_data.get("overall_assessment", "partial").lower()
-            # Convert to EvaluateStatus enum
-            if overall_assessment in ["pass", "fail", "partial"]:
+            overall_assessment = response_data.get("overall_assessment", "fail").lower()
+            if overall_assessment in ["pass", "fail"]:
                 overall_assessment = EvaluateStatus(overall_assessment)
             else:
-                overall_assessment = EvaluateStatus.UNKNOWN
+                logger.warning(
+                    "Unsupported overall_assessment value '%s'; coercing to fail",
+                    overall_assessment,
+                )
+                overall_assessment = EvaluateStatus.FAIL
             
             overall_reasoning = response_data.get("overall_reasoning", "")
             confidence = float(response_data.get("confidence_score", 0.5))
@@ -175,6 +179,12 @@ def _map_verdict_to_status(verdict: str) -> EvaluateStatus:
     return EvaluateStatus.UNKNOWN
 
 
+def _coerce_overall_assessment_to_binary(status: EvaluateStatus) -> EvaluateStatus:
+    if status == EvaluateStatus.PASS:
+        return EvaluateStatus.PASS
+    return EvaluateStatus.FAIL
+
+
 def _has_verdict_conflict(
     overall_assessment: EvaluateStatus,
     involved_steps: List[StepEvaluationDetail],
@@ -195,6 +205,66 @@ def _has_verdict_conflict(
         return True
 
     return False
+
+
+def _clip_confidence(value: Any) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except Exception:
+        return 0.0
+
+
+def _compute_step_confidence(
+    ev_list: List[EvidenceCitation],
+    fallback_confidence: float,
+) -> float:
+    base = _clip_confidence(fallback_confidence)
+    if not ev_list:
+        return _clip_confidence(base * 0.75)
+
+    evidence_count = len(ev_list)
+    source_diversity = len(
+        {
+            ev.source_field.value if hasattr(ev.source_field, "value") else str(ev.source_field)
+            for ev in ev_list
+        }
+    )
+    avg_reasoning_len = sum(len((ev.reasoning or "").strip()) for ev in ev_list) / evidence_count
+    verdicts = {
+        str(ev.verdict.value if hasattr(ev.verdict, "value") else ev.verdict).lower()
+        for ev in ev_list
+        if ev.verdict
+    }
+
+    count_score = min(1.0, evidence_count / 3.0)
+    source_score = min(1.0, source_diversity / 3.0)
+    reasoning_score = min(1.0, avg_reasoning_len / 120.0)
+    consistency_score = 1.0 if len(verdicts) <= 1 else max(0.35, 1.0 - 0.25 * (len(verdicts) - 1))
+
+    technical_score = (
+        0.36 * base
+        + 0.24 * count_score
+        + 0.16 * source_score
+        + 0.14 * reasoning_score
+        + 0.10 * consistency_score
+    )
+
+    if evidence_count > 1 and len(verdicts) > 1:
+        entropy = 0.0
+        verdict_list = [
+            str(ev.verdict.value if hasattr(ev.verdict, "value") else ev.verdict).lower()
+            for ev in ev_list
+            if ev.verdict
+        ]
+        if verdict_list:
+            for verdict in set(verdict_list):
+                probability = verdict_list.count(verdict) / len(verdict_list)
+                entropy -= probability * math.log(max(probability, 1e-8))
+            max_entropy = math.log(max(2, len(set(verdict_list))))
+            if max_entropy > 0:
+                technical_score *= max(0.7, 1.0 - 0.2 * (entropy / max_entropy))
+
+    return _clip_confidence(technical_score)
 
 
 async def _process_single_criterion(
@@ -281,7 +351,10 @@ async def _process_single_criterion(
                     evaluateStatus=step_verdict,
                     reasoning=step_reasoning,
                     highlighted_evidence=ev_dicts,
-                    confidenceScore=eval_result.confidence_score,
+                    confidenceScore=_compute_step_confidence(
+                        ev_list,
+                        float(eval_result.confidence_score or 0.0),
+                    ),
                     steps=[step_idx]
                 )
                 involved_steps_list.append(step_detail)
@@ -289,7 +362,9 @@ async def _process_single_criterion(
         logger.info(f"Created {len(involved_steps_list)} StepEvaluationDetail objects")
         
         # 6. Generate overall assessment only when confidence is low or verdicts conflict.
-        overall_assessment = _map_verdict_to_status(eval_result.verdict)
+        overall_assessment = _coerce_overall_assessment_to_binary(
+            _map_verdict_to_status(eval_result.verdict)
+        )
         overall_reasoning = eval_result.reasoning or ""
         confidence = float(eval_result.confidence_score or 0.0)
 
@@ -319,6 +394,7 @@ async def _process_single_criterion(
                 services=services,
                 judge_model=judge_model,
             )
+            overall_assessment = _coerce_overall_assessment_to_binary(overall_assessment)
         else:
             logger.info(
                 "Skipping secondary overall assessment for criterion '%s' (confidence=%.3f, threshold=%.3f, verdict_conflict=%s)",

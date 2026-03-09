@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import PropTypes from 'prop-types';
 import { select } from 'd3-selection';
 import { zoom, zoomIdentity } from 'd3-zoom';
@@ -27,6 +27,7 @@ const PARALLEL_LINK_CURVE_MULTIPLIER = 0.1;
 const PARALLEL_LINK_CONTROL_PULL = 0.4;
 const ACTION_CHIP_VERTICAL_NUDGE = 10;
 const RENDER_FRAME_SKIP = 2;
+const NODE_DRAG_RENDER_FRAME_SKIP = 6;
 const SIMULATION_ALPHA_MIN = 0.02;
 const SIMULATION_ALPHA_DECAY = 0.045;
 const ICON_PIN = 'M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z';
@@ -423,9 +424,39 @@ const TrajectoryGraph = ({
 	const tooltipTimeoutRef = useRef(null);
 	const persistentNodeStateRef = useRef(new Map());
 	const interactionCallbackRef = useRef(onInteraction);
+	const onNodeClickRef = useRef(onNodeClick);
+	const onLinkClickRef = useRef(onLinkClick);
 	const lastMouseMoveLoggedAtRef = useRef(0);
 	const lastZoomLoggedAtRef = useRef(0);
 	const lastDragLoggedAtRef = useRef(0);
+	const interactionDepthRef = useRef(0);
+	const isNodeDraggingRef = useRef(false);
+
+	const setInteractionPerformanceMode = useCallback((enabled) => {
+		const containerNode = containerRef.current;
+		if (!containerNode) {
+			return;
+		}
+
+		select(containerNode).classed('trajectory-graph--dragging', Boolean(enabled));
+	}, []);
+
+	const beginHeavyInteraction = useCallback(() => {
+		interactionDepthRef.current += 1;
+		if (interactionDepthRef.current === 1) {
+			setInteractionPerformanceMode(true);
+		}
+	}, [setInteractionPerformanceMode]);
+
+	const endHeavyInteraction = useCallback(() => {
+		if (interactionDepthRef.current > 0) {
+			interactionDepthRef.current -= 1;
+		}
+
+		if (interactionDepthRef.current === 0) {
+			setInteractionPerformanceMode(false);
+		}
+	}, [setInteractionPerformanceMode]);
 
 	const emitInteraction = (payload) => {
 		const callback = interactionCallbackRef.current;
@@ -442,6 +473,14 @@ const TrajectoryGraph = ({
 	useEffect(() => {
 		interactionCallbackRef.current = onInteraction;
 	}, [onInteraction]);
+
+	useEffect(() => {
+		onNodeClickRef.current = onNodeClick;
+	}, [onNodeClick]);
+
+	useEffect(() => {
+		onLinkClickRef.current = onLinkClick;
+	}, [onLinkClick]);
 
 	const cancelHighlightTimers = () => {
 		const { timers } = highlightStateRef.current;
@@ -468,6 +507,8 @@ const TrajectoryGraph = ({
 	useEffect(
 		() => () => {
 			cancelHighlightTimers();
+			interactionDepthRef.current = 0;
+			setInteractionPerformanceMode(false);
 			// Cleanup tooltip timeout
 			if (tooltipTimeoutRef.current) {
 				window.clearTimeout(tooltipTimeoutRef.current);
@@ -478,7 +519,7 @@ const TrajectoryGraph = ({
 				select(tooltipRef.current).style('display', 'none');
 			}
 		},
-		[],
+		[setInteractionPerformanceMode],
 	);
 
 	const data = useMemo(() => {
@@ -516,6 +557,9 @@ const TrajectoryGraph = ({
 
 		const zoomBehaviour = zoom()
 			.scaleExtent(ZOOM_EXTENT)
+			.on('start', () => {
+				beginHeavyInteraction();
+			})
 			.on('zoom', (event) => {
 				zoomStateRef.current = event.transform;
 				root.attr('transform', event.transform);
@@ -530,6 +574,9 @@ const TrajectoryGraph = ({
 						translateY: Number(event.transform.y?.toFixed?.(2) || event.transform.y || 0),
 					});
 				}
+			})
+			.on('end', () => {
+				endHeavyInteraction();
 			});
 
 		zoomBehaviourRef.current = zoomBehaviour;
@@ -540,7 +587,7 @@ const TrajectoryGraph = ({
 		return () => {
 			svg.on('.zoom', null);
 		};
-	}, []);
+	}, [beginHeavyInteraction, endHeavyInteraction]);
 
 	useEffect(() => {
 		if (!width || !height) {
@@ -946,8 +993,8 @@ const TrajectoryGraph = ({
 				linkId: link?.id || null,
 				actionType: null,
 			});
-			if (onLinkClick) {
-				onLinkClick({ link, actionType: null });
+			if (typeof onLinkClickRef.current === 'function') {
+				onLinkClickRef.current({ link, actionType: null });
 			}
 		});
 
@@ -993,8 +1040,8 @@ const TrajectoryGraph = ({
 						linkId: link?.id || null,
 						actionType: actionType || null,
 					});
-					if (onLinkClick) {
-						onLinkClick({ link, actionType });
+					if (typeof onLinkClickRef.current === 'function') {
+						onLinkClickRef.current({ link, actionType });
 					}
 				});
 
@@ -1122,7 +1169,7 @@ const TrajectoryGraph = ({
 
 		nodesMerged
 			.select('.trajectory-node__image')
-			.attr('href', (node) => (enableNodeImages ? node.src : null))
+			.attr('href', (node) => (enableNodeImages ? (node.previewSrc || node.src) : null))
 			.attr('x', (node) => -node.width / 2)
 			.attr('y', (node) => -node.height / 2)
 			.attr('width', (node) => node.width)
@@ -1213,27 +1260,54 @@ const TrajectoryGraph = ({
 
 		simulationRef.current = simulation;
 		let tickCount = 0;
+		let rafId = null;
+		let isDisposed = false;
+		const complexityFramePenalty = validLinks.length > 260 ? 2 : validLinks.length > 140 ? 1 : 0;
 		const renderFrameSkip =
-			nodes.length > 140 ? 4 : nodes.length > 70 ? 3 : RENDER_FRAME_SKIP;
+			(nodes.length > 140 ? 4 : nodes.length > 70 ? 3 : RENDER_FRAME_SKIP) + complexityFramePenalty;
+		const dragAlphaTarget = nodes.length > 120 || validLinks.length > 180 ? 0.02 : 0.06;
 
-		const tick = () => {
-			tickCount += 1;
-			const shouldRenderThisTick = tickCount % renderFrameSkip === 0;
+		const renderScene = () => {
+			if (isDisposed) {
+				return;
+			}
 
-			if (shouldRenderThisTick) {
+			if (!isNodeDraggingRef.current) {
 				linksMerged.attr('d', (link) => computeLinkPath(link));
+			}
 
+			if (!isNodeDraggingRef.current) {
 				linkActionMerged.attr('transform', (link) => {
 					const anchor = computeLinkActionAnchor(link);
 					return `translate(${anchor.x}, ${anchor.y})`;
 				});
-
-				nodesMerged.attr('transform', (node) => `translate(${node.x || 0}, ${node.y || 0})`);
 			}
-			
-			if (!shouldRenderThisTick) {
+
+			nodesMerged.attr('transform', (node) => `translate(${node.x || 0}, ${node.y || 0})`);
+		};
+
+		const scheduleRender = () => {
+			if (rafId !== null) {
 				return;
 			}
+
+			rafId = window.requestAnimationFrame(() => {
+				rafId = null;
+				renderScene();
+			});
+		};
+
+		const tick = () => {
+			tickCount += 1;
+			const activeFrameSkip = isNodeDraggingRef.current
+				? Math.max(renderFrameSkip, NODE_DRAG_RENDER_FRAME_SKIP)
+				: renderFrameSkip;
+
+			if (tickCount % activeFrameSkip !== 0) {
+				return;
+			}
+
+			scheduleRender();
 		};
 
 		// Add tooltip hover handlers
@@ -1350,6 +1424,9 @@ const TrajectoryGraph = ({
 
 		nodesMerged
 			.on('mouseenter', (event, node) => {
+				if (interactionDepthRef.current > 0) {
+					return;
+				}
 				showTooltip(event, node);
 			})
 			.on('mouseleave', () => {
@@ -1360,8 +1437,8 @@ const TrajectoryGraph = ({
 					type: 'node_click',
 					nodeId: node?.id || null,
 				});
-				if (onNodeClick) {
-					onNodeClick(node);
+				if (typeof onNodeClickRef.current === 'function') {
+					onNodeClickRef.current(node);
 				}
 			})
 			.on('contextmenu', (event, node) => {
@@ -1374,6 +1451,9 @@ const TrajectoryGraph = ({
 				});
 			})
 			.on('mousemove', (event) => {
+				if (interactionDepthRef.current > 0) {
+					return;
+				}
 				// Update tooltip position on mouse move
 				if (tooltipRef.current && select(tooltipRef.current).style('display') === 'block') {
 					const containerRect = containerRef.current?.getBoundingClientRect();
@@ -1394,11 +1474,14 @@ const TrajectoryGraph = ({
 
 		const dragBehaviour = d3Drag()
 			.on('start', (event, node) => {
+				beginHeavyInteraction();
+				isNodeDraggingRef.current = true;
 				if (!event.active && simulationRef.current) {
-					simulationRef.current.alphaTarget(0.2).restart();
+					simulationRef.current.alphaTarget(dragAlphaTarget).restart();
 				}
 				node.fx = node.x;
 				node.fy = node.y;
+				scheduleRender();
 				emitInteraction({
 					type: 'node_drag_start',
 					nodeId: node?.id || null,
@@ -1409,6 +1492,7 @@ const TrajectoryGraph = ({
 			.on('drag', (event, node) => {
 				node.fx = event.x;
 				node.fy = event.y;
+				scheduleRender();
 
 				const now = Date.now();
 				if (now - lastDragLoggedAtRef.current >= 180) {
@@ -1422,8 +1506,11 @@ const TrajectoryGraph = ({
 				}
 			})
 			.on('end', (event, node) => {
+				isNodeDraggingRef.current = false;
+				endHeavyInteraction();
 				if (!event.active && simulationRef.current) {
 					simulationRef.current.alphaTarget(0);
+					simulationRef.current.alpha(0.12).restart();
 				}
 				if (!node._pinned) {
 					node.fx = null;
@@ -1443,16 +1530,26 @@ const TrajectoryGraph = ({
 					y: Number(node?.y?.toFixed?.(2) || node?.y || 0),
 					isPinned: Boolean(node?._pinned),
 				});
+				renderScene();
 			});
 
 		nodesMerged.call(dragBehaviour);
 
 		simulation.on('tick', tick);
+		renderScene();
 
 		return () => {
+			isDisposed = true;
+			isNodeDraggingRef.current = false;
+			if (rafId !== null) {
+				window.cancelAnimationFrame(rafId);
+				rafId = null;
+			}
+			interactionDepthRef.current = 0;
+			setInteractionPerformanceMode(false);
 			simulation.stop();
 		};
-	}, [data, width, height, enableNodeImages, onNodeClick, onLinkClick]);
+	}, [data, width, height, enableNodeImages, beginHeavyInteraction, endHeavyInteraction, setInteractionPerformanceMode]);
 
 	useEffect(() => {
 		const highlight = highlightRequest;
@@ -1643,6 +1740,10 @@ const TrajectoryGraph = ({
 	const shouldShowPlaceholder = !isLoading && (!data.nodes.length || !width || !height);
 
 	const handleContainerMouseMove = (event) => {
+		if (interactionDepthRef.current > 0) {
+			return;
+		}
+
 		const now = Date.now();
 		if (now - lastMouseMoveLoggedAtRef.current < 120) {
 			return;

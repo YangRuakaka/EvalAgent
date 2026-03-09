@@ -273,6 +273,7 @@ Output ONLY one JSON object:
                 "phase_summary",
                 "phase_steps_context",
                 "existing_evidence_json",
+          "coverage_lenses",
             ],
             template="""You are an expert evidence miner for AI-agent execution traces.
 
@@ -285,17 +286,19 @@ Phase Summary: {phase_summary}
 Current extracted evidence (may be insufficient):
 {existing_evidence_json}
 
+Coverage lenses to complete a human-readable evidence storyline:
+{coverage_lenses}
+
 Phase Steps (raw context):
 {phase_steps_context}
 
 Your job:
-1) Find ADDITIONAL evidence not already covered by existing evidence.
-2) Only return evidence that is decisive/interesting for this criterion.
-3) Skip weak, generic, repetitive, or low-information snippets.
-4) Keep quotes short and atomic; each quote must be exact substring from raw text.
-5) If no meaningful additional evidence exists, return an empty list.
-6) Prioritize complementary snippets that together complete a cross-step behavior chain.
-7) If criterion signal remains fragmented, state that clearly in coverage_note.
+1) Complete the missing links of the behavior storyline instead of repeating existing evidence.
+2) Prefer decisive moments: intent shift, tradeoff choice, risk handling, correction, and outcome confirmation.
+3) Use coverage_lenses to improve complementarity across steps/fields (not just same type snippets).
+4) Skip weak, generic, repetitive, or low-information snippets.
+5) Keep quotes short and atomic; each quote must be exact substring from raw text.
+6) If no meaningful complementary evidence exists, return an empty list and explain the gap in coverage_note.
 
 Hard constraints:
 - highlighted_text MUST be exact substring from raw step field text
@@ -361,10 +364,12 @@ Your job:
 3) Output final confidence and concise aggregation summary.
 4) Prefer strict evidence-weighted synthesis over averaging by count.
 5) Decide based on the criteria rather than overall behavior quality.
+6) Final verdict MUST be binary at criterion level: PASS or FAIL.
+7) If mixed/partial/insufficient signals exist, resolve conservatively to FAIL and explain why.
 
 Output ONLY one JSON object:
 {{
-  "verdict": "PASS|FAIL|PARTIAL|UNABLE_TO_EVALUATE",
+  "verdict": "PASS|FAIL",
   "reasoning": "...",
   "confidence_score": 0.0,
   "supporting_evidence": "...",
@@ -482,9 +487,14 @@ INVOLVED STEPS SUMMARY:
 
 Provide your overall assessment in JSON format:
 {{
-  "overall_assessment": "pass|fail|partial",
+  "overall_assessment": "pass|fail",
   "overall_reasoning": "Comprehensive explanation",
   "confidence_score": 0.0-1.0
 }}
+
+Binary decision policy:
+- Return only "pass" or "fail".
+- Do not return "partial" or any third state.
+- If evidence is mixed or uncertain, choose "fail" and explain uncertainty explicitly.
 """,
         )

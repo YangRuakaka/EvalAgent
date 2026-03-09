@@ -357,7 +357,7 @@ const App = () => {
 
 	const handleCleanupServerFiles = useCallback(async () => {
 		await runConfirmedServerAction({
-			confirmMessage: 'This will preserve everything under history_logs/ and delete other server-side files. Continue?',
+			confirmMessage: 'This will delete temporary Browser Agent run files under browser_agent_runs/ only. history_logs/ will not be touched. Continue?',
 			setLoading: setIsCleaningServerFiles,
 			action: cleanupServerFiles,
 			onSuccess: (response) => {

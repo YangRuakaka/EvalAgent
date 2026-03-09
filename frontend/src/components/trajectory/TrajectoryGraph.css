@@ -161,9 +161,10 @@
 }
 
 .trajectory-node__image {
-	pointer-events: none;
+	pointer-events: all;
 	image-rendering: auto;
 	border-radius: 4px;
+	cursor: grab;
 }
 
 .trajectory-node__outline {
@@ -182,6 +183,34 @@
 
 .trajectory-node:hover {
 	filter: drop-shadow(0 10px 18px rgba(30, 64, 175, 0.18));
+}
+
+.trajectory-graph--dragging .trajectory-node,
+.trajectory-graph--dragging .trajectory-link,
+.trajectory-graph--dragging .trajectory-link__arrow,
+.trajectory-graph--dragging .trajectory-link-action-chip__bg,
+.trajectory-graph--dragging .trajectory-node__halo,
+.trajectory-graph--dragging .trajectory-node__outline {
+	transition: none !important;
+}
+
+.trajectory-graph--dragging .trajectory-node,
+.trajectory-graph--dragging .trajectory-node:hover,
+.trajectory-graph--dragging .trajectory-node.is-traced {
+	filter: none !important;
+}
+
+.trajectory-graph--dragging .trajectory-graph__links,
+.trajectory-graph--dragging .trajectory-graph__link-actions {
+	display: none;
+}
+
+.trajectory-graph--dragging .trajectory-node__halo,
+.trajectory-graph--dragging .trajectory-node.is-traced .trajectory-node__halo,
+.trajectory-graph--dragging .trajectory-link-action-chip__bg,
+.trajectory-graph--dragging .trajectory-link.is-active,
+.trajectory-graph--dragging .trajectory-link.is-traced {
+	filter: none !important;
 }
 
 .trajectory-node.is-dimmed {

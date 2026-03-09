@@ -145,7 +145,7 @@ class EvaluationResult(BaseModel):
     reasoning: str = Field(..., description="Detailed reasoning and evidence for the verdict")
     confidence_score: float = Field(..., ge=0, le=1, description="Confidence score (0-1)")
     relevant_steps: List[int] = Field(default_factory=list, description="Indices of relevant steps for this evaluation")
-    aggregated_step_summary: str = Field(..., description="The aggregated step content that was evaluated")
+    aggregated_step_summary: str = Field(default="", description="The aggregated step content that was evaluated")
     used_granularity: Granularity = Field(..., description="Granularity level used for this evaluation")
     supporting_evidence: Optional[str] = Field(None, description="Specific evidence quotes from the steps")
     highlighted_evidence: List[EvidenceCitation] = Field(default_factory=list, description="Structured evidence for highlighting")
@@ -258,7 +258,14 @@ class ExperimentCriterionResult(ExperimentCriterion):
 
 class ConditionRequest(BaseModel):
     """Request for a single condition within an experiment."""
-    conditionID: str = Field(..., description="Condition ID (filename without .json extension)")
+    conditionID: str = Field(..., min_length=1, description="Condition ID (filename without .json extension)")
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_condition_id(cls, data: Any) -> Any:
+        if isinstance(data, dict) and 'conditionID' in data:
+            data['conditionID'] = str(data.get('conditionID') or '').strip()
+        return data
 
 class ConditionResult(BaseModel):
     """Result for a single condition within an experiment."""
@@ -271,8 +278,8 @@ class ConditionResult(BaseModel):
 
 class ExperimentEvaluationRequest(BaseModel):
     """Request to evaluate an experiment consisting of multiple conditions."""
-    conditions: List[ConditionRequest] = Field(..., description="List of condition IDs to evaluate")
-    criteria: List[ExperimentCriterion] = Field(..., description="List of criteria to evaluate for all conditions")
+    conditions: List[ConditionRequest] = Field(..., min_length=1, description="List of condition IDs to evaluate")
+    criteria: List[ExperimentCriterion] = Field(..., min_length=1, description="List of criteria to evaluate for all conditions")
     judge_model: Optional[str] = Field(None, description="Optional model name used by AI judge pipeline")
 
 class RankingItem(BaseModel):

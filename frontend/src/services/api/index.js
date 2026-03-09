@@ -272,16 +272,38 @@ export const generateCriteria = (taskName, taskUrl, personas, models, client = d
 };
 
 export const evaluateExperiment = (conditionIds, criteria, judgeModel = null, client = defaultClient) => {
+	const normalizedConditionIds = (Array.isArray(conditionIds) ? conditionIds : [])
+		.map((condition) => {
+			if (typeof condition === 'object' && condition !== null) {
+				return condition.id || condition.conditionID || '';
+			}
+			return condition || '';
+		})
+		.map((value) => String(value).trim())
+		.filter(Boolean);
+
+	const normalizedCriteria = (Array.isArray(criteria) ? criteria : [])
+		.map((item) => {
+			const title = item?.title || item?.name || item?.id || '';
+			const assertion = item?.assertion || '';
+			const description = item?.description || '';
+			return {
+				title: String(title).trim(),
+				assertion: String(assertion),
+				description: String(description),
+			};
+		})
+		.filter((item) => item.title.length > 0);
+
+	if (normalizedConditionIds.length === 0 || normalizedCriteria.length === 0) {
+		throw new Error(
+			`Invalid evaluation payload: conditions=${normalizedConditionIds.length}, criteria=${normalizedCriteria.length}`,
+		);
+	}
+
 	const payload = {
-		conditions: conditionIds.map(c => {
-			const conditionId = typeof c === 'object' ? (c.id || c.conditionID) : c;
-			return { conditionID: conditionId };
-		}),
-		criteria: criteria.map(c => ({
-			title: c.title || c.id || c.name || '',
-			assertion: c.assertion || '',
-			description: c.description || '',
-		})),
+		conditions: normalizedConditionIds.map((conditionId) => ({ conditionID: conditionId })),
+		criteria: normalizedCriteria,
 	};
 
 	if (judgeModel) {

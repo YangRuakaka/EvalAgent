@@ -17,26 +17,7 @@ settings = get_settings()
 
 class PersonaPromptTemplate:
     """Template for constructing persona generation prompts based on demographic information."""
-    
-    from langchain_core.prompts import FewShotPromptTemplate, PromptTemplate
-
-    example_prompt = PromptTemplate(
-        input_variables=["demographic", "persona"],
-        template="DEMOGRAPHIC: {demographic}\nPersona: {persona}"
-    )
-
-    examples = [
-        {
-            "demographic": "Name: Emma Johnson, Age: 32, Job: Marketing Manager, Location: Seattle, WA, Education: Master's in Business Administration, Interests: Sustainable living, yoga, cooking",
-            "persona": "Emma Johnson is a 32-year-old marketing manager in Seattle who brings strategic thinking from her MBA to both her professional and personal decisions. Her passion for sustainable living influences her purchasing choices, leading her to favor brands that demonstrate authentic environmental commitment. She finds balance through regular yoga practice and enjoys experimenting with plant-based recipes in her kitchen. Living in Seattle's eco-conscious community, Emma researches thoroughly before making decisions and values transparency and quality over flashy marketing, seeking products that align with her mindful lifestyle."
-        },
-        {
-            "demographic": "Name: Lucas Chen, Age: 28, Job: Software Engineer, Location: Austin, TX, Education: Bachelor's in Computer Science, Interests: Gaming, technology trends, craft beer",
-            "persona": "Lucas Chen is a 28-year-old software engineer deeply embedded in Austin's thriving tech ecosystem, where he channels his computer science background into solving complex problems daily. His evenings are split between competitive gaming sessions, researching the latest in AI and hardware innovations, and discovering new craft breweries around the city. Lucas approaches purchasing decisions with an engineer's mindset, prioritizing performance metrics, technical specifications, and genuine innovation over marketing claims. His lifestyle reflects a blend of digital-native efficiency and appreciation for artisanal quality, making him drawn to brands that deliver authentic value and cutting-edge functionality."
-        }
-    ]
-
-    suffix = """
+    PERSONA_DIRECT_TEMPLATE = """
 You are an expert at creating realistic personas from demographic information. 
 
 TASK: Based on the following demographic information, create a natural persona description: {demographic}
@@ -52,14 +33,6 @@ INSTRUCTIONS:
 DEMOGRAPHIC: {demographic}
 
 Persona:"""
-
-    # FewShotPromptTemplate object
-    few_shot_prompt = FewShotPromptTemplate(
-        examples=examples,
-        example_prompt=example_prompt,
-        suffix=suffix,
-        input_variables=["demographic"]
-    )
 
     @classmethod
     def build_prompt(cls, demographic: Dict[str, Any]) -> str:
@@ -86,7 +59,7 @@ Persona:"""
             demo_parts.append(f"Interests: {demographic['interests']}")
             
         demographic_str = ", ".join(demo_parts)
-        return cls.few_shot_prompt.format(demographic=demographic_str)
+        return cls.PERSONA_DIRECT_TEMPLATE.format(demographic=demographic_str).strip()
 
 
 

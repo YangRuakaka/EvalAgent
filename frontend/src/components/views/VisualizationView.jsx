@@ -51,6 +51,7 @@ const VisualizationView = ({
 	onCloseRun,
 	onManageCriteria,
 	trajectoryUseImageHashEnabled,
+	trajectoryRefreshNonce,
 	reasoningEvidenceHighlightEnabled,
 	onDAGInteraction,
 	showBackendLogs,
@@ -294,6 +295,7 @@ const VisualizationView = ({
 												trajectory={entryTrajectory}
 												conditions={entryConditions}
 												useImageHashEnabled={effectiveTrajectoryUseImageHash}
+												refreshNonce={trajectoryRefreshNonce}
 												onNavigateToReasoning={handleTrajectoryNavigateToReasoning}
 												onDAGInteraction={onDAGInteraction}
 												showBackendLogs={showLogsForEntry}
@@ -349,17 +351,26 @@ const VisualizationView = ({
 							evaluationResponse={evaluationResponse}
 							isEvaluating={isEvaluatingCurrentRun}
 							onEvaluate={async (config) => {
-								const { criteriaIds, conditionIds, evaluateModel: selectedEvaluateModel } = config;
+								const {
+									criteria: selectedCriteriaFromPanel,
+									conditions: selectedConditionsFromPanel,
+									evaluateModel: selectedEvaluateModel,
+								} = config;
 								const runIdForRequest = activeRunId;
 								setRunEvaluationLoading(runIdForRequest, true);
 								try {
-									const selectedConditions = experimentsData?.conditions
-										?.filter((cond) => conditionIds.includes(cond.id))
-										|| [];
-									
-									const selectedCriteria = Object.values(criterias || {})
-										.filter((crit) => criteriaIds.includes(crit.id))
-										|| [];
+									const selectedConditions = Array.isArray(selectedConditionsFromPanel)
+										? selectedConditionsFromPanel
+										: [];
+
+									const selectedCriteria = Array.isArray(selectedCriteriaFromPanel)
+										? selectedCriteriaFromPanel
+										: [];
+
+									if (selectedConditions.length === 0 || selectedCriteria.length === 0) {
+										alert(`Invalid evaluation selection. conditions=${selectedConditions.length}, criteria=${selectedCriteria.length}`);
+										return;
+									}
 
 									const response = await evaluateExperiment(
 										selectedConditions,
@@ -401,6 +412,7 @@ VisualizationView.propTypes = {
 	onCloseRun: PropTypes.func.isRequired,
 	onManageCriteria: PropTypes.func,
 	trajectoryUseImageHashEnabled: PropTypes.bool,
+	trajectoryRefreshNonce: PropTypes.number,
 	reasoningEvidenceHighlightEnabled: PropTypes.bool,
 	onDAGInteraction: PropTypes.func,
 	showBackendLogs: PropTypes.bool,
@@ -413,6 +425,7 @@ VisualizationView.defaultProps = {
 	activeRunId: null,
 	onManageCriteria: undefined,
 	trajectoryUseImageHashEnabled: undefined,
+	trajectoryRefreshNonce: 0,
 	reasoningEvidenceHighlightEnabled: undefined,
 	onDAGInteraction: undefined,
 	showBackendLogs: false,

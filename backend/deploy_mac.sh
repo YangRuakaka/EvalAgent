@@ -12,7 +12,12 @@ BROWSER_AGENT_RUNS_PATH="${SCRIPT_ROOT}/browser_agent_runs"
 HISTORY_LOGS_DIR="${MOUNT_PATH}/history_logs"
 BROWSER_AGENT_RUN_OUTPUT_DIR="${MOUNT_PATH}/browser_agent_runs"
 
-DEFAULT_LLM_MODEL="gpt-4o"
+# Preserve whether DEFAULT_LLM_MODEL was provided in the environment.
+DEFAULT_LLM_MODEL_ENV_SET=0
+if [[ -n "${DEFAULT_LLM_MODEL+set}" ]]; then
+  DEFAULT_LLM_MODEL_ENV_SET=1
+fi
+DEFAULT_LLM_MODEL="${DEFAULT_LLM_MODEL:-gpt-4o}"
 MEMORY="4Gi"
 CPU="2"
 
@@ -139,7 +144,7 @@ if [[ -f "$ENV_PATH" ]]; then
           [[ -z "$GEMINI_API_KEY_VALUE" ]] && GEMINI_API_KEY_VALUE="$value"
           ;;
         DEFAULT_LLM_MODEL)
-          if [[ -z "${DEFAULT_LLM_MODEL:-}" || "$DEFAULT_LLM_MODEL" == "gpt-4o" ]]; then
+          if [[ "$DEFAULT_LLM_MODEL_ENV_SET" -eq 0 ]]; then
             DEFAULT_LLM_MODEL="$value"
           fi
           ;;

@@ -22,6 +22,12 @@ from ..core.storage_paths import (
 from ..schemas.history_logs import HistoryLogDetails, HistoryLogPayload
 
 
+_LIST_CACHE_MAX_ENTRIES = 12
+_IMAGE_HASH_CACHE_MAX_ENTRIES = 4096
+_DEFAULT_SCREENSHOT_HASH_SIZE = 16
+_DEFAULT_SCREENSHOT_BORDER_IGNORE_RATIO = 0.08
+
+
 class HistoryLogsServiceError(RuntimeError):
     """Raised when cached history logs cannot be processed."""
 
@@ -47,6 +53,11 @@ class HistoryLogsService:
             (self._backend_root / "history_logs").resolve(),
             *[path.resolve() for path in self._legacy_data1_dirs],
         ]
+        self._list_cache: dict[
+            tuple[str, str, str, tuple[tuple[str, int, int], ...]],
+            List[HistoryLogPayload],
+        ] = {}
+        self._image_hash_cache: dict[tuple[str, int, int], Optional[str]] = {}
 
     def list_logs(
         self,
@@ -71,6 +82,13 @@ class HistoryLogsService:
         if not cache_dir.exists() or not cache_dir.is_dir():
             return []
 
+        cache_signature = self._build_directory_signature(cache_dir)
+        cache_prefix = screenshot_url_prefix.strip() if mode == "proxy" else ""
+        cache_key = (str(cache_dir), mode, cache_prefix, cache_signature)
+        cached_logs = self._list_cache.get(cache_key)
+        if cached_logs is not None:
+            return cached_logs
+
         logs: List[HistoryLogPayload] = []
         for json_path in sorted(cache_dir.glob("*.json")):
             try:
@@ -85,7 +103,39 @@ class HistoryLogsService:
             except Exception as exc:
                 print(f"Warning: Skipping corrupted or invalid log file '{json_path.name}': {exc}")
                 continue
+
+        self._store_list_cache(cache_key, logs)
         return logs
+
+    @staticmethod
+    def _build_directory_signature(cache_dir: Path) -> tuple[tuple[str, int, int], ...]:
+        signature: list[tuple[str, int, int]] = []
+
+        for json_path in sorted(cache_dir.glob("*.json")):
+            try:
+                stat = json_path.stat()
+            except OSError:
+                continue
+
+            signature.append((json_path.name, stat.st_mtime_ns, stat.st_size))
+
+        return tuple(signature)
+
+    def _store_list_cache(
+        self,
+        cache_key: tuple[str, str, str, tuple[tuple[str, int, int], ...]],
+        logs: List[HistoryLogPayload],
+    ) -> None:
+        if cache_key in self._list_cache:
+            self._list_cache.pop(cache_key, None)
+
+        self._list_cache[cache_key] = logs
+
+        while len(self._list_cache) > _LIST_CACHE_MAX_ENTRIES:
+            oldest_key = next(iter(self._list_cache), None)
+            if oldest_key is None:
+                break
+            self._list_cache.pop(oldest_key, None)
 
     def _resolve_dataset_dir(self, dataset_key: str) -> Path:
         if self._has_custom_cache_dir:
@@ -119,7 +169,14 @@ class HistoryLogsService:
 
         details_data = dict(raw_payload.get("details") or {})
         original_screenshot_paths = list(self._ensure_iterable(details_data.get("screenshots")))
-        should_resolve_screenshots = screenshot_mode == "inline"
+        screenshot_hashes: List[Optional[str]] = self._normalize_screenshot_hashes(
+            details_data.get("screenshot_hashes"),
+            len(original_screenshot_paths),
+        )
+        should_resolve_screenshots = screenshot_mode == "inline" or self._has_missing_screenshot_hashes(
+            original_screenshot_paths,
+            screenshot_hashes,
+        )
         resolved_screenshot_paths = (
             [
                 self._resolve_screenshot_path(path_str, json_path=json_path)
@@ -130,10 +187,16 @@ class HistoryLogsService:
         )
 
         encoded_screenshots: List[Optional[str]] = []
-        screenshot_hashes: List[Optional[str]] = list(
-            self._ensure_iterable(details_data.get("screenshot_hashes"))
-        )
         missing_screenshots: List[str] = []
+
+        if screenshot_hashes:
+            screenshot_hashes = [self._normalize_screenshot_hash_value(value) for value in screenshot_hashes]
+
+        if should_resolve_screenshots and original_screenshot_paths:
+            screenshot_hashes = self._populate_missing_screenshot_hashes(
+                screenshot_hashes,
+                resolved_screenshot_paths,
+            )
 
         if screenshot_mode == "inline":
             for path_str, resolved_path in zip(original_screenshot_paths, resolved_screenshot_paths):
@@ -188,6 +251,131 @@ class HistoryLogsService:
             summary=dict(raw_payload.get("summary") or {}),
             details=details,
         )
+
+    @staticmethod
+    def _normalize_screenshot_hash_value(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+
+        text = str(value).strip().lower()
+        return text or None
+
+    @classmethod
+    def _normalize_screenshot_hashes(cls, value: Any, target_length: int) -> List[Optional[str]]:
+        hashes = [cls._normalize_screenshot_hash_value(item) for item in cls._ensure_iterable(value)]
+        if target_length <= 0:
+            return hashes
+
+        if len(hashes) < target_length:
+            hashes.extend([None] * (target_length - len(hashes)))
+        elif len(hashes) > target_length:
+            hashes = hashes[:target_length]
+
+        return hashes
+
+    @staticmethod
+    def _has_missing_screenshot_hashes(
+        screenshot_paths: List[str],
+        screenshot_hashes: List[Optional[str]],
+    ) -> bool:
+        if not screenshot_paths:
+            return False
+
+        if len(screenshot_hashes) < len(screenshot_paths):
+            return True
+
+        for index, path_str in enumerate(screenshot_paths):
+            if not path_str:
+                continue
+            if screenshot_hashes[index] is None:
+                return True
+
+        return False
+
+    def _populate_missing_screenshot_hashes(
+        self,
+        screenshot_hashes: List[Optional[str]],
+        resolved_screenshot_paths: List[Optional[Path]],
+    ) -> List[Optional[str]]:
+        next_hashes = list(screenshot_hashes)
+
+        if len(next_hashes) < len(resolved_screenshot_paths):
+            next_hashes.extend([None] * (len(resolved_screenshot_paths) - len(next_hashes)))
+
+        for index, resolved_path in enumerate(resolved_screenshot_paths):
+            if next_hashes[index] is not None:
+                continue
+            next_hashes[index] = self._compute_cached_screenshot_hash(resolved_path)
+
+        return next_hashes
+
+    def _compute_cached_screenshot_hash(self, image_path: Optional[Path]) -> Optional[str]:
+        if image_path is None or not image_path.exists() or not image_path.is_file():
+            return None
+
+        try:
+            stat = image_path.stat()
+        except OSError:
+            return None
+
+        cache_key = (str(image_path.resolve()), stat.st_mtime_ns, stat.st_size)
+        cached_hash = self._image_hash_cache.get(cache_key)
+        if cached_hash is not None:
+            return cached_hash
+
+        computed_hash = self._compute_screenshot_hash(image_path)
+        self._store_image_hash_cache(cache_key, computed_hash)
+        return computed_hash
+
+    def _store_image_hash_cache(self, cache_key: tuple[str, int, int], hash_value: Optional[str]) -> None:
+        if cache_key in self._image_hash_cache:
+            self._image_hash_cache.pop(cache_key, None)
+
+        self._image_hash_cache[cache_key] = hash_value
+
+        while len(self._image_hash_cache) > _IMAGE_HASH_CACHE_MAX_ENTRIES:
+            oldest_key = next(iter(self._image_hash_cache), None)
+            if oldest_key is None:
+                break
+            self._image_hash_cache.pop(oldest_key, None)
+
+    @staticmethod
+    def _compute_screenshot_hash(image_path: Path) -> Optional[str]:
+        try:
+            with Image.open(image_path) as image:
+                if image.mode not in {"RGB", "RGBA", "L"}:
+                    image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+
+                width, height = image.size
+                crop_x = width * _DEFAULT_SCREENSHOT_BORDER_IGNORE_RATIO
+                crop_y = height * _DEFAULT_SCREENSHOT_BORDER_IGNORE_RATIO
+                left = min(max(int(round(crop_x)), 0), max(width - 1, 0))
+                top = min(max(int(round(crop_y)), 0), max(height - 1, 0))
+                right = max(left + 1, width - left)
+                bottom = max(top + 1, height - top)
+
+                cropped = image.crop((left, top, right, bottom))
+                resized = cropped.resize(
+                    (_DEFAULT_SCREENSHOT_HASH_SIZE, _DEFAULT_SCREENSHOT_HASH_SIZE),
+                    Image.Resampling.BILINEAR,
+                ).convert("L")
+
+                grayscale_values = list(resized.getdata())
+                if not grayscale_values:
+                    return None
+
+                average = sum(grayscale_values) / len(grayscale_values)
+                bits = "".join("1" if value >= average else "0" for value in grayscale_values)
+
+                hash_chars: list[str] = []
+                for index in range(0, len(bits), 4):
+                    chunk = bits[index:index + 4]
+                    hash_chars.append(format(int(chunk, 2), "x"))
+
+                target_length = (_DEFAULT_SCREENSHOT_HASH_SIZE * _DEFAULT_SCREENSHOT_HASH_SIZE + 3) // 4
+                return "".join(hash_chars).ljust(target_length, "0")
+        except Exception:
+            return None
 
     @staticmethod
     def _build_proxy_screenshot_url(

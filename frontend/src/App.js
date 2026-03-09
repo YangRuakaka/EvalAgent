@@ -240,7 +240,7 @@ const App = () => {
 		() => SYSTEM_VARIANT_OPTIONS.find((option) => option.value === selectedSystemVariant) || SYSTEM_VARIANT_OPTIONS[0],
 		[selectedSystemVariant],
 	);
-	const historyLogScreenshotMode = 'inline';
+	const historyLogScreenshotMode = 'proxy';
 
 	useEffect(() => {
 		const handlePointerMove = (event) => {

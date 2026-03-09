@@ -439,6 +439,7 @@ const TrajectoryGraph = ({
 	const lastDragLoggedAtRef = useRef(0);
 	const interactionDepthRef = useRef(0);
 	const isNodeDraggingRef = useRef(false);
+	const activeSimulationCleanupRef = useRef(null);
 
 	const setInteractionPerformanceMode = useCallback((enabled) => {
 		const containerNode = containerRef.current;
@@ -610,71 +611,27 @@ const TrajectoryGraph = ({
 	}, [beginHeavyInteraction, endHeavyInteraction]);
 
 	useEffect(() => {
+		// Only run full build when data, layout flag, or image settings change.
+		// width and height are deliberately excluded so that resizing doesn't trigger a full rebuild.
+		// It only runs when we transition from no-size to having-size.
 		if (!width || !height) {
 			return () => {};
 		}
 
+		select(nodesLayerRef.current).style('will-change', 'transform');
+		select(linksLayerRef.current).style('will-change', 'transform');
+
 		const dataChanged = data !== previousDataRef.current;
 		previousDataRef.current = data;
 
-		if (!dataChanged && simulationRef.current) {
-			if (width > 0 && height > 0) {
-				containerSizeRef.current = { width, height };
-			}
+		if (dataChanged) {
+			simulationRef.current = null;
+			persistentNodeStateRef.current.clear();
+		}
 
-			const simulation = simulationRef.current;
-			const simulationNodes =
-				typeof simulation.nodes === 'function' ? simulation.nodes() : [];
-
-			if (!simulationNodes.length) {
-				return () => {};
-			}
-
-			let minLayoutOrder = Infinity;
-			let maxLayoutOrder = -Infinity;
-
-			simulationNodes.forEach((node, index) => {
-				const layoutOrder =
-					typeof node.__layoutOrderHint === 'number' ? node.__layoutOrderHint : index;
-
-				if (layoutOrder < minLayoutOrder) {
-					minLayoutOrder = layoutOrder;
-				}
-
-				if (layoutOrder > maxLayoutOrder) {
-					maxLayoutOrder = layoutOrder;
-				}
-			});
-
-			if (!Number.isFinite(minLayoutOrder) || !Number.isFinite(maxLayoutOrder)) {
-				minLayoutOrder = 0;
-				maxLayoutOrder = simulationNodes.length - 1;
-			}
-
-			const layoutOrderRange = Math.max(1, maxLayoutOrder - minLayoutOrder);
-			const computeTargetXForResize = (node) => {
-				const order =
-					typeof node.__layoutOrderHint === 'number' ? node.__layoutOrderHint : minLayoutOrder;
-				const normalized =
-					layoutOrderRange === 0 ? 0.5 : (order - minLayoutOrder) / layoutOrderRange;
-				const safeWidth = Math.max(width, 1);
-				const usableWidth = Math.max(safeWidth - 160, safeWidth * 0.65);
-				const padding = Math.max((safeWidth - usableWidth) / 2, 32);
-				const target = padding + normalized * usableWidth;
-				return Math.min(safeWidth - padding, Math.max(padding, target));
-			};
-
-			simulation.force('center', forceCenter(width / 2, height / 2));
-			simulation.force(
-				'horizontal',
-				forceX((node) => computeTargetXForResize(node)).strength(0.08),
-			);
-			simulation.force('vertical', forceY(height / 2).strength(0.18));
-			
-			// Nudge the existing layout to settle into the updated viewport without rebuilding.
-			simulation.alpha(0.3).restart();
-
-			return () => {};
+		if (activeSimulationCleanupRef.current) {
+			activeSimulationCleanupRef.current();
+			activeSimulationCleanupRef.current = null;
 		}
 
 		const { nodes, links, meta } = data;
@@ -1566,7 +1523,7 @@ const TrajectoryGraph = ({
 		simulation.on('tick', tick);
 		renderScene();
 
-		return () => {
+		const cleanupSimulation = () => {
 			isDisposed = true;
 			isNodeDraggingRef.current = false;
 			if (rafId !== null) {
@@ -1577,7 +1534,66 @@ const TrajectoryGraph = ({
 			setInteractionPerformanceMode(false);
 			simulation.stop();
 		};
-	}, [data, width, height, enableNodeImages, beginHeavyInteraction, endHeavyInteraction, setInteractionPerformanceMode]);
+
+		activeSimulationCleanupRef.current = cleanupSimulation;
+
+		return () => {
+			cleanupSimulation();
+		};
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [data, Boolean(width && height), enableNodeImages, beginHeavyInteraction, endHeavyInteraction, setInteractionPerformanceMode]);
+
+	// Separate effect strictly for resizing dimensions
+	useEffect(() => {
+		if (width > 0 && height > 0 && simulationRef.current && prevMeasuredSizeRef.current) {
+			const prevWidth = prevMeasuredSizeRef.current.width;
+			const prevHeight = prevMeasuredSizeRef.current.height;
+			
+			if (prevWidth !== width || prevHeight !== height) {
+				containerSizeRef.current = { width, height };
+				prevMeasuredSizeRef.current = { width, height };
+				
+				const simulation = simulationRef.current;
+				const simulationNodes = typeof simulation.nodes === 'function' ? simulation.nodes() : [];
+				
+				if (simulationNodes.length) {
+					let minLayoutOrder = Infinity;
+					let maxLayoutOrder = -Infinity;
+
+					simulationNodes.forEach((node, index) => {
+						const layoutOrder = typeof node.__layoutOrderHint === 'number' ? node.__layoutOrderHint : index;
+						if (layoutOrder < minLayoutOrder) minLayoutOrder = layoutOrder;
+						if (layoutOrder > maxLayoutOrder) maxLayoutOrder = layoutOrder;
+					});
+
+					if (!Number.isFinite(minLayoutOrder) || !Number.isFinite(maxLayoutOrder)) {
+						minLayoutOrder = 0;
+						maxLayoutOrder = simulationNodes.length - 1;
+					}
+
+					const layoutOrderRange = Math.max(1, maxLayoutOrder - minLayoutOrder);
+					const computeTargetXForResize = (node) => {
+						const order = typeof node.__layoutOrderHint === 'number' ? node.__layoutOrderHint : minLayoutOrder;
+						const normalized = layoutOrderRange === 0 ? 0.5 : (order - minLayoutOrder) / layoutOrderRange;
+						const safeWidth = Math.max(width, 1);
+						const usableWidth = Math.max(safeWidth - 160, safeWidth * 0.65);
+						const padding = Math.max((safeWidth - usableWidth) / 2, 32);
+						const target = padding + normalized * usableWidth;
+						return Math.min(safeWidth - padding, Math.max(padding, target));
+					};
+
+					simulation.force('center', forceCenter(width / 2, height / 2));
+					simulation.force(
+						'horizontal',
+						forceX((node) => computeTargetXForResize(node)).strength(0.08),
+					);
+					simulation.force('vertical', forceY(height / 2).strength(0.18));
+					
+					simulation.alpha(0.3).restart();
+				}
+			}
+		}
+	}, [width, height]);
 
 	useEffect(() => {
 		const highlight = highlightRequest;

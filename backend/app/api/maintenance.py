@@ -7,13 +7,42 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from ..core.config import get_settings
 from ..core.storage_paths import get_browser_run_output_dir, get_cache_history_root
+from ..services.screenshot_hash_backfill import run_backfill
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
+
+
+class ScreenshotHashBackfillRequest(BaseModel):
+    write: bool = Field(
+        default=False,
+        description="When true, write computed screenshot_hashes back to JSON files. Otherwise perform a dry run.",
+    )
+    datasets: list[str] = Field(
+        default_factory=lambda: ["data1", "data2", "data3"],
+        description="Datasets to scan when cache_dir is not provided.",
+    )
+    cache_dir: str | None = Field(
+        default=None,
+        description="Optional custom cache directory. When provided it overrides datasets.",
+    )
+    overwrite_existing: bool = Field(
+        default=False,
+        description="Recompute screenshot hashes even when a file already has screenshot_hashes.",
+    )
+    skip_legacy_data1: bool = Field(
+        default=False,
+        description="Skip legacy data1 directories such as history_logs_cache when scanning default locations.",
+    )
+    verbose: bool = Field(
+        default=True,
+        description="Include per-file details in the response.",
+    )
 
 
 def _terminate_process_after_delay(delay_seconds: float = 1.0) -> None:
@@ -163,3 +192,19 @@ async def cleanup_backend_files():
         "skipped": skipped,
         "failed": failed,
     }
+
+
+@router.post(
+    "/backfill-screenshot-hashes",
+    summary="Backfill missing screenshot hashes in cached history logs",
+)
+async def backfill_screenshot_hashes(request: ScreenshotHashBackfillRequest):
+    result = run_backfill(
+        write_changes=request.write,
+        datasets=request.datasets,
+        cache_dir=request.cache_dir,
+        overwrite_existing=request.overwrite_existing,
+        skip_legacy_data1=request.skip_legacy_data1,
+        verbose=request.verbose,
+    )
+    return result

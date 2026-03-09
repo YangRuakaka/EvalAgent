@@ -117,3 +117,36 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - **Path:** `GET /api/v1/history-logs/screenshot`
 - **Description:** Serve a screenshot file directly by `path` (optionally with `dataset` / `data_source`), suitable for `<img src="...">`.
+
+## 7) Offline Screenshot Hash Backfill
+If older cached logs are missing `details.screenshot_hashes`, you can precompute them once offline so the online `proxy` flow stays fast and trajectory image merging remains stable.
+
+From the `backend/` folder:
+```bash
+python precompute_screenshot_hashes.py
+```
+
+This default mode is a dry run. To write the hashes back into the JSON files:
+```bash
+python precompute_screenshot_hashes.py --write
+```
+
+Useful options:
+- `--datasets data1 data2`
+- `--overwrite-existing`
+- `--skip-legacy-data1`
+- `--cache-dir /custom/history_logs_dir`
+
+If the backend is already deployed on Cloud Run and you want to trigger the same backfill remotely, call:
+
+```bash
+curl -X POST "$BACKEND_URL/api/v1/maintenance/backfill-screenshot-hashes" \
+	-H "Content-Type: application/json" \
+	-d '{
+		"write": true,
+		"datasets": ["data1", "data2", "data3"],
+		"verbose": true
+	}'
+```
+
+This uses the same backfill logic as `precompute_screenshot_hashes.py`, but runs on the deployed backend service.

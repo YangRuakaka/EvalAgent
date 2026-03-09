@@ -778,6 +778,7 @@ class JudgeEvaluatorService:
                 verdict="UNABLE_TO_EVALUATE",
                 reasoning=f"No valid steps in phase '{phase_id}'",
                 confidence_score=0.0,
+                aggregated_step_summary=f"Phase {phase_id} has no valid step indices for evaluation",
                 used_granularity=Granularity.PHASE_LEVEL,
             )
 
@@ -874,6 +875,7 @@ class JudgeEvaluatorService:
                 verdict="UNABLE_TO_EVALUATE",
                 reasoning="No execution steps available for unified evaluation",
                 confidence_score=0.0,
+                aggregated_step_summary="No execution steps available",
                 used_granularity=Granularity.PHASE_LEVEL,
             )
 
@@ -955,6 +957,7 @@ class JudgeEvaluatorService:
                     verdict="UNABLE_TO_EVALUATE",
                     reasoning="No phase evaluation results were produced",
                     confidence_score=0.0,
+                    aggregated_step_summary="Phase evaluation produced no results",
                     used_granularity=Granularity.PHASE_LEVEL,
                 )
 
@@ -1001,6 +1004,7 @@ class JudgeEvaluatorService:
                 verdict="UNABLE_TO_EVALUATE",
                 reasoning=f"Unified evaluation failed: {str(exc)}",
                 confidence_score=0.0,
+                aggregated_step_summary=f"Unified evaluation failed: {str(exc)}",
                 used_granularity=Granularity.PHASE_LEVEL,
             )
 
@@ -1468,6 +1472,7 @@ class JudgeEvaluatorService:
                 verdict="UNABLE_TO_EVALUATE",
                 reasoning="No phase results available for criterion synthesis",
                 confidence_score=0.0,
+                aggregated_step_summary="No phase results available for synthesis",
                 used_granularity=Granularity.PHASE_LEVEL,
             )
 
@@ -1587,6 +1592,7 @@ class JudgeEvaluatorService:
                 verdict="UNABLE_TO_EVALUATE",
                 reasoning="No results to merge",
                 confidence_score=0.0,
+                aggregated_step_summary="No intermediate results to merge",
                 used_granularity=granularity,
             )
 

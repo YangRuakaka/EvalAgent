@@ -417,7 +417,16 @@ async def _process_single_criterion(
         
     except Exception as e:
         logger.error(f"Evaluation failed for criterion {crit.title}: {e}")
-        return None
+        return ExperimentCriterionResult(
+            title=crit.title,
+            assertion=crit.assertion,
+            description=crit.description,
+            granularity=target_granularity,
+            involved_steps=[],
+            overall_assessment=EvaluateStatus.UNKNOWN,
+            overall_reasoning=f"Criterion evaluation failed: {str(e)}",
+            confidence=0.0,
+        )
 
 
 async def _load_condition_run_data(
@@ -426,21 +435,56 @@ async def _load_condition_run_data(
 ) -> Optional[Dict]:
     """Load run data for a condition from disk."""
     logger.info(f"Loading data for condition: {condition.conditionID}")
+
+    requested_condition_id = normalize_to_string(condition.conditionID, "").strip()
+
+    def _build_lookup_ids(raw_condition_id: str) -> List[str]:
+        if not raw_condition_id:
+            return []
+
+        normalized_candidates: List[str] = []
+
+        def _append(candidate: str) -> None:
+            if not candidate:
+                return
+            if candidate not in normalized_candidates:
+                normalized_candidates.append(candidate)
+
+        base_name = raw_condition_id.replace("\\", "/").split("/")[-1].strip()
+        while base_name.lower().endswith(".json"):
+            base_name = base_name[:-5].strip()
+
+        stripped_raw = raw_condition_id
+        while stripped_raw.lower().endswith(".json"):
+            stripped_raw = stripped_raw[:-5].strip()
+
+        _append(base_name)
+        _append(stripped_raw)
+        return normalized_candidates
+
+    lookup_ids = _build_lookup_ids(requested_condition_id)
+    if not lookup_ids:
+        logger.error("Empty conditionID in request, cannot load condition")
+        return None
     
     # 1. Load run data using conditionID as filename
     try:
         json_file = None
-        filename = f"{condition.conditionID}.json"
         for lookup_dir in history_lookup_dirs:
-            candidate = lookup_dir / filename
-            if candidate.exists() and candidate.is_file():
-                json_file = candidate
+            for lookup_id in lookup_ids:
+                filename = f"{lookup_id}.json"
+                candidate = lookup_dir / filename
+                if candidate.exists() and candidate.is_file():
+                    json_file = candidate
+                    break
+            if json_file is not None:
                 break
 
         if json_file is None:
             logger.error(
-                "Condition file not found for %s (searched: %s)",
-                condition.conditionID,
+                "Condition file not found for %s (normalized candidates=%s, searched dirs=%s)",
+                requested_condition_id,
+                lookup_ids,
                 [path.as_posix() for path in history_lookup_dirs],
             )
             return None
@@ -479,12 +523,12 @@ async def _load_condition_run_data(
     model = normalize_to_string(metadata.get("model", ""), "")
     models = [model] if model else []
     
-    run_index = normalize_run_index(metadata.get("run_index", 1), condition.conditionID)
+    run_index = normalize_run_index(metadata.get("run_index", 1), requested_condition_id)
 
     logger.info(f"Loaded condition data: persona={persona}, value={value}, model={model}, run_index={run_index}, steps={len(all_steps)}")
 
     return {
-        "conditionID": condition.conditionID,
+        "conditionID": requested_condition_id,
         "task": task,
         "all_steps": all_steps,
         "personas": personas,
@@ -866,6 +910,16 @@ async def evaluate_experiment(
         overall_assessment_confidence_threshold,
         task_timeout_seconds,
     )
+    logger.info(
+        "Evaluate request conditionIDs=%s, criteria_titles=%s",
+        [normalize_to_string(c.conditionID, "").strip() for c in request.conditions],
+        [normalize_to_string(c.title, "").strip() for c in request.criteria],
+    )
+
+    if not request.conditions:
+        raise HTTPException(status_code=400, detail={"message": "No conditions selected for evaluation."})
+    if not request.criteria:
+        raise HTTPException(status_code=400, detail={"message": "No criteria selected for evaluation."})
     
     history_lookup_dirs = get_condition_lookup_dirs(settings)
     
@@ -880,10 +934,36 @@ async def evaluate_experiment(
         timeout_seconds=task_timeout_seconds,
     )
     loaded_contexts = [ctx for ctx in loaded_contexts_raw if ctx is not None]
+
+    requested_condition_ids = [normalize_to_string(cond.conditionID, "").strip() for cond in request.conditions]
+    loaded_condition_ids = {
+        normalize_to_string(ctx.get("conditionID"), "").strip()
+        for ctx in loaded_contexts
+    }
+    missing_condition_ids = [cond_id for cond_id in requested_condition_ids if cond_id and cond_id not in loaded_condition_ids]
     
     if not loaded_contexts:
         logger.warning("No valid conditions loaded")
-        return ExperimentEvaluationResponse(conditions=[], multi_condition_assessment=None)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "No valid conditions could be loaded for evaluation.",
+                "requested_condition_ids": requested_condition_ids,
+                "hint": "Use conditionID as filename stem (without extension), or ensure corresponding .json exists in history lookup dirs.",
+            },
+        )
+
+    if missing_condition_ids:
+        logger.warning("Some conditions could not be loaded: %s", missing_condition_ids)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Some selected conditions could not be loaded.",
+                "missing_condition_ids": missing_condition_ids,
+                "requested_condition_ids": requested_condition_ids,
+                "loaded_condition_ids": sorted(loaded_condition_ids),
+            },
+        )
 
     # 2. Build global overview once per condition and reuse for all criteria.
     overview_tasks = []
@@ -966,17 +1046,47 @@ async def evaluate_experiment(
             
     # 6. Build final ConditionResult objects
     condition_results = []
+
+    def _criterion_identity(criterion: ExperimentCriterion) -> Tuple[str, str]:
+        return (
+            normalize_to_string(getattr(criterion, "title", ""), "").strip(),
+            normalize_to_string(getattr(criterion, "assertion", ""), "").strip(),
+        )
+
     for ctx in loaded_contexts:
         cond_id = ctx["conditionID"]
         
         # Maintain order of criteria as requested
         current_criteria_results = results_by_condition[cond_id]
-        crit_map = {res.title: res for res in current_criteria_results}
+        crit_map = {
+            _criterion_identity(res): res
+            for res in current_criteria_results
+        }
         
         sorted_results = []
         for req_crit in request.criteria:
-            if req_crit.title in crit_map:
-                sorted_results.append(crit_map[req_crit.title])
+            criterion_key = _criterion_identity(req_crit)
+            if criterion_key in crit_map:
+                sorted_results.append(crit_map[criterion_key])
+                continue
+
+            logger.error(
+                "Missing criterion result for condition=%s, criterion=%s",
+                cond_id,
+                criterion_key,
+            )
+            sorted_results.append(
+                ExperimentCriterionResult(
+                    title=req_crit.title,
+                    assertion=req_crit.assertion,
+                    description=req_crit.description,
+                    granularity=Granularity.PHASE_LEVEL,
+                    involved_steps=[],
+                    overall_assessment=EvaluateStatus.UNKNOWN,
+                    overall_reasoning="No criterion result produced (internal timeout/failure).",
+                    confidence=0.0,
+                )
+            )
         
         cr = _safe_condition_result(ctx, sorted_results)
         if cr is not None:

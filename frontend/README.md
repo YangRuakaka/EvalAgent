@@ -1,5 +1,23 @@
 # 部署方法
 
+## 本地与服务器地址自动切换
+
+本项目已按环境拆分 API 与任务站点地址：
+
+- 本地开发（`npm start`）：读取 `.env.development`
+- 生产构建（`npm run build`）：读取 `.env.production`
+
+当前默认配置：
+
+- `.env.development`
+   - `REACT_APP_API_BASE_URL=http://127.0.0.1:8000/api/v1`
+   - `REACT_APP_TARGET_BASE_URL=http://localhost:3000`
+- `.env.production`
+   - `REACT_APP_API_BASE_URL=https://eval-agent-backend-588077581214.us-central1.run.app/api/v1`
+   - `REACT_APP_TARGET_BASE_URL=http://34.55.136.249:3000`
+
+如需改地址，只改对应环境文件即可。
+
 在部署之前，请确保设置以下代理和环境变量（如果需要）：
 
 ```bash

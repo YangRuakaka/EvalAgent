@@ -12,6 +12,8 @@ const PanelHeader = ({
   className,
   icon,
   variant,
+  onExportData,
+  isExportDisabled,
   onGetCacheData,
   onManageCriteria,
   onCleanupServer,
@@ -26,10 +28,11 @@ const PanelHeader = ({
     .filter(Boolean)
     .join(' ');
   const canRequestCache = typeof onGetCacheData === 'function';
+  const canExportData = typeof onExportData === 'function';
   const canManageCriteria = typeof onManageCriteria === 'function';
   const canCleanupServer = typeof onCleanupServer === 'function';
   const canRestartBackend = typeof onRestartBackend === 'function';
-  const hasRightContent = Boolean(children) || canRequestCache || canManageCriteria || canCleanupServer || canRestartBackend;
+  const hasRightContent = Boolean(children) || canRequestCache || canExportData || canManageCriteria || canCleanupServer || canRestartBackend;
 
   return (
     <header className={headerClassName}>
@@ -42,6 +45,16 @@ const PanelHeader = ({
       {hasRightContent && (
         <div className="panel__controls">
           {children}
+          {canExportData && (
+            <button
+              type="button"
+              className="panel__action"
+              onClick={onExportData}
+              disabled={isExportDisabled}
+            >
+              Export Data
+            </button>
+          )}
           {canManageCriteria && (
             <button
               type="button"
@@ -92,6 +105,8 @@ PanelHeader.propTypes = {
   className: PropTypes.string,
   icon: PropTypes.node,
   variant: PropTypes.oneOf(['page', 'panel']),
+  onExportData: PropTypes.func,
+  isExportDisabled: PropTypes.bool,
   onGetCacheData: PropTypes.func,
   onManageCriteria: PropTypes.func,
   onCleanupServer: PropTypes.func,
@@ -106,6 +121,8 @@ PanelHeader.defaultProps = {
   className: undefined,
   icon: undefined,
   variant: 'panel',
+  onExportData: undefined,
+  isExportDisabled: false,
   onGetCacheData: undefined,
   onManageCriteria: undefined,
   onCleanupServer: undefined,

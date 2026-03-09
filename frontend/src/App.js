@@ -58,6 +58,134 @@ const SYSTEM_VARIANT_OPTIONS = [
 	},
 ];
 
+const DAG_FOCUS_EVENT_TYPES = new Set([
+	'node_click',
+	'node_drag_start',
+	'node_drag_end',
+	'node_pin_toggle',
+	'zoom_pan',
+]);
+
+const DAG_EVENT_MIN_INTERVAL_BY_TYPE = {
+	zoom_pan: 900,
+};
+
+const toRoundedNumber = (value, digits = 0) => {
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed)) {
+		return null;
+	}
+
+	return Number(parsed.toFixed(digits));
+};
+
+const normalizeDAGInteractionForExport = (interaction, context = {}) => {
+	if (!interaction || typeof interaction !== 'object') {
+		return null;
+	}
+
+	const type = typeof interaction.type === 'string' ? interaction.type : 'unknown';
+	const scope = typeof interaction.scope === 'string' ? interaction.scope : 'trajectory_dag';
+
+	switch (type) {
+		case 'node_click':
+			return {
+				scope,
+				type,
+				nodeId: interaction.nodeId || null,
+			};
+		case 'node_drag_start':
+			return {
+				scope,
+				type,
+				nodeId: interaction.nodeId || null,
+				x: toRoundedNumber(interaction.x, 0),
+				y: toRoundedNumber(interaction.y, 0),
+			};
+		case 'node_pin_toggle':
+			return {
+				scope,
+				type: interaction.isPinned ? 'node_lock' : 'node_unlock',
+				nodeId: interaction.nodeId || null,
+			};
+		case 'node_drag_end':
+			return {
+				scope,
+				type,
+				nodeId: interaction.nodeId || null,
+				x: toRoundedNumber(interaction.x, 0),
+				y: toRoundedNumber(interaction.y, 0),
+				isPinned: Boolean(interaction.isPinned),
+			};
+		case 'zoom_pan':
+		{
+			const runKey = context.runKey || 'global';
+			const scale = toRoundedNumber(interaction.scale, 3);
+			if (scale === null) {
+				return null;
+			}
+
+			const previousScale = context.zoomScaleByRunRef?.current?.get(runKey);
+			const baselineScale = Number.isFinite(previousScale) ? previousScale : 1;
+			const delta = scale - baselineScale;
+
+			if (Math.abs(delta) < 0.01) {
+				context.zoomScaleByRunRef?.current?.set(runKey, scale);
+				return null;
+			}
+
+			context.zoomScaleByRunRef?.current?.set(runKey, scale);
+
+			return {
+				scope,
+				type: delta > 0 ? 'zoom_in' : 'zoom_out',
+				fromScale: toRoundedNumber(baselineScale, 3),
+				toScale: scale,
+				translateX: toRoundedNumber(interaction.translateX, 0),
+				translateY: toRoundedNumber(interaction.translateY, 0),
+			};
+		}
+		default:
+			return null;
+	}
+};
+
+const buildDAGInteractionSummary = (interactions) => {
+	if (!Array.isArray(interactions) || interactions.length === 0) {
+		return {
+			totalEvents: 0,
+			sessionDurationSeconds: 0,
+			countsByType: {},
+			countsByRunId: {},
+		};
+	}
+
+	const countsByType = {};
+	const countsByRunId = {};
+
+	interactions.forEach((item) => {
+		const type = item?.type || 'unknown';
+		const runId = item?.runId || 'unknown';
+		countsByType[type] = (countsByType[type] || 0) + 1;
+		countsByRunId[runId] = (countsByRunId[runId] || 0) + 1;
+	});
+
+	const first = interactions[0];
+	const last = interactions[interactions.length - 1];
+	const firstTs = Date.parse(first?.recordedAt || '');
+	const lastTs = Date.parse(last?.recordedAt || '');
+	const sessionDurationSeconds = Number.isFinite(firstTs) && Number.isFinite(lastTs) && lastTs >= firstTs
+		? Math.round((lastTs - firstTs) / 1000)
+		: 0;
+
+	return {
+		totalEvents: interactions.length,
+		sessionDurationSeconds,
+		countsByType,
+		countsByRunId,
+	};
+};
+
 const getResponseErrorDetail = (response) => {
 	if (!response) {
 		return 'No response from server';
@@ -212,6 +340,9 @@ const App = () => {
 	const containerRef = useRef(null);
 	const dragStateRef = useRef(null);
 	const cacheRunsByDataSourceRef = useRef(new Map());
+	const dagInteractionCounterRef = useRef(0);
+	const dagInteractionLastRecordedAtRef = useRef(new Map());
+	const dagZoomScaleByRunRef = useRef(new Map());
 
 	const [sizes, setSizes] = useState({
 		left: 50,
@@ -225,6 +356,7 @@ const App = () => {
 	const [isRestartingBackend, setIsRestartingBackend] = useState(false);
 	const [activeConfigTab, setActiveConfigTab] = useState('persona');
 	const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
+	const [dagInteractions, setDagInteractions] = useState([]);
 
 	const activeRun = useMemo(
 		() => experimentEntries.find((item) => item.id === activeRunId) ?? null,
@@ -411,6 +543,93 @@ const App = () => {
 		setIsCriteriaManagerOpen(false);
 	}, []);
 
+	const handleDAGInteraction = useCallback((interaction) => {
+		if (!interaction || typeof interaction !== 'object') {
+			return;
+		}
+
+		const type = typeof interaction.type === 'string' ? interaction.type : 'unknown';
+		if (!DAG_FOCUS_EVENT_TYPES.has(type)) {
+			return;
+		}
+
+		const runKey = activeRunId || 'global';
+		const now = Date.now();
+		const throttleKey = `${runKey}::${type}`;
+		const minInterval = DAG_EVENT_MIN_INTERVAL_BY_TYPE[type] || 0;
+		const lastRecordedAt = dagInteractionLastRecordedAtRef.current.get(throttleKey) || 0;
+		if (minInterval > 0 && now - lastRecordedAt < minInterval) {
+			return;
+		}
+
+		dagInteractionLastRecordedAtRef.current.set(throttleKey, now);
+
+		const normalizedPayload = normalizeDAGInteractionForExport(interaction, {
+			runKey,
+			zoomScaleByRunRef: dagZoomScaleByRunRef,
+		});
+		if (!normalizedPayload) {
+			return;
+		}
+
+		dagInteractionCounterRef.current += 1;
+		const normalizedInteraction = {
+			sequence: dagInteractionCounterRef.current,
+			recordedAt: new Date(now).toISOString(),
+			runId: activeRunId || null,
+			...normalizedPayload,
+		};
+
+		setDagInteractions((prev) => [...prev, normalizedInteraction]);
+	}, [activeRunId]);
+
+	const handleExportDAGInteractions = useCallback(() => {
+		if (!dagInteractions.length) {
+			alert('No DAG interaction data to export.');
+			return;
+		}
+
+		const timestamp = new Date();
+		const summary = buildDAGInteractionSummary(dagInteractions);
+		const payload = {
+			exportVersion: 'dag_interactions_focused_v2',
+			granularity: 'focused',
+			exportedAt: timestamp.toISOString(),
+			count: dagInteractions.length,
+			summary,
+			samplingPolicy: {
+				focusEventTypes: Array.from(DAG_FOCUS_EVENT_TYPES),
+				minIntervalMsByType: DAG_EVENT_MIN_INTERVAL_BY_TYPE,
+			},
+			interactions: dagInteractions,
+		};
+		const fileName = `dag_interactions_${timestamp.toISOString().replace(/[:.]/g, '-')}.json`;
+
+		let objectUrl = null;
+		try {
+			const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+			objectUrl = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = objectUrl;
+			anchor.download = fileName;
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+
+			setDagInteractions([]);
+			dagInteractionCounterRef.current = 0;
+			dagInteractionLastRecordedAtRef.current.clear();
+			dagZoomScaleByRunRef.current.clear();
+			alert(`Exported ${payload.count} focused DAG interactions.`);
+		} catch (error) {
+			alert(`Failed to export DAG interactions: ${error?.message || 'unknown error'}`);
+		} finally {
+			if (objectUrl) {
+				URL.revokeObjectURL(objectUrl);
+			}
+		}
+	}, [dagInteractions]);
+
 	const centerWeight = Math.max(MIN_CENTER, 100 - sizes.left);
 
 	useEffect(() => {
@@ -478,6 +697,8 @@ const App = () => {
 					<PanelHeader
 						title="Eval Agent"
 						variant="page"
+						onExportData={handleExportDAGInteractions}
+						isExportDisabled={!dagInteractions.length}
 						onCleanupServer={handleCleanupServerFiles}
 						onRestartBackend={handleRestartBackend}
 						onGetCacheData={handleGetCacheData}
@@ -555,6 +776,7 @@ const App = () => {
 						onSelectRun={setActiveRunId}
 						onCloseRun={handleCloseTab}
 						onManageCriteria={openCriteriaManager}
+						onDAGInteraction={handleDAGInteraction}
 						trajectoryUseImageHashEnabled={activeSystemVariant.trajectoryUseImageHashEnabled}
 						trajectoryRefreshNonce={trajectoryRefreshNonce}
 						reasoningEvidenceHighlightEnabled={activeSystemVariant.reasoningEvidenceHighlightEnabled}

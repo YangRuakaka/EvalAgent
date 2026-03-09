@@ -1,5 +1,6 @@
 import { createApiClient } from './client';
 import { API_ENDPOINTS } from './endpoints';
+import { API_BASE_URL } from '../../config/runtimeConfig';
 
 const defaultClient = createApiClient();
 
@@ -11,10 +12,7 @@ const sanitizeBaseUrl = (value) => {
 };
 
 const buildEventStreamUrl = (path) => {
-	const baseUrl = sanitizeBaseUrl(
-		process.env.REACT_APP_API_BASE_URL
-			|| 'https://eval-agent-backend-588077581214.us-central1.run.app/api/v1/',
-	);
+	const baseUrl = sanitizeBaseUrl(API_BASE_URL);
 	return path.startsWith('/') ? `${baseUrl}${path}` : `${baseUrl}/${path}`;
 };
 

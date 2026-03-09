@@ -1,6 +1,7 @@
 """API routes exposing cached history logs."""
 from __future__ import annotations
 
+import logging
 import mimetypes
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -8,11 +9,83 @@ from fastapi.responses import FileResponse
 
 from ..core.config import settings
 from ..core.normalizers import to_bool, to_float, to_int, to_str, to_str_list
+from ..core.storage_paths import normalize_cache_dataset
 from ..schemas.history_logs import HistoryLogsListResponse
 from ..services.history_logs_reader import HistoryLogsService, HistoryLogsServiceError
+from ..services.screenshot_hash_backfill import run_backfill
 
 router = APIRouter(prefix="/history-logs", tags=["history-logs"])
 _service = HistoryLogsService()
+logger = logging.getLogger(__name__)
+
+
+def _parse_preload_datasets(raw_value: str) -> list[str]:
+    candidates = [item.strip() for item in str(raw_value or "").split(",") if item.strip()]
+    if not candidates:
+        candidates = ["data1"]
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        try:
+            dataset_key = normalize_cache_dataset(item)
+        except ValueError:
+            continue
+
+        if dataset_key in seen:
+            continue
+
+        seen.add(dataset_key)
+        normalized.append(dataset_key)
+
+    return normalized or ["data1"]
+
+
+def preload_history_logs_cache() -> dict[str, object]:
+    preload_mode = str(settings.HISTORY_LOGS_PRELOAD_SCREENSHOT_MODE or "proxy").strip().lower()
+    if preload_mode not in {"inline", "proxy", "none"}:
+        preload_mode = "proxy"
+
+    datasets = _parse_preload_datasets(settings.HISTORY_LOGS_PRELOAD_DATASETS)
+    url_prefix = f"{settings.API_V1_PREFIX}/history-logs/screenshot"
+
+    backfill_summary: dict[str, object] | None = None
+    if settings.HISTORY_LOGS_PRELOAD_WRITE_MISSING_HASHES:
+        try:
+            backfill_result = run_backfill(
+                write_changes=True,
+                datasets=datasets,
+                overwrite_existing=False,
+                verbose=False,
+            )
+            backfill_summary = dict(backfill_result.get("summary") or {})
+        except Exception as exc:  # pragma: no cover - startup edge case
+            logger.exception("history logs hash backfill failed before preload")
+            backfill_summary = {"ok": False, "error": str(exc)}
+
+    warmed_counts: dict[str, int] = {}
+    errors: dict[str, str] = {}
+    for dataset_key in datasets:
+        try:
+            logs = _service.list_logs(
+                dataset=dataset_key,
+                screenshot_mode=preload_mode,
+                screenshot_url_prefix=url_prefix,
+            )
+            warmed_counts[dataset_key] = len(logs)
+        except Exception as exc:  # pragma: no cover - startup edge case
+            errors[dataset_key] = str(exc)
+
+    result: dict[str, object] = {
+        "mode": preload_mode,
+        "datasets": datasets,
+        "warmed_counts": warmed_counts,
+        "errors": errors,
+    }
+    if backfill_summary is not None:
+        result["backfill"] = backfill_summary
+
+    return result
 
 
 def _build_screenshot_url_prefix(request: Request) -> str:

@@ -712,28 +712,12 @@ const TrajectoryVisualizer = ({
 	};
 
 	const handleNodeClick = (node) => {
-		if (typeof onDAGInteraction === 'function') {
-			onDAGInteraction({
-				type: 'node_click',
-				nodeId: node?.id || null,
-				nodeLabel: node?.label || null,
-			});
-		}
-
 		if (node && node.src) {
 			setSelectedNode(node);
 		}
 	};
 
 	const handleLinkClick = (payload) => {
-		if (typeof onDAGInteraction === 'function') {
-			onDAGInteraction({
-				type: 'link_click',
-				linkId: payload?.link?.id || payload?.id || null,
-				actionType: payload?.actionType || null,
-			});
-		}
-
 		if (!payload) {
 			return;
 		}

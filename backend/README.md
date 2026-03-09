@@ -55,6 +55,14 @@ BROWSER_AGENT_INCLUDE_SCREENSHOTS_IN_RUN_RESPONSE=false
 BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD=false
 ```
 
+History-logs preload related overrides:
+```
+HISTORY_LOGS_PRELOAD_ENABLED=true
+HISTORY_LOGS_PRELOAD_DATASETS=data1,data2,data3
+HISTORY_LOGS_PRELOAD_SCREENSHOT_MODE=proxy
+HISTORY_LOGS_PRELOAD_WRITE_MISSING_HASHES=false
+```
+
 Notes:
 - `BROWSER_AGENT_RUN_TIMEOUT`: seconds for each submitted run batch; set `0` (or any `<=0`) to disable timeout.
 - `BROWSER_AGENT_MAX_CONCURRENT`: max browser agents running concurrently *inside one run_id*.
@@ -64,12 +72,24 @@ Notes:
 - `BROWSER_AGENT_CONCURRENCY_FALLBACK_MIN`: minimum per-run concurrency floor used by rollback.
 - `BROWSER_AGENT_MAX_PARALLEL_RUNS`: max run_id jobs processed concurrently by the API worker pool.
 - `BROWSER_AGENT_FORCE_THREADED_RUN_ON_WINDOWS`: runs each browser-use execution in a dedicated Proactor loop thread on Windows for better stability under concurrency.
+- `HISTORY_LOGS_PRELOAD_ENABLED`: preload `GET /api/v1/history-logs` caches at backend startup, so first frontend request is warm.
+- `HISTORY_LOGS_PRELOAD_DATASETS`: comma-separated datasets to preload (for example `data1,data2,data3`).
+- `HISTORY_LOGS_PRELOAD_SCREENSHOT_MODE`: preload mode `proxy | inline | none` (recommended `proxy` for speed/memory balance).
+- `HISTORY_LOGS_PRELOAD_WRITE_MISSING_HASHES`: when `true`, startup also backfills missing `details.screenshot_hashes` into JSON files before preloading.
 
 
 ## 4) Run the Server
 From the `backend/` folder, run:
 ```
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Or run `python app/main.py` and configure host/port via `.env`:
+```
+API_HOST=0.0.0.0
+API_PORT=8000
+API_RELOAD=true
+API_WORKERS=1
 ```
 
 ## 5) Browser Agent Endpoint
@@ -117,36 +137,3 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - **Path:** `GET /api/v1/history-logs/screenshot`
 - **Description:** Serve a screenshot file directly by `path` (optionally with `dataset` / `data_source`), suitable for `<img src="...">`.
-
-## 7) Offline Screenshot Hash Backfill
-If older cached logs are missing `details.screenshot_hashes`, you can precompute them once offline so the online `proxy` flow stays fast and trajectory image merging remains stable.
-
-From the `backend/` folder:
-```bash
-python precompute_screenshot_hashes.py
-```
-
-This default mode is a dry run. To write the hashes back into the JSON files:
-```bash
-python precompute_screenshot_hashes.py --write
-```
-
-Useful options:
-- `--datasets data1 data2`
-- `--overwrite-existing`
-- `--skip-legacy-data1`
-- `--cache-dir /custom/history_logs_dir`
-
-If the backend is already deployed on Cloud Run and you want to trigger the same backfill remotely, call:
-
-```bash
-curl -X POST "$BACKEND_URL/api/v1/maintenance/backfill-screenshot-hashes" \
-	-H "Content-Type: application/json" \
-	-d '{
-		"write": true,
-		"datasets": ["data1", "data2", "data3"],
-		"verbose": true
-	}'
-```
-
-This uses the same backfill logic as `precompute_screenshot_hashes.py`, but runs on the deployed backend service.

@@ -6,6 +6,10 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Value Agent Backend"
     API_V1_PREFIX: str = "/api/v1"
     PUBLIC_API_BASE_URL: Optional[str] = None
+    API_HOST: str = "0.0.0.0"
+    API_PORT: int = 8000
+    API_RELOAD: bool = True
+    API_WORKERS: int = 1
     
     # LLM Configuration
     OPENAI_API_KEY: Optional[str] = None
@@ -29,6 +33,10 @@ class Settings(BaseSettings):
     PERSONA_VARIATION_LLM_TEMPERATURE: float = 0
     PERSONA_VARIATION_MAX_CONCURRENCY: int = 4
     CACHE_HISTORY_LOGS_DIR: str = "history_logs"
+    HISTORY_LOGS_PRELOAD_ENABLED: bool = True
+    HISTORY_LOGS_PRELOAD_DATASETS: str = "data1,data2,data3"
+    HISTORY_LOGS_PRELOAD_SCREENSHOT_MODE: str = "proxy"
+    HISTORY_LOGS_PRELOAD_WRITE_MISSING_HASHES: bool = False
     BROWSER_AGENT_RUN_OUTPUT_DIR: str = "browser_agent_runs"
     # Legacy setting kept for backward compatibility with existing deployments.
     BROWSER_AGENT_OUTPUT_DIR: str = "history_logs"

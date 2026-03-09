@@ -1,8 +1,10 @@
 
 import asyncio
+import logging
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from .api.routes import api_router
+from .api.history_logs import preload_history_logs_cache
 from .core.config import settings
 import uvicorn
 
@@ -15,6 +17,7 @@ app = FastAPI(
     version="0.1.0",
     description="Backend API with FastAPI"
 )
+logger = logging.getLogger(__name__)
 
 # @app.middleware("http")
 # async def log_requests(request: Request, call_next):
@@ -75,6 +78,29 @@ app.add_middleware(
 app.include_router(api_router)
 
 
+@app.on_event("startup")
+async def preload_history_logs_on_startup() -> None:
+    if not settings.HISTORY_LOGS_PRELOAD_ENABLED:
+        logger.info("history logs preload disabled")
+        return
+
+    preload_result = await asyncio.to_thread(preload_history_logs_cache)
+    logger.info(
+        "history logs preload completed: mode=%s datasets=%s warmed=%s errors=%s",
+        preload_result.get("mode"),
+        preload_result.get("datasets"),
+        preload_result.get("warmed_counts"),
+        preload_result.get("errors"),
+    )
+
+
 if __name__ == "__main__":
-	print("running main")
-	uvicorn.run("app.main:app", port=8000, host="0.0.0.0", log_level="info", reload=True, workers=1)
+    print("running main")
+    uvicorn.run(
+        "app.main:app",
+        port=settings.API_PORT,
+        host=settings.API_HOST,
+        log_level="info",
+        reload=settings.API_RELOAD,
+        workers=settings.API_WORKERS,
+    )

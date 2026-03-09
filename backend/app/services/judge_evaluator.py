@@ -81,13 +81,18 @@ class JudgeEvaluatorService:
         return None
 
     def _normalize_source_field(self, field_name: str) -> str:
-        field_lower = (field_name or "").lower().strip()
+        field_lower = (field_name or "").lower().strip().replace("_", " ").replace("-", " ")
+        field_lower = " ".join(field_lower.split())
         mapping = {
             "evaluation": "Evaluation",
+            "evaluation of previous goal": "Evaluation",
+            "evaluation previous goal": "Evaluation",
+            "previous goal evaluation": "Evaluation",
+            "eval": "Evaluation",
             "memory": "Memory",
-            "thinking_process": "Thinking Process",
+            "thinking process": "Thinking Process",
             "thinking": "Thinking Process",
-            "next_goal": "Next Goal",
+            "next goal": "Next Goal",
             "next_action": "Next Goal",
             "action": "Action",
             "execution": "Action",
@@ -803,6 +808,7 @@ class JudgeEvaluatorService:
 
         response = await asyncio.to_thread(chain.invoke, invoke_dict)
         response_text = response.content if hasattr(response, "content") else str(response)
+        token_prediction_confidence = self._extract_token_prediction_confidence(response)
 
         phase_agg = AggregatedSteps(
             granularity=Granularity.PHASE_LEVEL,
@@ -1182,16 +1188,25 @@ class JudgeEvaluatorService:
         source_field = evidence.source_field.value if hasattr(evidence.source_field, "value") else str(evidence.source_field)
         declared_step_index = int(evidence.step_index)
 
+        candidate_step_indices: List[int] = []
         if 0 <= declared_step_index < len(all_steps):
-            candidates = self._extract_field_candidates(all_steps[declared_step_index], source_field)
+            candidate_step_indices.append(declared_step_index)
+
+        if 1 <= declared_step_index <= len(all_steps):
+            one_based_zero_index = declared_step_index - 1
+            if one_based_zero_index not in candidate_step_indices:
+                candidate_step_indices.append(one_based_zero_index)
+
+        for candidate_step_index in candidate_step_indices:
+            candidates = self._extract_field_candidates(all_steps[candidate_step_index], source_field)
             for candidate in candidates:
                 matched = self._find_exact_original_snippet(candidate, requested)
                 if matched:
-                    return evidence.model_copy(update={"step_index": declared_step_index, "highlighted_text": matched})
+                    return evidence.model_copy(update={"step_index": candidate_step_index, "highlighted_text": matched})
 
             repaired = self._repair_evidence_with_llm(
-                evidence=evidence,
-                step_obj=all_steps[declared_step_index],
+                evidence=evidence.model_copy(update={"step_index": candidate_step_index}),
+                step_obj=all_steps[candidate_step_index],
                 criterion_name=criterion_name,
                 model_name=model_name,
             )
@@ -1199,6 +1214,8 @@ class JudgeEvaluatorService:
                 return repaired
 
         unique_match = self._locate_unique_evidence_match(requested, source_field, all_steps)
+        if unique_match is None:
+            unique_match = self._locate_unique_evidence_match(requested, "", all_steps)
         if unique_match is None:
             return None
 

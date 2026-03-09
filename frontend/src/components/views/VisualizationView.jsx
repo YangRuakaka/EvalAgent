@@ -51,6 +51,7 @@ const VisualizationView = ({
 	onCloseRun,
 	onManageCriteria,
 	trajectoryUseImageHashEnabled,
+	trajectoryRefreshNonce,
 	reasoningEvidenceHighlightEnabled,
 	onDAGInteraction,
 	showBackendLogs,
@@ -294,6 +295,7 @@ const VisualizationView = ({
 												trajectory={entryTrajectory}
 												conditions={entryConditions}
 												useImageHashEnabled={effectiveTrajectoryUseImageHash}
+												refreshNonce={trajectoryRefreshNonce}
 												onNavigateToReasoning={handleTrajectoryNavigateToReasoning}
 												onDAGInteraction={onDAGInteraction}
 												showBackendLogs={showLogsForEntry}
@@ -401,6 +403,7 @@ VisualizationView.propTypes = {
 	onCloseRun: PropTypes.func.isRequired,
 	onManageCriteria: PropTypes.func,
 	trajectoryUseImageHashEnabled: PropTypes.bool,
+	trajectoryRefreshNonce: PropTypes.number,
 	reasoningEvidenceHighlightEnabled: PropTypes.bool,
 	onDAGInteraction: PropTypes.func,
 	showBackendLogs: PropTypes.bool,
@@ -413,6 +416,7 @@ VisualizationView.defaultProps = {
 	activeRunId: null,
 	onManageCriteria: undefined,
 	trajectoryUseImageHashEnabled: undefined,
+	trajectoryRefreshNonce: 0,
 	reasoningEvidenceHighlightEnabled: undefined,
 	onDAGInteraction: undefined,
 	showBackendLogs: false,

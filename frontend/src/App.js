@@ -47,7 +47,7 @@ const SYSTEM_VARIANT_OPTIONS = [
 	{
 		value: 'B',
 		label: 'B',
-		trajectoryUseImageHashEnabled: true,
+		trajectoryUseImageHashEnabled: false,
 		reasoningEvidenceHighlightEnabled: true,
 	},
 	{
@@ -219,6 +219,7 @@ const App = () => {
 	const [activeRunId, setActiveRunId] = useState(null);
 	const [selectedDataSource, setSelectedDataSource] = useState('data1');
 	const [selectedSystemVariant, setSelectedSystemVariant] = useState('A');
+	const [trajectoryRefreshNonce, setTrajectoryRefreshNonce] = useState(0);
 	const [isFetchingCache, setIsFetchingCache] = useState(false);
 	const [isCleaningServerFiles, setIsCleaningServerFiles] = useState(false);
 	const [isRestartingBackend, setIsRestartingBackend] = useState(false);
@@ -239,6 +240,7 @@ const App = () => {
 		() => SYSTEM_VARIANT_OPTIONS.find((option) => option.value === selectedSystemVariant) || SYSTEM_VARIANT_OPTIONS[0],
 		[selectedSystemVariant],
 	);
+	const historyLogScreenshotMode = 'inline';
 
 	useEffect(() => {
 		const handlePointerMove = (event) => {
@@ -298,7 +300,8 @@ const App = () => {
 	const handleGetCacheData = useCallback(async () => {
 		setIsFetchingCache(true);
 
-		const cachedRun = cacheRunsByDataSourceRef.current.get(selectedDataSource);
+		const cacheKey = `${selectedDataSource}::${historyLogScreenshotMode}`;
+		const cachedRun = cacheRunsByDataSourceRef.current.get(cacheKey);
 		if (cachedRun?.id) {
 			addExperiment(cachedRun);
 			setActiveRunId(cachedRun.id);
@@ -307,7 +310,7 @@ const App = () => {
 		try {
 			const response = await fetchHistoryLogs({
 				dataSource: selectedDataSource,
-				screenshotMode: 'proxy',
+				screenshotMode: historyLogScreenshotMode,
 			});
 
 			if (!response.ok) {
@@ -318,7 +321,7 @@ const App = () => {
 			
 			const nextEntry = handleAddRunEntry(response.data, { activate: true });
 			if (nextEntry?.id) {
-				cacheRunsByDataSourceRef.current.set(selectedDataSource, nextEntry);
+				cacheRunsByDataSourceRef.current.set(cacheKey, nextEntry);
 			}
 
 		} catch (error) {
@@ -326,7 +329,7 @@ const App = () => {
 		} finally {
 			setIsFetchingCache(false);
 		}
-	}, [addExperiment, handleAddRunEntry, selectedDataSource]);
+	}, [addExperiment, handleAddRunEntry, historyLogScreenshotMode, selectedDataSource]);
 
 	const runConfirmedServerAction = useCallback(async ({
 		confirmMessage,
@@ -465,6 +468,7 @@ const App = () => {
 
 	const handleSystemVariantChange = useCallback((event) => {
 		setSelectedSystemVariant(event.target.value);
+		setTrajectoryRefreshNonce((prev) => prev + 1);
 	}, []);
 
 	return (
@@ -552,6 +556,7 @@ const App = () => {
 						onCloseRun={handleCloseTab}
 						onManageCriteria={openCriteriaManager}
 						trajectoryUseImageHashEnabled={activeSystemVariant.trajectoryUseImageHashEnabled}
+						trajectoryRefreshNonce={trajectoryRefreshNonce}
 						reasoningEvidenceHighlightEnabled={activeSystemVariant.reasoningEvidenceHighlightEnabled}
 						showBackendLogs={Boolean(activeEnvironmentRunTab)}
 						backendLogs={activeEnvironmentRunTab?.logs || []}

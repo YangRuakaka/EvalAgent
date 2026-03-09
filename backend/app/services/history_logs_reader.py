@@ -130,7 +130,9 @@ class HistoryLogsService:
         )
 
         encoded_screenshots: List[Optional[str]] = []
-        screenshot_hashes: List[Optional[str]] = []
+        screenshot_hashes: List[Optional[str]] = list(
+            self._ensure_iterable(details_data.get("screenshot_hashes"))
+        )
         missing_screenshots: List[str] = []
 
         if screenshot_mode == "inline":

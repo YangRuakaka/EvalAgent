@@ -26,6 +26,59 @@ const scheduleIdleWork = (callback, timeout = 500) => {
 	return () => window.clearTimeout(timerId);
 };
 
+const coerceText = (value) => {
+	if (typeof value !== 'string') {
+		return null;
+	}
+
+	const trimmed = value.trim();
+	return trimmed ? trimmed : null;
+};
+
+const firstNonEmptyText = (...values) => {
+	for (const value of values) {
+		const text = coerceText(value);
+		if (text) {
+			return text;
+		}
+	}
+
+	return null;
+};
+
+const getEntryScreenshots = (entry) => {
+	if (Array.isArray(entry?.screenshots)) {
+		return entry.screenshots;
+	}
+
+	if (Array.isArray(entry?.history_payload?.screenshots)) {
+		return entry.history_payload.screenshots;
+	}
+
+	return [];
+};
+
+const getScreenshotItemHash = (shot) => firstNonEmptyText(
+	shot?.imageHash,
+	shot?.image_hash,
+	shot?.metadata?.imageHash,
+	shot?.metadata?.image_hash,
+	shot?.meta?.imageHash,
+	shot?.meta?.image_hash,
+);
+
+const getEntryScreenshotHashes = (entry, screenshots) => {
+	const hashes = Array.isArray(entry?.screenshot_hashes)
+		? entry.screenshot_hashes
+		: (Array.isArray(entry?.history_payload?.screenshot_hashes) ? entry.history_payload.screenshot_hashes : []);
+
+	if (!Array.isArray(screenshots) || !screenshots.length) {
+		return [];
+	}
+
+	return screenshots.map((shot, index) => firstNonEmptyText(hashes[index], getScreenshotItemHash(shot)));
+};
+
 const PersonaPopUp = ({ entry, onClose }) => {
 	if (!entry) return null;
 	const { fullPersona, label } = entry;
@@ -163,6 +216,7 @@ const TrajectoryVisualizer = ({
 	trajectory,
 	conditions,
 	useImageHashEnabled,
+	refreshNonce,
 	onNavigateToReasoning,
 	onDAGInteraction,
 	showBackendLogs,
@@ -236,17 +290,13 @@ const TrajectoryVisualizer = ({
 		let hasAnyScreenshot = false;
 
 		for (const entry of details) {
-			const screenshots = Array.isArray(entry?.screenshots)
-				? entry.screenshots
-				: (Array.isArray(entry?.history_payload?.screenshots) ? entry.history_payload.screenshots : []);
+			const screenshots = getEntryScreenshots(entry);
 			if (!screenshots.length) {
 				continue;
 			}
 
 			hasAnyScreenshot = true;
-			const hashes = Array.isArray(entry?.screenshot_hashes)
-				? entry.screenshot_hashes
-				: (Array.isArray(entry?.history_payload?.screenshot_hashes) ? entry.history_payload.screenshot_hashes : []);
+			const hashes = getEntryScreenshotHashes(entry, screenshots);
 
 			if (hashes.length < screenshots.length) {
 				return false;
@@ -428,7 +478,7 @@ const TrajectoryVisualizer = ({
 			isMounted = false;
 			cancelRefinement();
 		};
-	}, [hasTrajectory, trajectory, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage]);
+	}, [hasTrajectory, trajectory, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage, refreshNonce]);
 
 
 	const legendEntries = useMemo(() => {
@@ -919,6 +969,7 @@ TrajectoryVisualizer.propTypes = {
 		}),
 	),
 	useImageHashEnabled: PropTypes.bool,
+	refreshNonce: PropTypes.number,
 	onNavigateToReasoning: PropTypes.func,
 	onDAGInteraction: PropTypes.func,
 	showBackendLogs: PropTypes.bool,
@@ -930,6 +981,7 @@ TrajectoryVisualizer.defaultProps = {
 	trajectory: undefined,
 	conditions: [],
 	useImageHashEnabled: undefined,
+	refreshNonce: 0,
 	onNavigateToReasoning: undefined,
 	onDAGInteraction: undefined,
 	showBackendLogs: false,

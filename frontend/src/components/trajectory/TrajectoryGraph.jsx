@@ -174,6 +174,14 @@ const markerIdForColor = (color) => {
 	return `trajectory-arrowhead-${color.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'default'}`;
 };
 
+const targetWithinSelector = (target, selector) => {
+	if (!target || typeof target.closest !== 'function') {
+		return false;
+	}
+
+	return Boolean(target.closest(selector));
+};
+
 const ensureLayoutDefaults = (nodes, width, height) => {
 	nodes.forEach((node) => {
 		if (typeof node.x !== 'number' || Number.isNaN(node.x)) {
@@ -556,6 +564,18 @@ const TrajectoryGraph = ({
 		const root = select(rootNode);
 
 		const zoomBehaviour = zoom()
+			.filter((event) => {
+				const defaultAllowed = (!event.ctrlKey || event.type === 'wheel') && !event.button;
+				if (!defaultAllowed) {
+					return false;
+				}
+
+				if (event.type === 'wheel') {
+					return true;
+				}
+
+				return !targetWithinSelector(event.target, '.trajectory-node');
+			})
 			.scaleExtent(ZOOM_EXTENT)
 			.on('start', () => {
 				beginHeavyInteraction();
@@ -1473,7 +1493,15 @@ const TrajectoryGraph = ({
 		});
 
 		const dragBehaviour = d3Drag()
+			.filter((event) => {
+				if (event.button) {
+					return false;
+				}
+
+				return !targetWithinSelector(event.target, '.trajectory-node__lock-control');
+			})
 			.on('start', (event, node) => {
+				event.sourceEvent?.stopPropagation?.();
 				beginHeavyInteraction();
 				isNodeDraggingRef.current = true;
 				if (!event.active && simulationRef.current) {

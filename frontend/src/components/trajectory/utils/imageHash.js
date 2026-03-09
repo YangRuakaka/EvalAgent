@@ -1,4 +1,5 @@
 const DEFAULT_HASH_SIZE = 16;
+const DEFAULT_BORDER_IGNORE_RATIO = 0.08;
 const hashCache = new Map();
 const WORKER_TIMEOUT_MS = 12000;
 
@@ -12,6 +13,9 @@ self.onmessage = async (event) => {
 	const id = payload.id;
 	const src = payload.src;
 	const size = Number.isFinite(payload.size) ? payload.size : 16;
+	const borderIgnoreRatio = Number.isFinite(payload.borderIgnoreRatio)
+		? Math.min(Math.max(payload.borderIgnoreRatio, 0), 0.3)
+		: 0.08;
 
 	const respond = (message) => {
 		self.postMessage({ id, ...message });
@@ -40,7 +44,12 @@ self.onmessage = async (event) => {
 			throw new Error('Failed to acquire worker canvas context.');
 		}
 
-		context.drawImage(bitmap, 0, 0, size, size);
+		const cropX = bitmap.width * borderIgnoreRatio;
+		const cropY = bitmap.height * borderIgnoreRatio;
+		const cropWidth = Math.max(1, bitmap.width - cropX * 2);
+		const cropHeight = Math.max(1, bitmap.height - cropY * 2);
+
+		context.drawImage(bitmap, cropX, cropY, cropWidth, cropHeight, 0, 0, size, size);
 		const imageData = context.getImageData(0, 0, size, size);
 
 		const grayscale = new Float32Array(size * size);
@@ -137,7 +146,7 @@ const getHashWorker = () => {
 	return hashWorker;
 };
 
-const computeImageHashViaWorker = (src, size) => {
+const computeImageHashViaWorker = (src, size, borderIgnoreRatio) => {
 	const worker = getHashWorker();
 	if (!worker) {
 		return Promise.reject(new Error('Hash worker is not available'));
@@ -152,7 +161,7 @@ const computeImageHashViaWorker = (src, size) => {
 		}, WORKER_TIMEOUT_MS);
 
 		pendingWorkerRequests.set(id, { resolve, reject, timeoutId });
-		worker.postMessage({ id, src, size });
+		worker.postMessage({ id, src, size, borderIgnoreRatio });
 	});
 };
 
@@ -199,7 +208,7 @@ const loadImage = (src) => {
 	});
 };
 
-const computeAverageHash = (image, size) => {
+const computeAverageHash = (image, size, borderIgnoreRatio = DEFAULT_BORDER_IGNORE_RATIO) => {
 	const dimension = size;
 	const canvas = document.createElement('canvas');
 	canvas.width = dimension;
@@ -210,7 +219,15 @@ const computeAverageHash = (image, size) => {
 		throw new Error('Failed to acquire 2D context for image hashing.');
 	}
 
-	context.drawImage(image, 0, 0, dimension, dimension);
+	const normalizedBorderIgnoreRatio = Number.isFinite(borderIgnoreRatio)
+		? Math.min(Math.max(borderIgnoreRatio, 0), 0.3)
+		: DEFAULT_BORDER_IGNORE_RATIO;
+	const cropX = image.naturalWidth * normalizedBorderIgnoreRatio;
+	const cropY = image.naturalHeight * normalizedBorderIgnoreRatio;
+	const cropWidth = Math.max(1, image.naturalWidth - cropX * 2);
+	const cropHeight = Math.max(1, image.naturalHeight - cropY * 2);
+
+	context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, dimension, dimension);
 
 	let imageData;
 
@@ -273,22 +290,24 @@ const hashStringFallback = async (value) => {
 };
 
 export const computeImageHash = async (src, options = {}) => {
-	const key = `${src}::${options.hashSize || DEFAULT_HASH_SIZE}`;
+	const size = options.hashSize || DEFAULT_HASH_SIZE;
+	const borderIgnoreRatio = Number.isFinite(options.borderIgnoreRatio)
+		? Math.min(Math.max(options.borderIgnoreRatio, 0), 0.3)
+		: DEFAULT_BORDER_IGNORE_RATIO;
+	const key = `${src}::${size}::${borderIgnoreRatio}`;
 
 	if (hashCache.has(key)) {
 		return hashCache.get(key);
 	}
 
-	const size = options.hashSize || DEFAULT_HASH_SIZE;
-
 	try {
-		const hash = await computeImageHashViaWorker(src, size);
+		const hash = await computeImageHashViaWorker(src, size, borderIgnoreRatio);
 		hashCache.set(key, hash);
 		return hash;
 	} catch (error) {
 		try {
 			const image = await loadImage(src);
-			const hash = computeAverageHash(image, size);
+			const hash = computeAverageHash(image, size, borderIgnoreRatio);
 			hashCache.set(key, hash);
 			return hash;
 		} catch (mainThreadError) {

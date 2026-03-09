@@ -1,6 +1,6 @@
 import { schemeTableau10 } from 'd3-scale-chromatic';
 
-import { computeImageHash } from './imageHash';
+import { computeImageHash, hashesAreSimilar } from './imageHash';
 import { generatePreviewImage } from './imagePreview';
 
 const COLOR_PALETTE = schemeTableau10 || [
@@ -34,6 +34,57 @@ const coerceText = (value) => {
 	const trimmed = value.trim();
 
 	return trimmed.length > 0 ? trimmed : null;
+};
+
+const firstNonEmptyText = (...values) => {
+	for (const value of values) {
+		const text = coerceText(value);
+		if (text) {
+			return text;
+		}
+	}
+
+	return null;
+};
+
+const normalizeHashValue = (value) => {
+	const hash = coerceText(value);
+	return hash ? hash.toLowerCase() : null;
+};
+
+const getEntryScreenshots = (entry) => {
+	if (Array.isArray(entry?.screenshots)) {
+		return entry.screenshots;
+	}
+
+	if (Array.isArray(entry?.history_payload?.screenshots)) {
+		return entry.history_payload.screenshots;
+	}
+
+	return [];
+};
+
+const extractScreenshotHash = (raw, metadata) => firstNonEmptyText(
+	metadata?.imageHash,
+	metadata?.image_hash,
+	typeof raw === 'string' ? null : raw?.imageHash,
+	typeof raw === 'string' ? null : raw?.image_hash,
+	typeof raw === 'string' ? null : raw?.metadata?.imageHash,
+	typeof raw === 'string' ? null : raw?.metadata?.image_hash,
+	typeof raw === 'string' ? null : raw?.meta?.imageHash,
+	typeof raw === 'string' ? null : raw?.meta?.image_hash,
+);
+
+const getEntryScreenshotHashes = (entry, screenshots) => {
+	const hashList = Array.isArray(entry?.screenshot_hashes)
+		? entry.screenshot_hashes
+		: (Array.isArray(entry?.history_payload?.screenshot_hashes) ? entry.history_payload.screenshot_hashes : []);
+
+	if (!Array.isArray(screenshots) || !screenshots.length) {
+		return [];
+	}
+
+	return screenshots.map((item, index) => firstNonEmptyText(hashList[index], extractScreenshotHash(item)));
 };
 
 const extractActionTypes = (actionPayload) => {
@@ -190,7 +241,7 @@ const normalizeScreenshot = (raw, metadata) => {
 	// 后端只返回 base64 string，无需处理 object 格式
 	if (typeof raw === 'string') {
 		const src = resolveImageSource(raw, null, normalizedMetadata);
-		const imageHash = coerceText(normalizedMetadata.imageHash);
+		const imageHash = extractScreenshotHash(raw, normalizedMetadata);
 
 		if (!src) {
 			return null;
@@ -253,14 +304,15 @@ const extractScreenshotSequences = (trajectory) => {
 				conditionPersona;
 			const baseLabel = titleCandidate || fallbackLabel;
 			
+			const screenshotsInput = getEntryScreenshots(entry);
 			// Get step descriptions array from entry (matches screenshot indices)
-			const stepDescriptions = asArray(entry?.step_descriptions);
+			const stepDescriptions = asArray(entry?.step_descriptions || entry?.history_payload?.step_descriptions);
 			// Get model outputs array from entry (matches screenshot indices)
 			const modelOutputs = asArray(entry?.model_outputs || entry?.history_payload?.model_outputs);
 			// Get precomputed screenshot hashes array from entry (matches screenshot indices)
-			const screenshotHashes = asArray(entry?.screenshot_hashes || entry?.history_payload?.screenshot_hashes);
+			const screenshotHashes = getEntryScreenshotHashes(entry, screenshotsInput);
 			
-			const screenshotsRaw = asArray(entry?.screenshots)
+			const screenshotsRaw = screenshotsInput
 				.map((item, screenshotIndex) => {
 					const screenshotPersona =
 						coerceText(item?.persona) ||
@@ -330,6 +382,14 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const sequences = extractScreenshotSequences(trajectory);
 	const conditions = Array.isArray(options.conditions) ? options.conditions : [];
 	const useImageHash = options.useImageHash !== false;
+	const hashOptions = options.hash || {};
+	const hashSize = Number.isFinite(hashOptions.hashSize) && hashOptions.hashSize > 0
+		? Math.floor(hashOptions.hashSize)
+		: 16;
+	const perceptualHashLength = Math.ceil((hashSize * hashSize) / 4);
+	const hashSimilarityThreshold = Number.isFinite(options.hashSimilarityThreshold) && options.hashSimilarityThreshold >= 0
+		? Math.floor(options.hashSimilarityThreshold)
+		: Math.max(8, Math.round((hashSize * hashSize) * 0.09));
 	const usePreviewImage = options.usePreviewImage !== false;
 	const previewConcurrency = Number.isFinite(options.previewConcurrency) && options.previewConcurrency > 0
 		? Math.floor(options.previewConcurrency)
@@ -369,6 +429,36 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const hashConcurrency = Number.isFinite(options.hashConcurrency) && options.hashConcurrency > 0
 		? Math.floor(options.hashConcurrency)
 		: DEFAULT_HASH_CONCURRENCY;
+	const canonicalPerceptualHashes = [];
+	const canonicalHashMap = new Map();
+
+	const resolveCanonicalHash = (hash) => {
+		const normalizedHash = normalizeHashValue(hash);
+		if (!normalizedHash) {
+			return null;
+		}
+
+		if (canonicalHashMap.has(normalizedHash)) {
+			return canonicalHashMap.get(normalizedHash);
+		}
+
+		if (normalizedHash.length !== perceptualHashLength) {
+			canonicalHashMap.set(normalizedHash, normalizedHash);
+			return normalizedHash;
+		}
+
+		const matchingCanonicalHash = canonicalPerceptualHashes.find(
+			(existingHash) => hashesAreSimilar(existingHash, normalizedHash, hashSimilarityThreshold),
+		);
+
+		const canonicalHash = matchingCanonicalHash || normalizedHash;
+		if (!matchingCanonicalHash) {
+			canonicalPerceptualHashes.push(canonicalHash);
+		}
+
+		canonicalHashMap.set(normalizedHash, canonicalHash);
+		return canonicalHash;
+	};
 
 	const hashTasks = [];
 	sequences.forEach((sequence, sequenceIndex) => {
@@ -390,14 +480,19 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 				return { ...task, hash: null };
 			}
 
+			const providedHash = normalizeHashValue(task?.screenshot?.imageHash);
+			if (providedHash) {
+				return { ...task, hash: providedHash };
+			}
+
 			const hash = await computeImageHash(task.screenshot.src, options.hash);
-			return { ...task, hash };
+			return { ...task, hash: normalizeHashValue(hash) };
 		},
 	);
 
 	const hashByOccurrence = new Map();
 	hashedTasks.forEach((task) => {
-		hashByOccurrence.set(`${task.sequenceIndex}-${task.position}`, task.hash);
+		hashByOccurrence.set(`${task.sequenceIndex}-${task.position}`, resolveCanonicalHash(task.hash));
 	});
 
 	sequences.forEach((sequence, sequenceIndex) => {

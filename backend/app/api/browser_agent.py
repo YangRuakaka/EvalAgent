@@ -4,10 +4,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
+import re
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse, StreamingResponse
 
 from ..core.config import get_settings
 from ..schemas.browser_agent import (
@@ -29,6 +31,75 @@ _service = BrowserAgentService()
 _worker_queue: asyncio.Queue[tuple[str, BrowserAgentRunRequest, int]] | None = None
 _worker_tasks: list[asyncio.Task] = []
 _worker_lock: asyncio.Lock | None = None
+
+
+def _resolve_request_scheme(request: Request) -> str:
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").strip().lower()
+    if forwarded_proto:
+        first = forwarded_proto.split(",", maxsplit=1)[0].strip()
+        if first in {"http", "https"}:
+            return first
+
+    scheme = (request.url.scheme or "").strip().lower()
+    return scheme if scheme in {"http", "https"} else "https"
+
+
+def _force_url_scheme(url: str, scheme: str) -> str:
+    if scheme not in {"http", "https"}:
+        return url
+
+    if url.startswith("http://"):
+        return f"{scheme}://{url[len('http://') :]}"
+    if url.startswith("https://"):
+        return f"{scheme}://{url[len('https://') :]}"
+    return url
+
+
+def _origin_is_allowed(origin: str) -> bool:
+    candidate = str(origin or "").strip()
+    if not candidate:
+        return False
+
+    allow_origins = [str(item).strip() for item in (settings.CORS_ALLOW_ORIGINS or []) if str(item).strip()]
+    if candidate in allow_origins:
+        return True
+
+    for pattern in (settings.CORS_ALLOW_ORIGIN_REGEX, settings.CORS_ALLOW_LOCALHOST_REGEX):
+        raw_pattern = str(pattern or "").strip()
+        if not raw_pattern:
+            continue
+        try:
+            if re.fullmatch(raw_pattern, candidate):
+                return True
+        except re.error:
+            continue
+
+    return False
+
+
+def _build_cors_headers(request: Request) -> dict[str, str]:
+    origin = (request.headers.get("origin") or "").strip()
+    if not _origin_is_allowed(origin):
+        return {"Vary": "Origin"}
+
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    }
+
+
+def _build_browser_agent_screenshot_url_prefix(request: Request) -> str:
+    configured_base = (settings.PUBLIC_API_BASE_URL or "").strip()
+    request_scheme = _resolve_request_scheme(request)
+    if configured_base:
+        normalized_base = _force_url_scheme(configured_base.rstrip("/"), request_scheme)
+        if normalized_base.endswith(settings.API_V1_PREFIX):
+            return f"{normalized_base}/browser-agent/screenshot"
+        return f"{normalized_base}{settings.API_V1_PREFIX}/browser-agent/screenshot"
+
+    generated = str(request.url_for("get_browser_agent_screenshot"))
+    return _force_url_scheme(generated, request_scheme)
 
 
 async def _worker_loop(worker_name: str) -> None:
@@ -90,7 +161,10 @@ async def _ensure_worker_started() -> None:
     response_model=BrowserAgentRunStartResponse,
     summary="Start a browser-use automation task (non-blocking)",
 )
-async def run_browser_agent(request: BrowserAgentRunRequest) -> BrowserAgentRunStartResponse:
+async def run_browser_agent(
+    request_context: Request,
+    request: BrowserAgentRunRequest,
+) -> BrowserAgentRunStartResponse:
     """Start the browser agent in the background.
 
     Returns immediately with a run_id. Poll ``/status/{run_id}`` for results.
@@ -130,6 +204,8 @@ async def run_browser_agent(request: BrowserAgentRunRequest) -> BrowserAgentRunS
         )
 
     _service.register_queued_run(run_id=run_id, total_tasks=total_tasks)
+    screenshot_url_prefix = _build_browser_agent_screenshot_url_prefix(request=request_context)
+    _service.set_run_screenshot_url_prefix(run_id=run_id, prefix=screenshot_url_prefix)
     await _worker_queue.put((run_id, request, total_tasks))
 
     return BrowserAgentRunStartResponse(
@@ -250,3 +326,32 @@ async def stop_browser_agent(request: BrowserAgentStopRequest) -> BrowserAgentSt
     )
     logger.info("Browser-agent stop requested | run_id=%s stopped=%s", request.run_id, stopped)
     return BrowserAgentStopResponse(run_id=request.run_id, stopped=stopped, message=message)
+
+
+@router.get(
+    "/screenshot",
+    summary="Serve browser-agent run screenshot file",
+)
+async def get_browser_agent_screenshot(
+    request: Request,
+    path: str = Query(..., description="Screenshot path from browser-agent run payload."),
+):
+    try:
+        screenshot_file = _service.resolve_run_screenshot_file(path_str=path)
+        if not screenshot_file:
+            raise HTTPException(status_code=404, detail="Screenshot not found")
+
+        media_type, _ = mimetypes.guess_type(str(screenshot_file))
+        response_headers = {
+            "Cache-Control": "public, max-age=86400",
+            **_build_cors_headers(request),
+        }
+        return FileResponse(
+            path=screenshot_file,
+            media_type=media_type or "application/octet-stream",
+            headers=response_headers,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

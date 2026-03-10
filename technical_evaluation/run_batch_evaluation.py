@@ -19,6 +19,8 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.api.deps import get_judge_services
 from app.api.judge import evaluate_experiment
+from app.core.config import settings
+from app.core.storage_paths import get_condition_lookup_dirs
 from app.schemas.judge import ExperimentEvaluationRequest
 
 
@@ -191,6 +193,201 @@ async def run_single_request(payload: dict[str, Any]) -> dict[str, Any]:
     return response.model_dump(mode="json")
 
 
+def _normalize_condition_lookup_ids(raw_condition_id: str) -> list[str]:
+    normalized_candidates: list[str] = []
+
+    def _append(candidate: str) -> None:
+        if candidate and candidate not in normalized_candidates:
+            normalized_candidates.append(candidate)
+
+    base_name = str(raw_condition_id or "").replace("\\", "/").split("/")[-1].strip()
+    stripped_raw = str(raw_condition_id or "").strip()
+
+    while base_name.lower().endswith(".json"):
+        base_name = base_name[:-5].strip()
+    while stripped_raw.lower().endswith(".json"):
+        stripped_raw = stripped_raw[:-5].strip()
+
+    _append(base_name)
+    _append(stripped_raw)
+    return normalized_candidates
+
+
+def _find_condition_json_path(condition_id: str, lookup_dirs: list[Path]) -> Path | None:
+    lookup_ids = _normalize_condition_lookup_ids(condition_id)
+    if not lookup_ids:
+        return None
+
+    for lookup_dir in lookup_dirs:
+        for lookup_id in lookup_ids:
+            candidate = lookup_dir / f"{lookup_id}.json"
+            if candidate.exists() and candidate.is_file():
+                return candidate
+
+    return None
+
+
+def _load_condition_run_payload(condition_id: str, lookup_dirs: list[Path]) -> dict[str, Any] | None:
+    json_path = _find_condition_json_path(condition_id, lookup_dirs)
+    if json_path is None:
+        return None
+
+    try:
+        return json.loads(json_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _build_human_review_template(condition_output: dict[str, Any]) -> dict[str, Any]:
+    criteria_reviews: list[dict[str, Any]] = []
+    criteria_list = condition_output.get("criteria") if isinstance(condition_output, dict) else []
+    if not isinstance(criteria_list, list):
+        criteria_list = []
+
+    for criterion_index, criterion in enumerate(criteria_list, start=1):
+        if not isinstance(criterion, dict):
+            continue
+
+        criterion_title = str(
+            criterion.get("title")
+            or criterion.get("name")
+            or f"criterion_{criterion_index}"
+        )
+
+        step_reviews: list[dict[str, Any]] = []
+        involved_steps = criterion.get("involved_steps")
+        if not isinstance(involved_steps, list):
+            involved_steps = []
+
+        for step_group_index, step_group in enumerate(involved_steps, start=1):
+            if not isinstance(step_group, dict):
+                continue
+
+            step_indices = step_group.get("steps")
+            if not isinstance(step_indices, list):
+                step_indices = []
+
+            normalized_step_indices = [
+                int(step_index)
+                for step_index in step_indices
+                if isinstance(step_index, int)
+            ]
+
+            evidence_reviews: list[dict[str, Any]] = []
+            highlighted_evidence = step_group.get("highlighted_evidence")
+            if isinstance(highlighted_evidence, list):
+                for evidence_index, evidence in enumerate(highlighted_evidence, start=1):
+                    if not isinstance(evidence, dict):
+                        continue
+
+                    evidence_reviews.append(
+                        {
+                            "evidence_id": f"c{criterion_index:02d}_s{step_group_index:02d}_e{evidence_index:02d}",
+                            "step_index": evidence.get("step_index"),
+                            "source_field": evidence.get("source_field"),
+                            "highlighted_text": evidence.get("highlighted_text"),
+                            "llm_verdict": evidence.get("verdict"),
+                            "human_verdict": None,
+                            "relevance_score": None,
+                            "grounding_score": None,
+                            "clarity_score": None,
+                            "comment": "",
+                        }
+                    )
+
+            step_reviews.append(
+                {
+                    "step_group_id": f"c{criterion_index:02d}_s{step_group_index:02d}",
+                    "step_indices": normalized_step_indices,
+                    "llm_step_verdict": step_group.get("evaluateStatus"),
+                    "llm_reasoning": step_group.get("reasoning"),
+                    "human_step_verdict": None,
+                    "human_step_score": None,
+                    "comment": "",
+                    "evidence_reviews": evidence_reviews,
+                }
+            )
+
+        criteria_reviews.append(
+            {
+                "criterion_title": criterion_title,
+                "criterion_assertion": criterion.get("assertion"),
+                "llm_overall_assessment": criterion.get("overall_assessment"),
+                "llm_overall_reasoning": criterion.get("overall_reasoning"),
+                "human_overall_assessment": None,
+                "human_overall_score": None,
+                "comment": "",
+                "step_reviews": step_reviews,
+            }
+        )
+
+    return {
+        "review_status": "pending",
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "scoring_scale": {
+            "score_min": 1,
+            "score_max": 5,
+            "description": "1=very poor, 5=very good",
+        },
+        "criteria_reviews": criteria_reviews,
+    }
+
+
+def _build_annotatable_request_package(
+    source_file: str,
+    request_index: int,
+    request_payload: dict[str, Any],
+    llm_output: dict[str, Any],
+    condition_lookup_dirs: list[Path],
+    condition_payload_cache: dict[str, dict[str, Any] | None],
+) -> dict[str, Any]:
+    merged_conditions: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    conditions_output = llm_output.get("conditions")
+    if not isinstance(conditions_output, list):
+        conditions_output = []
+
+    for condition_output in conditions_output:
+        if not isinstance(condition_output, dict):
+            continue
+
+        condition_id = str(condition_output.get("conditionID") or "").strip()
+        run_payload = condition_payload_cache.get(condition_id)
+        if condition_id and condition_id not in condition_payload_cache:
+            run_payload = _load_condition_run_payload(condition_id, condition_lookup_dirs)
+            condition_payload_cache[condition_id] = run_payload
+
+        if condition_id and run_payload is None:
+            warnings.append(f"Condition source data not found for conditionID='{condition_id}'")
+
+        source_data = None
+        if isinstance(run_payload, dict):
+            source_data = {
+                "metadata": run_payload.get("metadata", {}),
+                "summary": run_payload.get("summary", {}),
+                "details": run_payload.get("details", {}),
+            }
+
+        merged_condition = {
+            **condition_output,
+            "data": source_data,
+            "human_review": _build_human_review_template(condition_output),
+        }
+        merged_conditions.append(merged_condition)
+
+    return {
+        "source_file": source_file,
+        "request_index": request_index,
+        "request": request_payload,
+        "llm_output": llm_output,
+        "conditions": merged_conditions,
+        "multi_condition_assessment": llm_output.get("multi_condition_assessment"),
+        "warnings": warnings,
+    }
+
+
 def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -202,6 +399,7 @@ async def run_batch(
     fail_fast: bool,
     forced_granularity: str | None,
     run_tag: str | None,
+    emit_annotatable_output: bool,
 ) -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -223,6 +421,13 @@ async def run_batch(
 
     total_requests = 0
     success_requests = 0
+    annotatable_packages: list[dict[str, Any]] = []
+
+    condition_lookup_dirs: list[Path] = []
+    condition_payload_cache: dict[str, dict[str, Any] | None] = {}
+    if emit_annotatable_output:
+        condition_lookup_dirs = get_condition_lookup_dirs(settings)
+        summary["condition_lookup_dirs"] = [str(path) for path in condition_lookup_dirs]
 
     for txt_file in txt_files:
         file_result: dict[str, Any] = {
@@ -263,6 +468,10 @@ async def run_batch(
 
                 try:
                     result = await run_single_request(payload)
+
+                    annotatable_output_name = output_name.replace("__result.json", "__annotatable.json")
+                    annotatable_output_path = results_dir / annotatable_output_name
+
                     output_path.write_text(
                         json.dumps(
                             {
@@ -276,6 +485,25 @@ async def run_batch(
                         ),
                         encoding="utf-8",
                     )
+
+                    if emit_annotatable_output:
+                        annotatable_package = _build_annotatable_request_package(
+                            source_file=txt_file.name,
+                            request_index=idx,
+                            request_payload=payload,
+                            llm_output=result,
+                            condition_lookup_dirs=condition_lookup_dirs,
+                            condition_payload_cache=condition_payload_cache,
+                        )
+                        annotatable_output_path.write_text(
+                            json.dumps(annotatable_package, indent=2, ensure_ascii=False),
+                            encoding="utf-8",
+                        )
+                        request_item["annotatable_output_file"] = annotatable_output_name
+                        if annotatable_package.get("warnings"):
+                            file_result["warnings"].extend(annotatable_package["warnings"])
+                        annotatable_packages.append(annotatable_package)
+
                     success_requests += 1
                 except Exception as exc:
                     request_item["status"] = "error"
@@ -302,12 +530,29 @@ async def run_batch(
     summary["success_requests"] = success_requests
     summary["failed_requests"] = total_requests - success_requests
 
+    if emit_annotatable_output and annotatable_packages:
+        merged_annotatable_path = results_dir / f"all_data_with_llm_output_{batch_id}.json"
+        merged_annotatable_payload = {
+            "batch_id": batch_id,
+            "started_at": summary["started_at"],
+            "finished_at": summary["finished_at"],
+            "total_requests": total_requests,
+            "requests": annotatable_packages,
+        }
+        merged_annotatable_path.write_text(
+            json.dumps(merged_annotatable_payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        summary["merged_annotatable_file"] = merged_annotatable_path.name
+
     summary_path = results_dir / f"batch_summary_{batch_id}.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[DONE] Batch: {batch_id}")
     print(f"[DONE] Summary: {summary_path}")
     print(f"[DONE] Requests: success={success_requests}, failed={total_requests - success_requests}")
+    if summary.get("merged_annotatable_file"):
+        print(f"[DONE] Annotatable merged output: {results_dir / summary['merged_annotatable_file']}")
 
     return 0 if (total_requests > 0 and success_requests == total_requests) else 2
 
@@ -345,6 +590,11 @@ def main() -> int:
         default=None,
         help="Optional tag appended to output file names for experiment tracking",
     )
+    parser.add_argument(
+        "--skip-annotatable-output",
+        action="store_true",
+        help="Skip writing data+LLM output files used for manual verdict/evidence scoring",
+    )
     args = parser.parse_args()
 
     dataset_dir = Path(args.dataset_dir).resolve()
@@ -362,6 +612,7 @@ def main() -> int:
             fail_fast=args.fail_fast,
             forced_granularity=args.forced_granularity,
             run_tag=args.run_tag,
+            emit_annotatable_output=not args.skip_annotatable_output,
         )
     )
 

@@ -62,7 +62,7 @@ class HistoryLogsService:
     def list_logs(
         self,
         dataset: str = "data1",
-        screenshot_mode: str = "inline",
+        screenshot_mode: str = "proxy",
         screenshot_url_prefix: str = "",
     ) -> List[HistoryLogPayload]:
         """Return all cached history logs with inline screenshot payloads."""
@@ -173,10 +173,7 @@ class HistoryLogsService:
             details_data.get("screenshot_hashes"),
             len(original_screenshot_paths),
         )
-        should_resolve_screenshots = screenshot_mode == "inline" or self._has_missing_screenshot_hashes(
-            original_screenshot_paths,
-            screenshot_hashes,
-        )
+        should_resolve_screenshots = screenshot_mode == "inline"
         resolved_screenshot_paths = (
             [
                 self._resolve_screenshot_path(path_str, json_path=json_path)
@@ -191,12 +188,6 @@ class HistoryLogsService:
 
         if screenshot_hashes:
             screenshot_hashes = [self._normalize_screenshot_hash_value(value) for value in screenshot_hashes]
-
-        if should_resolve_screenshots and original_screenshot_paths:
-            screenshot_hashes = self._populate_missing_screenshot_hashes(
-                screenshot_hashes,
-                resolved_screenshot_paths,
-            )
 
         if screenshot_mode == "inline":
             for path_str, resolved_path in zip(original_screenshot_paths, resolved_screenshot_paths):

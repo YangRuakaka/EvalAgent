@@ -120,8 +120,7 @@ const extractActionTypes = (actionPayload) => {
 const SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 
 const extractMimeType = (raw, metadata) => {
-	// 后端不返回 MIME 类型，始终使用 image/png 作为默认值
-	// 因为所有 screenshots 都是 PNG/JPG 格式
+	// 后端使用 URL/proxy 传图时不提供 MIME，base64 回退场景统一默认 image/png
 	return 'image/png';
 };
 
@@ -156,6 +155,36 @@ const runWithConcurrencyLimit = async (items, concurrency, worker) => {
 
 	return results;
 };
+
+const preloadImageSource = (src) => new Promise((resolve) => {
+	if (typeof src !== 'string' || !src.trim()) {
+		resolve(false);
+		return;
+	}
+
+	const image = new Image();
+	let settled = false;
+	const finish = (ok) => {
+		if (settled) {
+			return;
+		}
+		settled = true;
+		resolve(ok);
+	};
+
+	image.crossOrigin = 'Anonymous';
+	image.decoding = 'async';
+	image.referrerPolicy = 'no-referrer';
+	image.onload = () => finish(true);
+	image.onerror = () => finish(false);
+
+	window.setTimeout(() => finish(false), 12000);
+	image.src = src;
+
+	if (image.complete && image.naturalWidth !== 0) {
+		finish(true);
+	}
+});
 
 const isLikelyBase64Image = (value) => {
 	if (!value || typeof value !== 'string') {
@@ -238,7 +267,7 @@ const normalizeScreenshot = (raw, metadata) => {
 		delete normalizedMetadata.persona;
 	}
 
-	// 后端只返回 base64 string，无需处理 object 格式
+	// 当前后端返回 URL/proxy 字符串；这里保留字符串路径解析
 	if (typeof raw === 'string') {
 		const src = resolveImageSource(raw, null, normalizedMetadata);
 		const imageHash = extractScreenshotHash(raw, normalizedMetadata);
@@ -382,6 +411,7 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const sequences = extractScreenshotSequences(trajectory);
 	const conditions = Array.isArray(options.conditions) ? options.conditions : [];
 	const useImageHash = options.useImageHash !== false;
+	const strictHashMatch = options.strictHashMatch === true;
 	const hashOptions = options.hash || {};
 	const hashSize = Number.isFinite(hashOptions.hashSize) && hashOptions.hashSize > 0
 		? Math.floor(hashOptions.hashSize)
@@ -389,7 +419,7 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const perceptualHashLength = Math.ceil((hashSize * hashSize) / 4);
 	const hashSimilarityThreshold = Number.isFinite(options.hashSimilarityThreshold) && options.hashSimilarityThreshold >= 0
 		? Math.floor(options.hashSimilarityThreshold)
-		: Math.max(8, Math.round((hashSize * hashSize) * 0.09));
+		: (strictHashMatch ? 0 : Math.max(8, Math.round((hashSize * hashSize) * 0.09)));
 	const usePreviewImage = options.usePreviewImage !== false;
 	const previewConcurrency = Number.isFinite(options.previewConcurrency) && options.previewConcurrency > 0
 		? Math.floor(options.previewConcurrency)
@@ -442,6 +472,11 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 			return canonicalHashMap.get(normalizedHash);
 		}
 
+		if (strictHashMatch) {
+			canonicalHashMap.set(normalizedHash, normalizedHash);
+			return normalizedHash;
+		}
+
 		if (normalizedHash.length !== perceptualHashLength) {
 			canonicalHashMap.set(normalizedHash, normalizedHash);
 			return normalizedHash;
@@ -472,6 +507,21 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 		}
 	});
 
+	if (useImageHash && hashTasks.length > 0) {
+		await runWithConcurrencyLimit(
+			hashTasks,
+			hashConcurrency,
+			async (task) => {
+				const src = coerceText(task?.screenshot?.src);
+				if (!src) {
+					return null;
+				}
+				await preloadImageSource(src);
+				return null;
+			},
+		);
+	}
+
 	const hashedTasks = await runWithConcurrencyLimit(
 		hashTasks,
 		hashConcurrency,
@@ -480,20 +530,50 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 				return { ...task, hash: null };
 			}
 
-			const providedHash = normalizeHashValue(task?.screenshot?.imageHash);
-			if (providedHash) {
-				return { ...task, hash: providedHash };
+			const src = coerceText(task?.screenshot?.src);
+			if (!src) {
+				return { ...task, hash: null };
 			}
 
-			const hash = await computeImageHash(task.screenshot.src, options.hash);
+			const hash = await computeImageHash(src, options.hash);
 			return { ...task, hash: normalizeHashValue(hash) };
 		},
 	);
+
+	const validHashCount = hashedTasks.reduce((count, task) => (
+		normalizeHashValue(task?.hash) ? count + 1 : count
+	), 0);
+	if (useImageHash && hashedTasks.length > 0 && validHashCount < hashedTasks.length) {
+		const failedSources = hashedTasks
+			.filter((task) => !normalizeHashValue(task?.hash))
+			.map((task) => task?.screenshot?.src)
+			.filter((src) => typeof src === 'string' && src.trim())
+			.slice(0, 5);
+		console.warn('[trajectory] Some screenshots failed to produce content hash; those nodes cannot be merged by image.', {
+			total: hashedTasks.length,
+			valid: validHashCount,
+			missing: hashedTasks.length - validHashCount,
+			failedSources,
+		});
+	}
 
 	const hashByOccurrence = new Map();
 	hashedTasks.forEach((task) => {
 		hashByOccurrence.set(`${task.sequenceIndex}-${task.position}`, resolveCanonicalHash(task.hash));
 	});
+
+	if (useImageHash && hashByOccurrence.size > 0) {
+		const uniqueHashes = new Set();
+		hashByOccurrence.forEach((value) => {
+			if (value) {
+				uniqueHashes.add(value);
+			}
+		});
+		console.debug('[trajectory] Image hash merge stats', {
+			totalScreenshots: hashByOccurrence.size,
+			uniqueHashes: uniqueHashes.size,
+		});
+	}
 
 	sequences.forEach((sequence, sequenceIndex) => {
 		const screenshots = sequence.screenshots;

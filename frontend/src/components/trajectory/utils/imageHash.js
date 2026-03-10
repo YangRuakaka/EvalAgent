@@ -165,6 +165,27 @@ const computeImageHashViaWorker = (src, size, borderIgnoreRatio) => {
 	});
 };
 
+const normalizeHashSource = (src) => {
+	if (typeof src !== 'string') {
+		return '';
+	}
+
+	const trimmed = src.trim();
+	if (!trimmed) {
+		return '';
+	}
+
+	if (typeof window === 'undefined' || !window.location) {
+		return trimmed;
+	}
+
+	try {
+		return new URL(trimmed, window.location.href).toString();
+	} catch {
+		return trimmed;
+	}
+};
+
 const bufferToHex = (buffer) => {
 	const bytes = new Uint8Array(buffer);
 	const hex = [];
@@ -263,55 +284,80 @@ const computeAverageHash = (image, size, borderIgnoreRatio = DEFAULT_BORDER_IGNO
 	return hash.padEnd(Math.ceil((dimension * dimension) / chunkSize), '0');
 };
 
-const hashStringFallback = async (value) => {
-	if (!value) {
-		return '0';
+const hashBinaryContent = async (src) => {
+	if (!src) {
+		return null;
 	}
 
-	if (typeof window !== 'undefined' && window.crypto?.subtle) {
-		try {
-			const encoder = new TextEncoder();
-			const buffer = encoder.encode(value);
+	try {
+		const response = await fetch(src);
+		if (!response.ok) {
+			return null;
+		}
+
+		const buffer = await response.arrayBuffer();
+		if (!buffer || buffer.byteLength === 0) {
+			return null;
+		}
+
+		if (typeof window !== 'undefined' && window.crypto?.subtle) {
 			const digest = await window.crypto.subtle.digest('SHA-1', buffer);
 			return bufferToHex(digest);
-		} catch (error) {
-			// fall through to manual hash
 		}
+
+		const bytes = new Uint8Array(buffer);
+		let hash = 0;
+		for (let i = 0; i < bytes.length; i += 1) {
+			hash = (hash << 5) - hash + bytes[i];
+			hash |= 0;
+		}
+
+		return Math.abs(hash).toString(16);
+	} catch {
+		return null;
 	}
-
-	let hash = 0;
-
-	for (let i = 0; i < value.length; i += 1) {
-		hash = (hash << 5) - hash + value.charCodeAt(i);
-		hash |= 0;
-	}
-
-	return Math.abs(hash).toString(16);
 };
 
 export const computeImageHash = async (src, options = {}) => {
+	const normalizedSrc = normalizeHashSource(src);
+	if (!normalizedSrc) {
+		return null;
+	}
+
+	const contentKey = `${normalizedSrc}::content-sha1`;
+	if (hashCache.has(contentKey)) {
+		return hashCache.get(contentKey);
+	}
+
+	const contentHash = await hashBinaryContent(normalizedSrc);
+	if (contentHash) {
+		const normalizedContentHash = `sha1-${contentHash}`;
+		hashCache.set(contentKey, normalizedContentHash);
+		return normalizedContentHash;
+	}
+
 	const size = options.hashSize || DEFAULT_HASH_SIZE;
 	const borderIgnoreRatio = Number.isFinite(options.borderIgnoreRatio)
 		? Math.min(Math.max(options.borderIgnoreRatio, 0), 0.3)
 		: DEFAULT_BORDER_IGNORE_RATIO;
-	const key = `${src}::${size}::${borderIgnoreRatio}`;
+	const key = `${normalizedSrc}::${size}::${borderIgnoreRatio}`;
 
 	if (hashCache.has(key)) {
 		return hashCache.get(key);
 	}
 
 	try {
-		const hash = await computeImageHashViaWorker(src, size, borderIgnoreRatio);
+		const hash = await computeImageHashViaWorker(normalizedSrc, size, borderIgnoreRatio);
 		hashCache.set(key, hash);
 		return hash;
 	} catch (error) {
 		try {
-			const image = await loadImage(src);
+			const image = await loadImage(normalizedSrc);
 			const hash = computeAverageHash(image, size, borderIgnoreRatio);
 			hashCache.set(key, hash);
 			return hash;
 		} catch (mainThreadError) {
-			const fallback = await hashStringFallback(src);
+			const fallback = await hashBinaryContent(normalizedSrc);
 			hashCache.set(key, fallback);
 			return fallback;
 		}

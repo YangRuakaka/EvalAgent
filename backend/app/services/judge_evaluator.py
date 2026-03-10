@@ -659,32 +659,40 @@ class JudgeEvaluatorService:
         response_text = response.content if hasattr(response, "content") else str(response)
         response_data = self._extract_json_object(response_text) or {}
 
+        dimensions = response_data.get("evaluation_dimensions", [])
+        if not isinstance(dimensions, list) or not dimensions:
+            dimensions = [
+                {
+                    "dimension_name": "Criterion Alignment",
+                    "description": criterion_assertion,
+                    "why_relevant": "Directly derived from criterion assertion",
+                }
+            ]
+
         focus_points = response_data.get("focus_points", [])
         if not isinstance(focus_points, list):
             focus_points = []
 
-        phase_relevance_rules = response_data.get("phase_relevance_rules", [])
-        if not isinstance(phase_relevance_rules, list):
-            phase_relevance_rules = []
+        phase_selection_heuristics = response_data.get("phase_selection_heuristics", [])
+        if not isinstance(phase_selection_heuristics, list):
+            phase_selection_heuristics = []
 
-        strict_evidence_principles = response_data.get("strict_evidence_principles", [])
-        if not isinstance(strict_evidence_principles, list):
-            strict_evidence_principles = []
+        pass_signals = response_data.get("pass_signals", [])
+        if not isinstance(pass_signals, list):
+            pass_signals = []
 
-        criteria_interpretation = str(response_data.get("criteria_interpretation", "")).strip()
-        if not criteria_interpretation:
-            criteria_interpretation = (
-                f"Judge whether agent behavior satisfies criterion '{criterion_name}' by verifying"
-                f" action-result chains under assertion: {criterion_assertion}."
-            )
+        fail_signals = response_data.get("fail_signals", [])
+        if not isinstance(fail_signals, list):
+            fail_signals = []
 
         return {
             "criterion_intent": str(response_data.get("criterion_intent", criterion_assertion)),
             "persona_task_alignment": str(response_data.get("persona_task_alignment", "")),
-            "criteria_interpretation": criteria_interpretation,
-            "phase_relevance_rules": phase_relevance_rules,
-            "strict_evidence_principles": strict_evidence_principles,
+            "evaluation_dimensions": dimensions,
             "focus_points": focus_points,
+            "phase_selection_heuristics": phase_selection_heuristics,
+            "pass_signals": pass_signals,
+            "fail_signals": fail_signals,
         }
 
     async def _segment_phases_by_dimensions_async(
@@ -754,14 +762,14 @@ class JudgeEvaluatorService:
         criterion_name: str,
         criterion_assertion: str,
         criterion_intent: str,
-        criteria_interpretation: str,
         persona_task_alignment: str,
-        phase_relevance_rules: List[str],
-        strict_evidence_principles: List[str],
+        pass_signals: List[str],
+        fail_signals: List[str],
         global_behavior_summary: str,
         task_name: str,
         personas: List[str],
         models: List[str],
+        evaluation_dimensions: List[Dict[str, Any]],
         phase: Dict[str, Any],
         all_steps: List[Dict[str, Any]],
         model_name: Optional[str],
@@ -786,11 +794,11 @@ class JudgeEvaluatorService:
             "criterion_name": criterion_name,
             "criterion_assertion": criterion_assertion,
             "criterion_intent": criterion_intent,
-            "criteria_interpretation": criteria_interpretation,
             "persona_task_alignment": persona_task_alignment,
-            "phase_relevance_rules": json.dumps(phase_relevance_rules or [], ensure_ascii=False),
-            "strict_evidence_principles": json.dumps(strict_evidence_principles or [], ensure_ascii=False),
+            "pass_signals": json.dumps(pass_signals, ensure_ascii=False),
+            "fail_signals": json.dumps(fail_signals, ensure_ascii=False),
             "global_behavior_summary": global_behavior_summary,
+            "evaluation_dimensions": json.dumps(evaluation_dimensions, ensure_ascii=False, indent=2),
             "phase_id": phase_id,
             "phase_summary": phase_summary,
             "phase_steps_context": self._build_phase_steps_context(all_steps, step_indices),
@@ -801,35 +809,6 @@ class JudgeEvaluatorService:
         response = await asyncio.to_thread(chain.invoke, invoke_dict)
         response_text = response.content if hasattr(response, "content") else str(response)
         token_prediction_confidence = self._extract_token_prediction_confidence(response)
-        response_data = self._extract_json_object(response_text) or {}
-        raw_phase_relevance = response_data.get("phase_relevance", None)
-        if isinstance(raw_phase_relevance, bool):
-            phase_relevance = raw_phase_relevance
-        else:
-            phase_relevance = self._normalize_verdict(response_data.get("verdict", "UNABLE_TO_EVALUATE")) != "UNABLE_TO_EVALUATE"
-        phase_relevance_reasoning = str(response_data.get("phase_relevance_reasoning", "")).strip()
-
-        if not phase_relevance:
-            not_relevant_result = EvaluationResult(
-                criterion_name=criterion_name,
-                verdict="UNABLE_TO_EVALUATE",
-                reasoning=phase_relevance_reasoning or f"Phase '{phase_id}' is not materially relevant to criterion '{criterion_name}'.",
-                confidence_score=self._clip_confidence(0.45 if token_prediction_confidence is None else 0.45 * 0.7 + token_prediction_confidence * 0.3),
-                relevant_steps=[],
-                aggregated_step_summary=f"{phase_id}: {phase_summary}"[:500],
-                used_granularity=Granularity.PHASE_LEVEL,
-                highlighted_evidence=[],
-                llm_token_prediction_confidence=token_prediction_confidence,
-            )
-            return not_relevant_result.model_copy(
-                update={
-                    "phase_relevance": False,
-                    "phase_relevance_reasoning": phase_relevance_reasoning,
-                    "phase_id": phase_id,
-                    "phase_summary": phase_summary,
-                    "phase_step_indices": step_indices,
-                }
-            )
 
         phase_agg = AggregatedSteps(
             granularity=Granularity.PHASE_LEVEL,
@@ -841,37 +820,40 @@ class JudgeEvaluatorService:
             response_text=response_text,
             criterion_name=criterion_name,
             aggregated_steps=phase_agg,
-            all_steps=None,
+            all_steps=all_steps,
             model_name=model_name,
         )
-
-        step_scope = set(step_indices)
-        evidence_candidates = [
-            item
-            for item in (result.highlighted_evidence or [])
-            if isinstance(item.step_index, int) and item.step_index in step_scope
-        ]
-        result = result.model_copy(update={"highlighted_evidence": evidence_candidates})
+        result.highlighted_evidence = await self._expand_phase_evidence_if_needed_async(
+            base_evidence=result.highlighted_evidence or [],
+            criterion_name=criterion_name,
+            criterion_assertion=criterion_assertion,
+            task_name=task_name,
+            phase_id=phase_id,
+            phase_summary=phase_summary,
+            step_indices=step_indices,
+            all_steps=all_steps,
+            model_name=model_name,
+        )
+        dimension_assessments: List[Dict[str, Any]] = []
+        if isinstance(result.model_extra, dict):
+            raw_dimensions = result.model_extra.get("dimension_assessments", [])
+            if isinstance(raw_dimensions, list):
+                dimension_assessments = [item for item in raw_dimensions if isinstance(item, dict)]
 
         calibrated_confidence = self._calibrate_phase_confidence(
             raw_confidence=float(result.confidence_score or 0.0),
             verdict=result.verdict,
-            evidence_list=evidence_candidates,
+            evidence_list=result.highlighted_evidence or [],
             relevant_steps=[s for s in (result.relevant_steps or []) if isinstance(s, int)],
             phase_step_indices=step_indices,
-            dimension_assessments=[],
+            dimension_assessments=dimension_assessments,
             reasoning=result.reasoning,
             token_prediction_confidence=token_prediction_confidence,
         )
 
         update_payload: Dict[str, Any] = {
             "confidence_score": calibrated_confidence,
-            "highlighted_evidence": self._curate_story_evidence(evidence_candidates, step_indices),
-            "phase_relevance": True,
-            "phase_relevance_reasoning": phase_relevance_reasoning,
-            "phase_id": phase_id,
-            "phase_summary": phase_summary,
-            "phase_step_indices": step_indices,
+            "highlighted_evidence": self._curate_story_evidence(result.highlighted_evidence or [], step_indices),
         }
         if token_prediction_confidence is not None:
             update_payload["llm_token_prediction_confidence"] = token_prediction_confidence
@@ -923,26 +905,29 @@ class JudgeEvaluatorService:
                 global_overview=global_overview,
                 model_name=model_name,
             )
+            dimensions = interpreted.get("evaluation_dimensions", [])
             criterion_intent = str(interpreted.get("criterion_intent", criterion_assertion))
             persona_task_alignment = str(interpreted.get("persona_task_alignment", ""))
-            criteria_interpretation = str(interpreted.get("criteria_interpretation", criterion_assertion))
-            phase_relevance_rules = interpreted.get("phase_relevance_rules", [])
-            strict_evidence_principles = interpreted.get("strict_evidence_principles", [])
+            pass_signals = interpreted.get("pass_signals", [])
+            fail_signals = interpreted.get("fail_signals", [])
+            phase_selection_heuristics = interpreted.get("phase_selection_heuristics", [])
 
-            phases = global_overview.get("phases", []) if isinstance(global_overview, dict) else []
-            if not isinstance(phases, list):
-                phases = []
-            target_phases = [phase for phase in phases if isinstance(phase, dict)]
+            segmentation = await self._segment_phases_by_dimensions_async(
+                criterion_name=criterion_name,
+                criterion_assertion=criterion_assertion,
+                task_name=task_name,
+                criterion_intent=criterion_intent,
+                phase_selection_heuristics=phase_selection_heuristics,
+                global_overview=global_overview,
+                evaluation_dimensions=dimensions,
+                all_steps=all_steps,
+                model_name=model_name,
+            )
+            phases = segmentation.get("phases", [])
+            relevant_ids = set(segmentation.get("relevant_phase_ids", []))
+            target_phases = [phase for phase in phases if str(phase.get("phase_id")) in relevant_ids]
             if not target_phases:
-                target_phases = [
-                    {
-                        "phase_id": "phase_0",
-                        "semantic_label": "Complete Execution",
-                        "step_indices": list(range(len(all_steps))),
-                        "phase_summary": f"Complete execution with {len(all_steps)} steps",
-                        "relevant_to_evaluation": True,
-                    }
-                ]
+                target_phases = phases
 
             configured_step_limit = (
                 int(step_max_concurrency)
@@ -957,14 +942,14 @@ class JudgeEvaluatorService:
                         criterion_name=criterion_name,
                         criterion_assertion=criterion_assertion,
                         criterion_intent=criterion_intent,
-                        criteria_interpretation=criteria_interpretation,
                         persona_task_alignment=persona_task_alignment,
-                        phase_relevance_rules=phase_relevance_rules if isinstance(phase_relevance_rules, list) else [],
-                        strict_evidence_principles=strict_evidence_principles if isinstance(strict_evidence_principles, list) else [],
+                        pass_signals=pass_signals if isinstance(pass_signals, list) else [],
+                        fail_signals=fail_signals if isinstance(fail_signals, list) else [],
                         global_behavior_summary=str(global_overview.get("overall_behavior_summary", "")),
                         task_name=task_name,
                         personas=personas,
                         models=models,
+                        evaluation_dimensions=dimensions,
                         phase=phase,
                         all_steps=all_steps,
                         model_name=model_name,
@@ -982,98 +967,41 @@ class JudgeEvaluatorService:
                     used_granularity=Granularity.PHASE_LEVEL,
                 )
 
-            relevant_phase_results: List[EvaluationResult] = []
-            phase_summary_by_step: Dict[int, str] = {}
-            phase_verdict_by_step: Dict[int, str] = {}
-
-            for phase, result in zip(target_phases, phase_results):
-                step_indices = [idx for idx in phase.get("step_indices", []) if isinstance(idx, int)]
-                phase_summary = str(phase.get("phase_summary", ""))
-                for step_idx in step_indices:
-                    phase_summary_by_step[step_idx] = phase_summary
-
-                model_extra = result.model_extra if isinstance(result.model_extra, dict) else {}
-                if bool(model_extra.get("phase_relevance", False)):
-                    relevant_phase_results.append(result)
-                    normalized_phase_verdict = self._normalize_verdict(result.verdict)
-                    for step_idx in step_indices:
-                        phase_verdict_by_step[step_idx] = normalized_phase_verdict
-
-            overall_verdict, overall_reasoning, overall_confidence = self._derive_overall_from_phase_verdicts(
+            final = await self._synthesize_overall_from_phase_results_async(
                 criterion_name=criterion_name,
                 criterion_assertion=criterion_assertion,
-                relevant_phase_results=relevant_phase_results,
-            )
-
-            evidence_candidates: List[EvidenceCitation] = []
-            for result in relevant_phase_results:
-                evidence_candidates.extend(result.highlighted_evidence or [])
-
-            strict_supporting_candidates = self._select_strong_evidence_supporting_overall(
-                evidence_candidates=evidence_candidates,
-                overall_verdict=overall_verdict,
-                phase_verdict_by_step=phase_verdict_by_step,
-                max_items=8,
-            )
-
-            grounded_supporting_evidence = self._filter_grounded_evidence(
-                evidence_list=strict_supporting_candidates,
+                criterion_description=criterion_description or "",
+                task_name=task_name,
+                personas=personas,
+                models=models,
+                criterion_intent=criterion_intent,
+                persona_task_alignment=persona_task_alignment,
+                evaluation_dimensions=dimensions,
+                global_behavior_summary=str(global_overview.get("overall_behavior_summary", "")),
+                phase_results=phase_results,
+                target_phases=target_phases,
+                model_name=model_name or "gpt-4o-mini",
                 all_steps=all_steps,
-                criterion_name=criterion_name,
-                model_name=model_name,
-                allow_llm_repair=False,
             )
 
-            rewritten_evidence = [
-                self._rewrite_evidence_reasoning_for_overall(
-                    evidence=item,
+            if final.verdict == "UNABLE_TO_EVALUATE" and len(phase_results) > 1:
+                final = self._merge_evaluation_results(
+                    results=phase_results,
                     criterion_name=criterion_name,
+                    granularity=Granularity.PHASE_LEVEL,
                     criterion_assertion=criterion_assertion,
-                    overall_verdict=overall_verdict,
-                    phase_summary_by_step=phase_summary_by_step,
+                    model_name=model_name or "gpt-4o-mini",
                 )
-                for item in grounded_supporting_evidence
-            ]
-            curated_evidence = self._curate_story_evidence(
-                rewritten_evidence,
-                sorted({int(item.step_index) for item in rewritten_evidence if isinstance(item.step_index, int)}),
-            )
+            elif final.verdict == "UNABLE_TO_EVALUATE" and len(phase_results) == 1:
+                final = phase_results[0]
 
-            relevant_steps = sorted({int(item.step_index) for item in curated_evidence if isinstance(item.step_index, int)})
-            if not relevant_steps:
-                relevant_steps = sorted(
-                    {
-                        int(step)
-                        for phase in target_phases
-                        for step in phase.get("step_indices", [])
-                        if isinstance(step, int)
-                    }
-                )[:8]
-
-            phase_agreement = self._calculate_phase_verdict_agreement(relevant_phase_results)
-            evidence_quality = self._calculate_evidence_quality(curated_evidence, relevant_steps)
-            final_confidence = self._clip_confidence(
-                0.50 * overall_confidence + 0.25 * phase_agreement + 0.25 * evidence_quality
-            )
-
-            final = EvaluationResult(
-                criterion_name=criterion_name,
-                verdict=self._normalize_binary_verdict(overall_verdict),
-                reasoning=overall_reasoning,
-                confidence_score=final_confidence,
-                relevant_steps=relevant_steps,
-                aggregated_step_summary=(
-                    f"Fast relevance-first phase pipeline. total_phases={len(target_phases)}, "
-                    f"relevant_phases={len(relevant_phase_results)}, evidence_candidates={len(evidence_candidates)}, "
-                    f"strict_grounded_evidence={len(curated_evidence)}"
-                )[:500],
-                used_granularity=Granularity.PHASE_LEVEL,
-                supporting_evidence=(
-                    f"Selected {len(curated_evidence)} strict grounded evidence snippets that support overall "
-                    f"{self._normalize_binary_verdict(overall_verdict)}."
-                ),
-                highlighted_evidence=curated_evidence,
-            )
+            final.aggregated_step_summary = (
+                f"Global-first phase evaluation. Relevant phases: {list(relevant_ids)}. "
+                f"Global reasoning: {str(global_overview.get('global_reasoning', ''))}. "
+                f"Segmentation reasoning: {segmentation.get('segmentation_reasoning', '')}"
+            )[:500]
+            final.used_granularity = Granularity.PHASE_LEVEL
+            final = final.model_copy(update={"verdict": self._normalize_binary_verdict(final.verdict)})
             return final
         except Exception as exc:
             logger.error("Unified criterion evaluation failed for '%s': %s", criterion_name, exc)
@@ -1252,7 +1180,6 @@ class JudgeEvaluatorService:
         all_steps: List[Dict[str, Any]],
         criterion_name: str,
         model_name: Optional[str] = None,
-        allow_llm_repair: bool = False,
     ) -> Optional[EvidenceCitation]:
         requested = (evidence.highlighted_text or "").strip()
         if not requested:
@@ -1277,15 +1204,14 @@ class JudgeEvaluatorService:
                 if matched:
                     return evidence.model_copy(update={"step_index": candidate_step_index, "highlighted_text": matched})
 
-            if allow_llm_repair:
-                repaired = self._repair_evidence_with_llm(
-                    evidence=evidence.model_copy(update={"step_index": candidate_step_index}),
-                    step_obj=all_steps[candidate_step_index],
-                    criterion_name=criterion_name,
-                    model_name=model_name,
-                )
-                if repaired is not None:
-                    return repaired
+            repaired = self._repair_evidence_with_llm(
+                evidence=evidence.model_copy(update={"step_index": candidate_step_index}),
+                step_obj=all_steps[candidate_step_index],
+                criterion_name=criterion_name,
+                model_name=model_name,
+            )
+            if repaired is not None:
+                return repaired
 
         unique_match = self._locate_unique_evidence_match(requested, source_field, all_steps)
         if unique_match is None:
@@ -1302,7 +1228,6 @@ class JudgeEvaluatorService:
         all_steps: List[Dict[str, Any]],
         criterion_name: str,
         model_name: Optional[str] = None,
-        allow_llm_repair: bool = False,
     ) -> List[EvidenceCitation]:
         grounded: List[EvidenceCitation] = []
         seen_keys = set()
@@ -1314,7 +1239,6 @@ class JudgeEvaluatorService:
                     all_steps,
                     criterion_name=criterion_name,
                     model_name=model_name,
-                    allow_llm_repair=allow_llm_repair,
                 )
                 if grounded_item is None:
                     continue
@@ -1411,163 +1335,6 @@ class JudgeEvaluatorService:
             return []
         high_signal = [item for item in evidence_list if self._is_high_signal_evidence(item)]
         return high_signal or evidence_list
-
-    def _derive_overall_from_phase_verdicts(
-        self,
-        criterion_name: str,
-        criterion_assertion: str,
-        relevant_phase_results: List[EvaluationResult],
-    ) -> tuple[str, str, float]:
-        if not relevant_phase_results:
-            return (
-                "FAIL",
-                f"No criterion-relevant phases found for '{criterion_name}', so criterion '{criterion_assertion}' cannot be supported.",
-                0.35,
-            )
-
-        pass_count = 0
-        fail_count = 0
-        partial_count = 0
-        unable_count = 0
-        weighted_score = 0.0
-        weight_total = 0.0
-
-        for result in relevant_phase_results:
-            verdict = self._normalize_verdict(result.verdict)
-            confidence = self._clip_confidence(result.confidence_score)
-            weight = max(0.35, confidence)
-
-            if verdict == "PASS":
-                pass_count += 1
-                weighted_score += 1.0 * weight
-            elif verdict == "FAIL":
-                fail_count += 1
-                weighted_score += -1.0 * weight
-            elif verdict == "PARTIAL":
-                partial_count += 1
-                weighted_score += 0.0
-            else:
-                unable_count += 1
-                weighted_score += -0.25 * weight
-
-            weight_total += weight
-
-        normalized_weighted = (weighted_score / weight_total) if weight_total > 0 else -1.0
-        final_verdict = "PASS" if (pass_count >= fail_count and normalized_weighted >= -0.1) else "FAIL"
-
-        verdict_reasoning = (
-            f"Overall criterion verdict for '{criterion_name}' is {final_verdict}, based on phase-level outcomes "
-            f"against assertion '{criterion_assertion}'. Relevant phases: PASS={pass_count}, FAIL={fail_count}, "
-            f"PARTIAL={partial_count}, UNABLE={unable_count}."
-        )
-        confidence = self._clip_confidence(0.45 + 0.40 * abs(normalized_weighted) + 0.15 * (pass_count + fail_count) / max(1, len(relevant_phase_results)))
-        return final_verdict, verdict_reasoning, confidence
-
-    def _evidence_supports_overall(
-        self,
-        evidence: EvidenceCitation,
-        overall_verdict: str,
-        phase_verdict: Optional[str] = None,
-    ) -> bool:
-        overall = self._normalize_verdict(overall_verdict)
-        evidence_verdict = self._normalize_verdict(evidence.verdict) if evidence.verdict else "UNABLE_TO_EVALUATE"
-        phase_normalized = self._normalize_verdict(phase_verdict) if phase_verdict else "UNABLE_TO_EVALUATE"
-
-        if overall == "PASS":
-            if evidence_verdict == "PASS" or phase_normalized == "PASS":
-                return True
-            return False
-
-        if overall == "FAIL":
-            if evidence_verdict == "FAIL" or phase_normalized == "FAIL":
-                return True
-            return False
-
-        return False
-
-    def _select_strong_evidence_supporting_overall(
-        self,
-        evidence_candidates: List[EvidenceCitation],
-        overall_verdict: str,
-        phase_verdict_by_step: Dict[int, str],
-        max_items: int = 8,
-    ) -> List[EvidenceCitation]:
-        if not evidence_candidates:
-            return []
-
-        unique: List[EvidenceCitation] = []
-        seen = set()
-        for evidence in evidence_candidates:
-            text = (evidence.highlighted_text or "").strip()
-            if not text:
-                continue
-            source_field = evidence.source_field.value if hasattr(evidence.source_field, "value") else str(evidence.source_field)
-            key = (int(evidence.step_index), source_field, self._normalize_text_for_match(text))
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(evidence)
-
-        ranked_items: List[tuple[float, EvidenceCitation]] = []
-        for evidence in unique:
-            step_idx = int(evidence.step_index)
-            phase_verdict = phase_verdict_by_step.get(step_idx)
-            supports_overall = self._evidence_supports_overall(evidence, overall_verdict, phase_verdict)
-            if not supports_overall:
-                continue
-
-            if not self._is_high_signal_evidence(evidence):
-                continue
-
-            base_score = self._score_evidence_item(evidence)
-            text = (evidence.highlighted_text or "").strip()
-            is_too_short = len(text) < 14
-            if is_too_short:
-                continue
-
-            support_bonus = 0.20
-            if evidence.verdict and self._normalize_verdict(evidence.verdict) == self._normalize_verdict(overall_verdict):
-                support_bonus += 0.10
-
-            final_score = self._clip_confidence(base_score + support_bonus)
-            if final_score < 0.68:
-                continue
-            ranked_items.append((final_score, evidence))
-
-        if not ranked_items:
-            return []
-
-        ranked_items.sort(key=lambda item: item[0], reverse=True)
-        selected: List[EvidenceCitation] = []
-        per_step_count: Dict[int, int] = {}
-        for _, evidence in ranked_items:
-            step_idx = int(evidence.step_index)
-            if per_step_count.get(step_idx, 0) >= 2:
-                continue
-            selected.append(evidence)
-            per_step_count[step_idx] = per_step_count.get(step_idx, 0) + 1
-            if len(selected) >= max_items:
-                break
-
-        return selected
-
-    def _rewrite_evidence_reasoning_for_overall(
-        self,
-        evidence: EvidenceCitation,
-        criterion_name: str,
-        criterion_assertion: str,
-        overall_verdict: str,
-        phase_summary_by_step: Dict[int, str],
-    ) -> EvidenceCitation:
-        step_idx = int(evidence.step_index)
-        phase_summary = phase_summary_by_step.get(step_idx, "")
-        orientation = "supports" if self._normalize_verdict(overall_verdict) == "PASS" else "indicates violation against"
-        summary_clause = f" within phase context '{phase_summary[:120]}'" if phase_summary else ""
-        reasoning = (
-            f"This evidence {orientation} criterion '{criterion_name}' ({criterion_assertion})"
-            f"{summary_clause}, and directly contributes to the overall {overall_verdict} assessment."
-        )
-        return evidence.model_copy(update={"reasoning": reasoning, "verdict": overall_verdict.lower()})
 
     async def _expand_phase_evidence_if_needed_async(
         self,
@@ -2059,7 +1826,7 @@ class JudgeEvaluatorService:
             GranularityRequirement(
                 criterion_name=criterion.get("name", "unknown"),
                 required_granularity=Granularity.PHASE_LEVEL,
-                rationale="Unified architecture uses relevance-first phase evaluation with strict evidence grounding.",
+                rationale="Unified architecture uses single dimension-driven phase evaluation path.",
                 target_cluster_indices=[],
                 target_step_indices=[],
             )
@@ -2077,7 +1844,7 @@ class JudgeEvaluatorService:
                 "evaluator_model": evaluator_model,
                 "total_steps": len(all_steps),
                 "architecture": "unified",
-                "pipeline_style": "global-phase-relevance-strict-evidence",
+                "pipeline_style": "global-phase-global",
                 "global_behavior_summary": str(global_overview.get("overall_behavior_summary", ""))[:1000],
             },
         )

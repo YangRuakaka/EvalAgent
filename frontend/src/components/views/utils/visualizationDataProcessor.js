@@ -13,6 +13,41 @@ const toObject = (value) => {
 	return {};
 };
 
+const SCREENSHOT_CACHE_BUST_TOKEN = 'corsfix-20260310';
+
+const appendCacheBustToScreenshotUrl = (value) => {
+	if (typeof value !== 'string') {
+		return value;
+	}
+
+	const trimmed = value.trim();
+	if (!trimmed || trimmed.startsWith('data:')) {
+		return value;
+	}
+
+	const isAbsoluteHttp = /^https?:\/\//i.test(trimmed);
+	const isRelativePath = trimmed.startsWith('/');
+	if (!isAbsoluteHttp && !isRelativePath) {
+		return value;
+	}
+
+	try {
+		const normalized = isAbsoluteHttp
+			? new URL(trimmed)
+			: new URL(trimmed, window.location.origin);
+
+		normalized.searchParams.set('_cb', SCREENSHOT_CACHE_BUST_TOKEN);
+		return isAbsoluteHttp
+			? normalized.toString()
+			: `${normalized.pathname}${normalized.search}${normalized.hash}`;
+	} catch {
+		const separator = trimmed.includes('?') ? '&' : '?';
+		return `${trimmed}${separator}_cb=${encodeURIComponent(SCREENSHOT_CACHE_BUST_TOKEN)}`;
+	}
+};
+
+const normalizeScreenshotList = (value) => toArray(value).map(appendCacheBustToScreenshotUrl);
+
 const extractRuns = (payload) => {
 	if (Array.isArray(payload)) {
 		return payload;
@@ -43,13 +78,16 @@ const extractRuns = (payload) => {
 
 const normalizeHistoryPayload = (run) => {
 	if (run.history_payload && typeof run.history_payload === 'object') {
-		return run.history_payload;
+		return {
+			...run.history_payload,
+			screenshots: normalizeScreenshotList(run.history_payload.screenshots),
+		};
 	}
 
 	const details = toObject(run.details);
 	if (Object.keys(details).length > 0) {
 		return {
-			screenshots: toArray(details.screenshots),
+			screenshots: normalizeScreenshotList(details.screenshots),
 			screenshot_paths: toArray(details.screenshot_paths),
 			screenshot_hashes: toArray(details.screenshot_hashes),
 			step_descriptions: toArray(details.step_descriptions),

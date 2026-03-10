@@ -429,12 +429,8 @@ async def _process_single_criterion(
         confidence = float(eval_result.confidence_score or 0.0)
 
         has_verdict_conflict = _has_verdict_conflict(overall_assessment, involved_steps_list)
-        enable_secondary_overall_assessment = bool(
-            getattr(settings, "JUDGE_EVALUATION_ENABLE_SECONDARY_OVERALL_ASSESSMENT", False)
-        )
         should_run_secondary_assessment = (
-            enable_secondary_overall_assessment
-            and (confidence < overall_assessment_confidence_threshold or has_verdict_conflict)
+            confidence < overall_assessment_confidence_threshold or has_verdict_conflict
         )
 
         if should_run_secondary_assessment:
@@ -461,9 +457,8 @@ async def _process_single_criterion(
             overall_assessment = _coerce_overall_assessment_to_binary(overall_assessment)
         else:
             logger.info(
-                "Skipping secondary overall assessment for criterion '%s' (enabled=%s, confidence=%.3f, threshold=%.3f, verdict_conflict=%s)",
+                "Skipping secondary overall assessment for criterion '%s' (confidence=%.3f, threshold=%.3f, verdict_conflict=%s)",
                 crit.title,
-                enable_secondary_overall_assessment,
                 confidence,
                 overall_assessment_confidence_threshold,
                 has_verdict_conflict,

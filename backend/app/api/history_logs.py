@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -17,6 +18,62 @@ from ..services.screenshot_hash_backfill import run_backfill
 router = APIRouter(prefix="/history-logs", tags=["history-logs"])
 _service = HistoryLogsService()
 logger = logging.getLogger(__name__)
+
+
+def _resolve_request_scheme(request: Request) -> str:
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").strip().lower()
+    if forwarded_proto:
+        first = forwarded_proto.split(",", maxsplit=1)[0].strip()
+        if first in {"http", "https"}:
+            return first
+
+    scheme = (request.url.scheme or "").strip().lower()
+    return scheme if scheme in {"http", "https"} else "https"
+
+
+def _force_url_scheme(url: str, scheme: str) -> str:
+    if scheme not in {"http", "https"}:
+        return url
+
+    if url.startswith("http://"):
+        return f"{scheme}://{url[len('http://') :]}"
+    if url.startswith("https://"):
+        return f"{scheme}://{url[len('https://') :]}"
+    return url
+
+
+def _origin_is_allowed(origin: str) -> bool:
+    candidate = str(origin or "").strip()
+    if not candidate:
+        return False
+
+    allow_origins = [str(item).strip() for item in (settings.CORS_ALLOW_ORIGINS or []) if str(item).strip()]
+    if candidate in allow_origins:
+        return True
+
+    for pattern in (settings.CORS_ALLOW_ORIGIN_REGEX, settings.CORS_ALLOW_LOCALHOST_REGEX):
+        raw_pattern = str(pattern or "").strip()
+        if not raw_pattern:
+            continue
+        try:
+            if re.fullmatch(raw_pattern, candidate):
+                return True
+        except re.error:
+            continue
+
+    return False
+
+
+def _build_cors_headers(request: Request) -> dict[str, str]:
+    origin = (request.headers.get("origin") or "").strip()
+    if not _origin_is_allowed(origin):
+        return {"Vary": "Origin"}
+
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    }
 
 
 def _parse_preload_datasets(raw_value: str) -> list[str]:
@@ -90,13 +147,16 @@ def preload_history_logs_cache() -> dict[str, object]:
 
 def _build_screenshot_url_prefix(request: Request) -> str:
     configured_base = (settings.PUBLIC_API_BASE_URL or "").strip()
+    request_scheme = _resolve_request_scheme(request)
+
     if configured_base:
-        normalized_base = configured_base.rstrip("/")
+        normalized_base = _force_url_scheme(configured_base.rstrip("/"), request_scheme)
         if normalized_base.endswith(settings.API_V1_PREFIX):
             return f"{normalized_base}/history-logs/screenshot"
         return f"{normalized_base}{settings.API_V1_PREFIX}/history-logs/screenshot"
 
-    return str(request.url_for("get_history_log_screenshot"))
+    generated = str(request.url_for("get_history_log_screenshot"))
+    return _force_url_scheme(generated, request_scheme)
 
 
 @router.get(
@@ -118,7 +178,7 @@ async def list_history_logs(
         pattern=r"^(data[123]|[123])$",
     ),
     screenshot_mode: str = Query(
-        "inline",
+        "proxy",
         description="Screenshot payload mode: inline (base64 data URI), proxy (URL), or none.",
         pattern=r"^(inline|proxy|none)$",
     ),
@@ -198,6 +258,7 @@ async def list_history_logs(
     summary="Serve cached screenshot file",
 )
 async def get_history_log_screenshot(
+    request: Request,
     path: str = Query(..., description="Screenshot path from history payload."),
     dataset: str = Query(
         "data1",
@@ -218,10 +279,14 @@ async def get_history_log_screenshot(
             raise HTTPException(status_code=404, detail="Screenshot not found")
 
         media_type, _ = mimetypes.guess_type(str(screenshot_file))
+        response_headers = {
+            "Cache-Control": "public, max-age=86400",
+            **_build_cors_headers(request),
+        }
         return FileResponse(
             path=screenshot_file,
             media_type=media_type or "application/octet-stream",
-            headers={"Cache-Control": "public, max-age=86400"},
+            headers=response_headers,
         )
     except HTTPException:
         raise

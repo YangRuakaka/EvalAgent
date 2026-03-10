@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
+from urllib.parse import quote
 
 from ..core.config import get_settings
 from ..core.storage_paths import get_browser_run_output_dir
@@ -129,6 +130,7 @@ class BrowserAgentService:
 
     def __init__(self) -> None:
         self._settings = get_settings()
+        self._backend_root = Path(__file__).resolve().parents[2]
         self._output_dir = get_browser_run_output_dir(self._settings)
         self._status_dir = (self._output_dir / "run_status").resolve()
         self._status_dir.mkdir(parents=True, exist_ok=True)
@@ -164,15 +166,12 @@ class BrowserAgentService:
             0,
             int(getattr(self._settings, "BROWSER_AGENT_MAX_SCREENSHOTS", 3)),
         )
-        self._include_screenshots_in_run_response = getattr(
-            self._settings,
-            "BROWSER_AGENT_INCLUDE_SCREENSHOTS_IN_RUN_RESPONSE",
-            False,
-        )
+        self._include_screenshots_in_run_response = False
         self._active_run_tasks: Dict[str, List[asyncio.Task[BrowserAgentRunResult]]] = {}
         self._active_runs_lock = asyncio.Lock()
         # Background run management
         self._run_store: Dict[str, dict] = {}
+        self._run_screenshot_url_prefixes: Dict[str, str] = {}
         self._background_run_tasks: Dict[str, asyncio.Task[None]] = {}
         self._run_runtime_stats: Dict[str, dict] = {}
         self._run_logs: Dict[str, deque[str]] = {}
@@ -395,6 +394,109 @@ class BrowserAgentService:
         if not run_id:
             return
         self._run_runtime_stats.pop(run_id, None)
+
+    def set_run_screenshot_url_prefix(self, run_id: str, prefix: str) -> None:
+        normalized_run_id = (run_id or "").strip()
+        normalized_prefix = (prefix or "").strip()
+        if not normalized_run_id:
+            return
+        if not normalized_prefix:
+            self._run_screenshot_url_prefixes.pop(normalized_run_id, None)
+            return
+        self._run_screenshot_url_prefixes[normalized_run_id] = normalized_prefix.rstrip("/")
+
+    def _pop_run_screenshot_url_prefix(self, run_id: str) -> None:
+        normalized_run_id = (run_id or "").strip()
+        if not normalized_run_id:
+            return
+        self._run_screenshot_url_prefixes.pop(normalized_run_id, None)
+
+    def _get_run_screenshot_url_prefix(self, run_id: str) -> str:
+        normalized_run_id = (run_id or "").strip()
+        if normalized_run_id and normalized_run_id in self._run_screenshot_url_prefixes:
+            return self._run_screenshot_url_prefixes[normalized_run_id]
+
+        configured_base = str(getattr(self._settings, "PUBLIC_API_BASE_URL", "") or "").strip().rstrip("/")
+        api_prefix = str(getattr(self._settings, "API_V1_PREFIX", "/api/v1") or "/api/v1").strip()
+        if configured_base:
+            if configured_base.endswith(api_prefix):
+                return f"{configured_base}/browser-agent/screenshot"
+            return f"{configured_base}{api_prefix}/browser-agent/screenshot"
+
+        return f"{api_prefix}/browser-agent/screenshot"
+
+    @staticmethod
+    def _build_run_screenshot_proxy_url(path_str: Any, screenshot_url_prefix: str) -> Optional[str]:
+        if path_str is None:
+            return None
+
+        clean_path = str(path_str).replace("\\", "/").strip()
+        if not clean_path:
+            return None
+
+        prefix = str(screenshot_url_prefix or "").strip().rstrip("/")
+        if not prefix:
+            prefix = "/api/v1/browser-agent/screenshot"
+
+        encoded_path = quote(clean_path, safe="")
+        return f"{prefix}?path={encoded_path}"
+
+    @staticmethod
+    def _path_is_within_root(path: Path, root: Path) -> bool:
+        try:
+            path.resolve().relative_to(root.resolve())
+            return True
+        except ValueError:
+            return False
+
+    def resolve_run_screenshot_file(self, path_str: str) -> Optional[Path]:
+        clean_path = str(path_str or "").replace("\\", "/").strip()
+        if not clean_path:
+            return None
+
+        candidate = Path(clean_path)
+        output_root = self._output_dir.resolve()
+        candidate_paths: list[Path] = []
+
+        if candidate.is_absolute():
+            candidate_paths.append(candidate.resolve())
+        else:
+            candidate_paths.extend([
+                (output_root / candidate).resolve(),
+                (self._backend_root / candidate).resolve(),
+                (Path.cwd().resolve() / candidate).resolve(),
+            ])
+
+            parts = [part for part in candidate.parts if part not in {"", "."}]
+            if parts:
+                try:
+                    marker_index = parts.index("browser_agent_runs")
+                    tail_parts = parts[marker_index + 1:]
+                    if tail_parts:
+                        candidate_paths.append((output_root / Path(*tail_parts)).resolve())
+                except ValueError:
+                    pass
+
+                if len(parts) >= 2 and parts[0] == "history_logs" and parts[1] == "browser_agent_runs":
+                    tail_parts = parts[2:]
+                    if tail_parts:
+                        candidate_paths.append((output_root / Path(*tail_parts)).resolve())
+
+        deduped_paths: list[Path] = []
+        seen: set[Path] = set()
+        for path_item in candidate_paths:
+            if path_item in seen:
+                continue
+            seen.add(path_item)
+            deduped_paths.append(path_item)
+
+        for resolved in deduped_paths:
+            if not self._path_is_within_root(resolved, output_root):
+                continue
+            if resolved.exists() and resolved.is_file():
+                return resolved
+
+        return None
 
     async def run(self, request: BrowserAgentRunRequest, run_id: Optional[str] = None) -> List[BrowserAgentRunResult]:
         """Execute the browser agent across all persona/model combinations."""
@@ -650,7 +752,7 @@ class BrowserAgentService:
             else:
                 results = await self.run(request, run_id=run_id)
 
-            processed = self._post_process_results(request, results)
+            processed = self._post_process_results(request, results, run_id=run_id)
             has_errors = any(
                 bool(item.get("has_errors")) or not bool(item.get("is_successful"))
                 for item in processed
@@ -738,6 +840,7 @@ class BrowserAgentService:
 
         finally:
             self._background_run_tasks.pop(run_id, None)
+            self._pop_run_screenshot_url_prefix(run_id)
             self._clear_run_runtime_stats(run_id)
             _ACTIVE_BROWSER_AGENT_RUN_ID.reset(run_context_token)
 
@@ -753,16 +856,15 @@ class BrowserAgentService:
         return persisted
 
     def _post_process_results(
-        self, request: BrowserAgentRunRequest, results: List[BrowserAgentRunResult]
+        self,
+        request: BrowserAgentRunRequest,
+        results: List[BrowserAgentRunResult],
+        run_id: str,
     ) -> list:
         """Transform raw BrowserAgentRunResult list into serialisable dicts for the API."""
         from datetime import datetime, timezone
 
-        include_base64 = getattr(
-            self._settings,
-            "BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD",
-            False,
-        )
+        screenshot_url_prefix = self._get_run_screenshot_url_prefix(run_id)
 
         now_utc = datetime.now(timezone.utc).isoformat()
         processed: list = []
@@ -780,29 +882,19 @@ class BrowserAgentService:
             }
 
             details = raw_payload.get("details", raw_payload)
+            screenshot_paths = getattr(result, "screenshot_paths", []) or details.get("screenshots", [])
             history_payload = {
-                "screenshots": details.get("screenshots", []) or [p for p in getattr(result, "screenshot_paths", [])],
-                "screenshot_paths": getattr(result, "screenshot_paths", []) or details.get("screenshots", []),
+                "screenshots": [
+                    self._build_run_screenshot_proxy_url(path_str=path, screenshot_url_prefix=screenshot_url_prefix)
+                    for path in screenshot_paths
+                ],
+                "screenshot_paths": screenshot_paths,
                 "step_descriptions": details.get("step_descriptions", []),
                 "model_outputs": details.get("model_outputs", None),
                 "last_action": details.get("last_action", None),
                 "summary": raw_payload.get("summary"),
                 "metadata": raw_payload.get("metadata"),
             }
-
-            if include_base64:
-                inline: list[str] = []
-                for rel_path in history_payload.get("screenshot_paths") or []:
-                    try:
-                        file_path = Path(str(rel_path))
-                        if not file_path.exists():
-                            file_path = Path.cwd() / str(rel_path)
-                        if file_path.exists():
-                            with file_path.open("rb") as fh:
-                                inline.append(base64.b64encode(fh.read()).decode("ascii"))
-                    except Exception:
-                        continue
-                history_payload["screenshots"] = inline
 
             processed.append({
                 "model": result.model,
@@ -816,10 +908,7 @@ class BrowserAgentService:
                 "history_path": result.history_path,
                 "history_payload": history_payload,
                 "screenshot_paths": getattr(result, "screenshot_paths", []) or [],
-                "screenshots": [
-                    {"path": s.path, "content_base64": s.content_base64}
-                    for s in getattr(result, "screenshots", [])
-                ],
+                "screenshots": [],
                 "metadata": metadata,
             })
 
@@ -1807,21 +1896,13 @@ class BrowserAgentService:
         else:
             task_instruction = "Complete the task"
 
-        # Just tell the model what to do, not where to go
-        if url:
-            # For localhost React apps, remind to wait for content to load
-            if "localhost" in url or "127.0.0.1" in url:
-                task_prompt = f"{task_instruction}. You are already at {url}. IMPORTANT: This is a React Single Page Application (SPA) - the page should be fully loaded, but verify elements are visible before interacting."
-            else:
-                task_prompt = f"{task_instruction}. You are already at {url}."
-        else:
-            task_prompt = f"{task_instruction}. Complete this task on the current website."
+        task_prompt = f"{task_instruction}. Complete this task on the {url}."
 
         # Add persona context if available
         if persona:
             return (
-                f"Persona: {persona}\n\n"
-                f"Task: {task_prompt}"
+                f"Complete the task based on the persona: {task_prompt}\n"
+                f"Persona: {persona}\n"
             )
         else:
             return f"Task: {task_prompt}"

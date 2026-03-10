@@ -38,6 +38,12 @@ Results are written to separate subfolders:
 python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results
 ```
 
+Disable annotatable output generation (optional):
+
+```powershell
+python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results --skip-annotatable-output
+```
+
 Baseline mode examples:
 
 ```powershell
@@ -77,7 +83,11 @@ Example (can be saved directly as `dataset/sample.txt`):
 
 ## Output Files
 - Each request corresponds to a result file: `results/<txt_filename>__reqXX__result.json`
+- Each request also writes an annotatable file (default enabled): `results/<txt_filename>__reqXX__annotatable.json`
+  - Includes original run data (`metadata/summary/details`) + backend LLM output (`conditions/criteria/involved_steps/highlighted_evidence`)
+  - Includes `human_review` placeholders for manual scoring of verdict/evidence
 - Each batch run will generate a summary: `results/batch_summary_<timestamp>.json`
+- Each batch also writes one merged package: `results/all_data_with_llm_output_<timestamp>.json`
 
 ## Notes
 - `conditionID` will be mapped to `backend/history_logs/<conditionID>.json`.

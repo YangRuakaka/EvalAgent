@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     BROWSER_AGENT_ENABLE_SCREENSHOT_PROCESSING: bool = False
     BROWSER_AGENT_MAX_SCREENSHOTS: int = 0  # 0 means no limit: persist all available screenshots
     BROWSER_AGENT_INCLUDE_SCREENSHOTS_IN_RUN_RESPONSE: bool = False
-    BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD: bool = True
+    BROWSER_AGENT_INCLUDE_SCREENSHOT_BASE64_IN_HISTORY_PAYLOAD: bool = False
     BROWSER_AGENT_STATUS_LOG_BUFFER_SIZE: int = 0  # 0 means unlimited (keep all captured logs)
     BROWSER_AGENT_STATUS_LOG_LEVEL: str = "INFO"  # Log level captured into run-status logs (e.g. INFO/DEBUG)
     BROWSER_AGENT_EXTERNAL_LOG_LEVEL: str = "INFO"  # Source logger level for browser_use/cdp_use capture
@@ -83,7 +83,6 @@ class Settings(BaseSettings):
     JUDGE_EVALUATION_TOTAL_LLM_CONCURRENCY_BUDGET: int = 32
     JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS: int = 1800
     JUDGE_EVALUATION_OVERALL_ASSESSMENT_CONFIDENCE_THRESHOLD: float = 0.7
-    JUDGE_EVALUATION_ENABLE_SECONDARY_OVERALL_ASSESSMENT: bool = False
 
     class Config:
         env_file = ".env"

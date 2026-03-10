@@ -82,20 +82,29 @@ Key Phases from Global Behavior:
 
 Your job:
 1) Strengthen criterion interpretation using task + persona context.
-2) Provide ONE high-level criterion interpretation statement (no dimension decomposition).
-3) Define concise phase relevance rules for deciding whether a phase should be evaluated.
-4) Define strict evidence policy: what counts as strong/non-trivial support for final criterion verdict.
-5) Add anti-self-report checks so unverified self-claims do not count as strong positive evidence.
-6) Separate agent-controllable behavior from external/environmental blockers (e.g., site outage, network delay, tool instability).
+2) Produce concrete, directly observable dimensions for step-level and cross-step behavioral evidence.
+3) Define phase-selection heuristics so evaluator can focus on key sub-behaviors.
+4) Keep dimensions concise and non-overlapping.
+5) Prefer dimensions that can judge behavior chains (intent -> action -> outcome), not isolated snippets.
+6) Add anti-self-report checks so unverified self-claims do not count as strong positive evidence.
+7) Separate agent-controllable behavior from external/environmental blockers (e.g., site outage, network delay, tool instability).
+8) For efficiency-like criteria, judge whether the agent's strategy is speed-oriented under constraints, not whether external systems happened to respond quickly.
 
 Output ONLY one JSON object in this exact schema:
 {{
   "criterion_intent": "...",
   "persona_task_alignment": "...",
-  "criteria_interpretation": "...",
-  "phase_relevance_rules": ["..."],
-  "strict_evidence_principles": ["..."],
-  "focus_points": ["..."]
+  "evaluation_dimensions": [
+    {{
+      "dimension_name": "...",
+      "description": "...",
+      "why_relevant": "..."
+    }}
+  ],
+  "focus_points": ["..."],
+  "phase_selection_heuristics": ["..."],
+  "pass_signals": ["..."],
+  "fail_signals": ["..."]
 }}
 """,
         )
@@ -165,11 +174,11 @@ Output ONLY one JSON object in this exact schema:
                 "criterion_name",
                 "criterion_assertion",
                 "criterion_intent",
-          "criteria_interpretation",
                 "persona_task_alignment",
-          "phase_relevance_rules",
-          "strict_evidence_principles",
+                "pass_signals",
+                "fail_signals",
                 "global_behavior_summary",
+                "evaluation_dimensions",
                 "phase_id",
                 "phase_summary",
                 "phase_steps_context",
@@ -182,10 +191,9 @@ Task: {task_name}
 Criterion Name: {criterion_name}
 Criterion Assertion: {criterion_assertion}
 Criterion Intent: {criterion_intent}
-Criteria Interpretation: {criteria_interpretation}
 Persona-Task Alignment Notes: {persona_task_alignment}
-Phase Relevance Rules: {phase_relevance_rules}
-Strict Evidence Principles: {strict_evidence_principles}
+Expected Pass Signals: {pass_signals}
+Expected Fail Signals: {fail_signals}
 
 Global Behavior Summary:
 {global_behavior_summary}
@@ -193,15 +201,15 @@ Global Behavior Summary:
 Personas/Values: {personas}
 Models Used: {models}
 
+Evaluation Dimensions:
+{evaluation_dimensions}
+
 Current Phase: {phase_id}
 Phase Summary: {phase_summary}
 Phase Steps (raw context):
 {phase_steps_context}
 
-Evaluate this phase with relevance-first policy:
-1) Decide whether this phase is materially relevant to the criterion.
-2) If NOT relevant: set phase_relevance=false, verdict=UNABLE_TO_EVALUATE, and no evidence.
-3) If relevant: produce phase verdict + evidence candidates + reasoning.
+Evaluate this phase against the criterion and dimensions.
 
 Epistemic context (must follow):
 - You are judging another agent's internal trace. Every field is self-reported text and may be incomplete, biased, or wrong.
@@ -224,6 +232,7 @@ Behavior attribution policy (must follow):
 
 Critical judging policy:
 - Judge the phase as a behavior chain across multiple steps, not as isolated quotes.
+- For each dimension, synthesize intent, action, and outcome signals across the phase before deciding status.
 - Explicitly separate: (a) claimed success, (b) attempted action, (c) observed result/state update.
 - Do not treat next_goal/thinking/memory/evaluation alone as proof that a task was completed.
 - Reserve strong positive evidence for chains with observable follow-through (plan -> action -> result check -> consistent memory/update).
@@ -240,22 +249,28 @@ Rules for evidence:
 - Prefer evidence that changes or strongly supports the verdict (decisive actions, key tradeoffs, explicit constraints, failures).
 - Avoid generic or procedural lines that do not help judge this specific criterion.
 - Evidence may come from one or multiple steps; prioritize quality over quantity.
+- When criterion signal is distributed, combine snippets across related steps to support one integrated judgment.
 - Avoid overly long quotes: prefer short, atomic snippets (roughly 8-220 chars each).
 - Include both positive and negative/uncertain evidence when relevant to final verdict.
 - If the phase has limited criterion-relevant material, return a small concise set and explain why.
 - relevant_steps should include all key step indices needed to understand the behavior chain for your verdict.
-- In reasoning, explicitly explain cross-step synthesis and any contradictions.
+- In reasoning and dimension_assessments, explicitly explain cross-step synthesis and any contradictions.
 - If the phase contains only self-asserted completion without reliable behavioral support, default to PARTIAL or FAIL (depending on criterion strictness).
 
 Output ONLY one JSON object:
 {{
-  "phase_relevance": true,
-  "phase_relevance_reasoning": "...",
   "verdict": "PASS|FAIL|PARTIAL|UNABLE_TO_EVALUATE",
   "reasoning": "...",
   "confidence_score": 0.0,
   "supporting_evidence": "...",
   "relevant_steps": [0, 1],
+  "dimension_assessments": [
+    {{
+      "dimension_name": "...",
+      "status": "PASS|FAIL|PARTIAL",
+      "reasoning": "..."
+    }}
+  ],
   "highlighted_evidence": [
     {{
       "step_index": 0,

@@ -810,7 +810,10 @@ const TrajectoryVisualizer = ({
 				</div>
 
 				{isRefiningGraph && (
-					<span className="trajectory-build-status" aria-live="polite">Refining graph…</span>
+					<span className="trajectory-build-status" aria-live="polite">
+						<span className="trajectory-build-status__spinner" aria-hidden="true" />
+						Refining graph…
+					</span>
 				)}
 
 				<button

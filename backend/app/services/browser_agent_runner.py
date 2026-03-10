@@ -8,7 +8,6 @@ import io
 import json
 import logging
 import os
-import re
 import sys
 import threading
 import uuid
@@ -29,6 +28,7 @@ _ACTIVE_BROWSER_AGENT_RUN_ID: contextvars.ContextVar[Optional[str]] = contextvar
     default=None,
 )
 _ACTIVE_BROWSER_AGENT_THREAD_STATE = threading.local()
+_STATUS_FIELD_UNSET = object()
 
 
 def _resolve_logging_level(value: Any, default: int = logging.INFO) -> int:
@@ -127,6 +127,7 @@ class BrowserAgentService:
 
     _LOG_HANDLER_INSTALL_LOCK = threading.Lock()
     _LOG_HANDLER_INSTALLED = False
+    _ACTIVE_RUN_STATUSES = {"queued", "running"}
 
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -251,8 +252,12 @@ class BrowserAgentService:
     def _status_file_path(self, run_id: str) -> Path:
         return self._status_dir / f"{run_id}.json"
 
+    @staticmethod
+    def _normalize_run_id(run_id: str) -> str:
+        return (run_id or "").strip()
+
     def _reset_run_logs(self, run_id: str) -> None:
-        normalized_run_id = (run_id or "").strip()
+        normalized_run_id = self._normalize_run_id(run_id)
         if not normalized_run_id:
             return
         with self._run_logs_lock:
@@ -262,7 +267,7 @@ class BrowserAgentService:
                 self._run_logs[normalized_run_id] = deque(maxlen=self._run_log_max_entries)
 
     def _append_run_log(self, run_id: str, message: str) -> None:
-        normalized_run_id = (run_id or "").strip()
+        normalized_run_id = self._normalize_run_id(run_id)
         if not normalized_run_id:
             return
 
@@ -292,7 +297,7 @@ class BrowserAgentService:
                 pass
 
     def _get_run_logs(self, run_id: str) -> List[str]:
-        normalized_run_id = (run_id or "").strip()
+        normalized_run_id = self._normalize_run_id(run_id)
         if not normalized_run_id:
             return []
 
@@ -303,29 +308,70 @@ class BrowserAgentService:
             return list(buffer)
 
     def _write_run_status(self, run_id: str, payload: dict) -> None:
+        normalized_run_id = self._normalize_run_id(run_id)
+        if not normalized_run_id:
+            return
+
         enriched_payload = {
             **payload,
             "logs": self._get_run_logs(run_id),
         }
-        self._run_store[run_id] = enriched_payload
+        self._run_store[normalized_run_id] = enriched_payload
         try:
-            status_file = self._status_file_path(run_id)
+            status_file = self._status_file_path(normalized_run_id)
             status_file.parent.mkdir(parents=True, exist_ok=True)
             status_file.write_text(
                 json.dumps(enriched_payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         except Exception as exc:
-            logger.warning("Failed to persist run status | run_id=%s error=%s", run_id, exc)
+            logger.warning("Failed to persist run status | run_id=%s error=%s", normalized_run_id, exc)
+
+    def _set_run_status(
+        self,
+        run_id: str,
+        status: str,
+        *,
+        total_tasks: Optional[int] = None,
+        results: Any = None,
+        error: Optional[str] = None,
+        runtime: Any = _STATUS_FIELD_UNSET,
+    ) -> Optional[dict]:
+        normalized_run_id = self._normalize_run_id(run_id)
+        if not normalized_run_id:
+            return None
+
+        previous = self._run_store.get(normalized_run_id)
+        if not isinstance(previous, dict):
+            previous = self._read_run_status(normalized_run_id) or {}
+
+        resolved_total_tasks = previous.get("total_tasks", 0) if total_tasks is None else total_tasks
+        payload = {
+            "run_id": normalized_run_id,
+            "status": status,
+            "total_tasks": resolved_total_tasks,
+            "results": results,
+            "error": error,
+        }
+
+        if runtime is not _STATUS_FIELD_UNSET:
+            payload["runtime"] = runtime
+
+        self._write_run_status(normalized_run_id, payload)
+        return payload
 
     def _read_run_status(self, run_id: str) -> Optional[dict]:
-        status_file = self._status_file_path(run_id)
+        normalized_run_id = self._normalize_run_id(run_id)
+        if not normalized_run_id:
+            return None
+
+        status_file = self._status_file_path(normalized_run_id)
         if not status_file.exists():
             return None
         try:
             return json.loads(status_file.read_text(encoding="utf-8"))
         except Exception as exc:
-            logger.warning("Failed to read persisted run status | run_id=%s error=%s", run_id, exc)
+            logger.warning("Failed to read persisted run status | run_id=%s error=%s", normalized_run_id, exc)
             return None
 
     @property
@@ -337,7 +383,7 @@ class BrowserAgentService:
 
     def get_active_run_id(self) -> Optional[str]:
         for run_id, payload in self._run_store.items():
-            if payload.get("status") in {"queued", "running"}:
+            if payload.get("status") in self._ACTIVE_RUN_STATUSES:
                 return run_id
         return None
 
@@ -345,40 +391,58 @@ class BrowserAgentService:
         return [
             run_id
             for run_id, payload in self._run_store.items()
-            if payload.get("status") in {"queued", "running"}
+            if payload.get("status") in self._ACTIVE_RUN_STATUSES
         ]
 
     def register_queued_run(self, run_id: str, total_tasks: int) -> None:
-        self._reset_run_logs(run_id)
-        self._append_run_log(run_id, f"Run queued | run_id={run_id} total_tasks={total_tasks}")
-        self._write_run_status(run_id, {
-            "run_id": run_id,
-            "status": "queued",
-            "total_tasks": total_tasks,
-            "results": None,
-            "error": None,
-        })
+        normalized_run_id = self._normalize_run_id(run_id)
+        if not normalized_run_id:
+            return
+
+        self._reset_run_logs(normalized_run_id)
+        self._append_run_log(
+            normalized_run_id,
+            f"Run queued | run_id={normalized_run_id} total_tasks={total_tasks}",
+        )
+        self._set_run_status(
+            normalized_run_id,
+            "queued",
+            total_tasks=total_tasks,
+            results=None,
+            error=None,
+        )
 
     def mark_run_running(self, run_id: str, total_tasks: int = 0) -> None:
-        self._append_run_log(run_id, f"Run started | run_id={run_id} total_tasks={total_tasks}")
-        self._write_run_status(run_id, {
-            "run_id": run_id,
-            "status": "running",
-            "total_tasks": total_tasks,
-            "results": None,
-            "error": None,
-        })
+        normalized_run_id = self._normalize_run_id(run_id)
+        if not normalized_run_id:
+            return
+
+        self._append_run_log(
+            normalized_run_id,
+            f"Run started | run_id={normalized_run_id} total_tasks={total_tasks}",
+        )
+        self._set_run_status(
+            normalized_run_id,
+            "running",
+            total_tasks=total_tasks,
+            results=None,
+            error=None,
+        )
 
     def mark_run_failed(self, run_id: str, error: str) -> None:
-        previous = self.get_run_status(run_id) or {}
-        self._append_run_log(run_id, f"Run failed | run_id={run_id} error={error}")
-        self._write_run_status(run_id, {
-            "run_id": run_id,
-            "status": "failed",
-            "total_tasks": previous.get("total_tasks", 0),
-            "results": previous.get("results"),
-            "error": error,
-        })
+        normalized_run_id = self._normalize_run_id(run_id)
+        if not normalized_run_id:
+            return
+
+        previous = self.get_run_status(normalized_run_id) or {}
+        self._append_run_log(normalized_run_id, f"Run failed | run_id={normalized_run_id} error={error}")
+        self._set_run_status(
+            normalized_run_id,
+            "failed",
+            total_tasks=previous.get("total_tasks", 0),
+            results=previous.get("results"),
+            error=error,
+        )
 
     def _set_run_runtime_stats(self, run_id: str, payload: dict) -> None:
         if not run_id:
@@ -396,7 +460,7 @@ class BrowserAgentService:
         self._run_runtime_stats.pop(run_id, None)
 
     def set_run_screenshot_url_prefix(self, run_id: str, prefix: str) -> None:
-        normalized_run_id = (run_id or "").strip()
+        normalized_run_id = self._normalize_run_id(run_id)
         normalized_prefix = (prefix or "").strip()
         if not normalized_run_id:
             return
@@ -406,13 +470,13 @@ class BrowserAgentService:
         self._run_screenshot_url_prefixes[normalized_run_id] = normalized_prefix.rstrip("/")
 
     def _pop_run_screenshot_url_prefix(self, run_id: str) -> None:
-        normalized_run_id = (run_id or "").strip()
+        normalized_run_id = self._normalize_run_id(run_id)
         if not normalized_run_id:
             return
         self._run_screenshot_url_prefixes.pop(normalized_run_id, None)
 
     def _get_run_screenshot_url_prefix(self, run_id: str) -> str:
-        normalized_run_id = (run_id or "").strip()
+        normalized_run_id = self._normalize_run_id(run_id)
         if normalized_run_id and normalized_run_id in self._run_screenshot_url_prefixes:
             return self._run_screenshot_url_prefixes[normalized_run_id]
 
@@ -658,7 +722,7 @@ class BrowserAgentService:
 
     async def stop_run(self, run_id: str) -> bool:
         """Cancel all active tasks for a run_id."""
-        normalized_run_id = (run_id or "").strip()
+        normalized_run_id = self._normalize_run_id(run_id)
         if not normalized_run_id:
             return False
 
@@ -682,13 +746,13 @@ class BrowserAgentService:
         # Update run store
         previous = self.get_run_status(normalized_run_id) or {}
         if previous:
-            self._write_run_status(normalized_run_id, {
-                "run_id": normalized_run_id,
-                "status": "cancelled",
-                "total_tasks": previous.get("total_tasks", 0),
-                "results": None,
-                "error": "Run was cancelled by user",
-            })
+            self._set_run_status(
+                normalized_run_id,
+                "cancelled",
+                total_tasks=previous.get("total_tasks", 0),
+                results=None,
+                error="Run was cancelled by user",
+            )
 
         logger.info("Browser-agent stop requested | run_id=%s cancelled=%s", normalized_run_id, cancelled_any)
         return cancelled_any or bool(previous)
@@ -712,31 +776,40 @@ class BrowserAgentService:
 
         Raises BrowserAgentBusyError if another run is already active.
         """
-        existing_task = self._background_run_tasks.get(run_id)
+        normalized_run_id = self._normalize_run_id(run_id)
+        if not normalized_run_id:
+            raise BrowserAgentExecutionError("run_id must not be empty.")
+
+        existing_task = self._background_run_tasks.get(normalized_run_id)
         if existing_task is not None and not existing_task.done():
             raise BrowserAgentBusyError(
-                f"Run is already in progress for run_id={run_id}. "
+                f"Run is already in progress for run_id={normalized_run_id}. "
                 "Stop it first or wait for it to finish."
             )
 
-        previous = self._run_store.get(run_id, {})
-        payload = {
-            "run_id": run_id,
+        previous = self._run_store.get(normalized_run_id, {})
+        payload = self._set_run_status(
+            normalized_run_id,
+            "running",
+            total_tasks=previous.get("total_tasks", 0),
+            results=None,
+            error=None,
+        ) or {
+            "run_id": normalized_run_id,
             "status": "running",
             "total_tasks": previous.get("total_tasks", 0),
             "results": None,
             "error": None,
         }
-        self._write_run_status(run_id, payload)
 
-        self._background_run_tasks[run_id] = asyncio.create_task(
-            self._execute_run_background(request, run_id)
+        self._background_run_tasks[normalized_run_id] = asyncio.create_task(
+            self._execute_run_background(request, normalized_run_id)
         )
-        logger.info("Browser-agent background run started | run_id=%s", run_id)
+        logger.info("Browser-agent background run started | run_id=%s", normalized_run_id)
         return payload
 
     def get_background_run_task(self, run_id: str) -> Optional[asyncio.Task[None]]:
-        return self._background_run_tasks.get(run_id)
+        return self._background_run_tasks.get(self._normalize_run_id(run_id))
 
     async def _execute_run_background(self, request: BrowserAgentRunRequest, run_id: str) -> None:
         """Background task: execute agent, post-process results, store in _run_store."""
@@ -759,16 +832,14 @@ class BrowserAgentService:
             )
 
             if has_errors:
-                previous = self._run_store.get(run_id, {})
                 runtime_stats = self._get_run_runtime_stats(run_id)
-                self._write_run_status(run_id, {
-                    "run_id": run_id,
-                    "status": "failed",
-                    "total_tasks": previous.get("total_tasks", 0),
-                    "results": processed,
-                    "error": "One or more browser-agent runs failed.",
-                    "runtime": runtime_stats,
-                })
+                self._set_run_status(
+                    run_id,
+                    "failed",
+                    results=processed,
+                    error="One or more browser-agent runs failed.",
+                    runtime=runtime_stats,
+                )
                 logger.warning(
                     "Background run finished with errors | run_id=%s results=%d",
                     run_id,
@@ -779,16 +850,14 @@ class BrowserAgentService:
                     f"Background execution finished with errors | run_id={run_id} results={len(processed)}",
                 )
             else:
-                previous = self._run_store.get(run_id, {})
                 runtime_stats = self._get_run_runtime_stats(run_id)
-                self._write_run_status(run_id, {
-                    "run_id": run_id,
-                    "status": "completed",
-                    "total_tasks": previous.get("total_tasks", 0),
-                    "results": processed,
-                    "error": None,
-                    "runtime": runtime_stats,
-                })
+                self._set_run_status(
+                    run_id,
+                    "completed",
+                    results=processed,
+                    error=None,
+                    runtime=runtime_stats,
+                )
                 logger.info("Background run completed | run_id=%s results=%d", run_id, len(processed))
                 self._append_run_log(
                     run_id,
@@ -796,45 +865,39 @@ class BrowserAgentService:
                 )
 
         except asyncio.TimeoutError:
-            previous = self._run_store.get(run_id, {})
             runtime_stats = self._get_run_runtime_stats(run_id)
-            self._write_run_status(run_id, {
-                "run_id": run_id,
-                "status": "failed",
-                "total_tasks": previous.get("total_tasks", 0),
-                "results": None,
-                "error": f"Run timed out after {timeout} seconds",
-                "runtime": runtime_stats,
-            })
+            self._set_run_status(
+                run_id,
+                "failed",
+                results=None,
+                error=f"Run timed out after {timeout} seconds",
+                runtime=runtime_stats,
+            )
             logger.warning("Background run timed out | run_id=%s timeout=%ds", run_id, timeout)
             self._append_run_log(run_id, f"Background execution timed out | run_id={run_id} timeout={timeout}s")
 
         except asyncio.CancelledError:
             if self._run_store.get(run_id, {}).get("status") != "cancelled":
-                previous = self._run_store.get(run_id, {})
                 runtime_stats = self._get_run_runtime_stats(run_id)
-                self._write_run_status(run_id, {
-                    "run_id": run_id,
-                    "status": "cancelled",
-                    "total_tasks": previous.get("total_tasks", 0),
-                    "results": None,
-                    "error": "Run was cancelled",
-                    "runtime": runtime_stats,
-                })
+                self._set_run_status(
+                    run_id,
+                    "cancelled",
+                    results=None,
+                    error="Run was cancelled",
+                    runtime=runtime_stats,
+                )
             logger.info("Background run cancelled | run_id=%s", run_id)
             self._append_run_log(run_id, f"Background execution cancelled | run_id={run_id}")
 
         except Exception as exc:
-            previous = self._run_store.get(run_id, {})
             runtime_stats = self._get_run_runtime_stats(run_id)
-            self._write_run_status(run_id, {
-                "run_id": run_id,
-                "status": "failed",
-                "total_tasks": previous.get("total_tasks", 0),
-                "results": None,
-                "error": str(exc),
-                "runtime": runtime_stats,
-            })
+            self._set_run_status(
+                run_id,
+                "failed",
+                results=None,
+                error=str(exc),
+                runtime=runtime_stats,
+            )
             logger.exception("Background run failed | run_id=%s", run_id)
             self._append_run_log(run_id, f"Background execution exception | run_id={run_id} error={exc}")
 
@@ -846,13 +909,17 @@ class BrowserAgentService:
 
     def get_run_status(self, run_id: str) -> Optional[dict]:
         """Return the current status dict for a run, or None if not found."""
-        status = self._run_store.get(run_id)
+        normalized_run_id = self._normalize_run_id(run_id)
+        if not normalized_run_id:
+            return None
+
+        status = self._run_store.get(normalized_run_id)
         if status is not None:
-            status.setdefault("logs", self._get_run_logs(run_id))
+            status.setdefault("logs", self._get_run_logs(normalized_run_id))
             return status
-        persisted = self._read_run_status(run_id)
+        persisted = self._read_run_status(normalized_run_id)
         if persisted is not None:
-            persisted.setdefault("logs", self._get_run_logs(run_id))
+            persisted.setdefault("logs", self._get_run_logs(normalized_run_id))
         return persisted
 
     def _post_process_results(
@@ -1010,6 +1077,10 @@ class BrowserAgentService:
         tmp_profile = None
         agent = None
         browser_session = None
+        browser_start_timeout = getattr(
+            self._settings, "BROWSER_AGENT_BROWSER_START_TIMEOUT", 120
+        )
+        chrome_executable: Optional[str] = None
         try:
             combined_task = self._compose_agent_task(
                 task=request.task,
@@ -1020,9 +1091,6 @@ class BrowserAgentService:
             llm = get_browser_use_llm(model=model_name)
 
             # Set timeout for BrowserStartEvent to avoid server timeouts
-            browser_start_timeout = getattr(
-                self._settings, "BROWSER_AGENT_BROWSER_START_TIMEOUT", 120
-            )
             os.environ["TIMEOUT_BrowserStartEvent"] = str(browser_start_timeout)
             browser_launch_timeout = getattr(
                 self._settings, "BROWSER_AGENT_BROWSER_LAUNCH_TIMEOUT", 120
@@ -1075,12 +1143,7 @@ class BrowserAgentService:
             browser_session = BrowserSession(**browser_kwargs)
 
             context = self._prepare_run_context(
-                task_name=request.task.name,
-                value=persona.value,
-                persona_index=persona_index,
-                model_name=model_name,  # Use the explicitly selected model
-                model_index=model_index,
-                run_index=run_index,
+                model_name=model_name,
             )
 
             agent = Agent(
@@ -1184,44 +1247,20 @@ class BrowserAgentService:
                 f"Original error: {exc}"
             )
             logger.error(f"[BROWSER_START_TIMEOUT] {error_msg}\n{traceback.format_exc()}")
-            return BrowserAgentRunResult(
-                model=model_name,
+            return self._build_failed_run_result(
+                model_name=model_name,
                 run_index=run_index,
-                is_done=False,
-                is_successful=False,
-                has_errors=True,
-                number_of_steps=0,
-                total_duration_seconds=0.0,
+                persona=persona,
                 final_result=error_msg,
-                history_path="",
-                history_payload={},
-                screenshot_paths=[],
-                screenshots=[],
-                metadata={
-                    "value": persona.value,
-                    "persona": persona.content
-                }
             )
         except Exception as exc:
             import traceback
             logger.error("Exception in _run_single: %s\n%s", exc, traceback.format_exc())
-            return BrowserAgentRunResult(
-                model=model_name,
+            return self._build_failed_run_result(
+                model_name=model_name,
                 run_index=run_index,
-                is_done=False,
-                is_successful=False,
-                has_errors=True,
-                number_of_steps=0,
-                total_duration_seconds=0.0,
+                persona=persona,
                 final_result=str(exc),
-                history_path="",
-                history_payload={},
-                screenshot_paths=[],
-                screenshots=[],
-                metadata={
-                    "value": persona.value,
-                    "persona": persona.content
-                }
             )
         finally:
             # Close browser-use resources AFTER history/screenshot extraction.
@@ -1235,68 +1274,69 @@ class BrowserAgentService:
                 except Exception:
                     pass
 
+    def _build_failed_run_result(
+        self,
+        *,
+        model_name: str,
+        run_index: int,
+        persona: BrowserAgentPersona,
+        final_result: str,
+    ) -> BrowserAgentRunResult:
+        return BrowserAgentRunResult(
+            model=model_name,
+            run_index=run_index,
+            is_done=False,
+            is_successful=False,
+            has_errors=True,
+            number_of_steps=0,
+            total_duration_seconds=0.0,
+            final_result=final_result,
+            history_path="",
+            history_payload={},
+            screenshot_paths=[],
+            screenshots=[],
+            metadata={
+                "value": persona.value,
+                "persona": persona.content,
+            },
+        )
+
+    async def _close_resource(self, resource: Any, resource_name: str) -> None:
+        if resource is None:
+            return
+
+        for method_name in ("close", "aclose", "shutdown", "stop", "__aexit__"):
+            if not hasattr(resource, method_name):
+                continue
+            try:
+                close_result = getattr(resource, method_name)()
+                if asyncio.iscoroutine(close_result):
+                    await close_result
+            except RuntimeError as exc:
+                if "Event loop is closed" not in str(exc):
+                    logger.warning("Exception when closing %s (%s): %s", resource_name, method_name, exc)
+            except Exception as exc:
+                logger.warning("Exception when closing %s (%s): %s", resource_name, method_name, exc)
+            break
+
     async def _close_agent_resources(self, agent: Any) -> None:
         """Best-effort close for agent and underlying browser session."""
         if agent is None:
             return
 
-        for method_name in ("close", "aclose", "shutdown", "stop", "__aexit__"):
-            if hasattr(agent, method_name):
-                try:
-                    close_result = getattr(agent, method_name)()
-                    if asyncio.iscoroutine(close_result):
-                        await close_result
-                except RuntimeError as e:
-                    if "Event loop is closed" not in str(e):
-                        logger.warning("Exception when closing agent (%s): %s", method_name, e)
-                except Exception as e:
-                    logger.warning("Exception when closing agent (%s): %s", method_name, e)
-                break
+        await self._close_resource(agent, "agent")
 
         browser_session = getattr(agent, "browser_session", None)
-        if browser_session is not None:
-            for method_name in ("close", "aclose", "shutdown", "stop", "__aexit__"):
-                if hasattr(browser_session, method_name):
-                    try:
-                        close_result = getattr(browser_session, method_name)()
-                        if asyncio.iscoroutine(close_result):
-                            await close_result
-                    except RuntimeError as e:
-                        if "Event loop is closed" not in str(e):
-                            logger.warning(
-                                "Exception when closing browser_session (%s): %s",
-                                method_name,
-                                e,
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            "Exception when closing browser_session (%s): %s",
-                            method_name,
-                            e,
-                        )
-                    break
+        await self._close_resource(browser_session, "browser_session")
 
     def _prepare_run_context(
         self,
         *,
-        task_name: str,
-        value: str,
-        persona_index: int,
         model_name: str,
-        model_index: int,
-        run_index: int,
     ) -> _RunContext:
         """Initialise output directories for the given run."""
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
-
-        safe_task = re.sub(r"[^A-Za-z0-9_-]+", "_", task_name.strip()) or "task"
-        safe_persona = re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip()) or f"persona{persona_index:02d}"
-        safe_model = re.sub(r"[^A-Za-z0-9_-]+", "_", model_name.strip()) or f"model{model_index:02d}"
-
-        safe_task = safe_task[:48]
-        safe_persona = safe_persona[:48]
-        safe_model = safe_model[:48]
 
         # Use UUID for run_id to ensure uniqueness and consistent file naming
         run_id = str(uuid.uuid4())
@@ -1515,6 +1555,16 @@ class BrowserAgentService:
 
         return artifacts
 
+    def _extract_history_items(self, history: Any) -> List[Any]:
+        if hasattr(history, "history") and isinstance(history.history, list):
+            return history.history
+        if hasattr(history, "__iter__") and not isinstance(history, (str, bytes)):
+            try:
+                return list(history)
+            except Exception:
+                return []
+        return []
+
     def _extract_action_descriptions(self, history: Any) -> dict:
         """
         Extract action descriptions from browser-use history for each step.
@@ -1524,14 +1574,7 @@ class BrowserAgentService:
         
         try:
             # Try to get history items/steps
-            history_items = []
-            if hasattr(history, 'history') and isinstance(history.history, list):
-                history_items = history.history
-            elif hasattr(history, '__iter__') and not isinstance(history, (str, bytes)):
-                try:
-                    history_items = list(history)
-                except Exception:
-                    pass
+            history_items = self._extract_history_items(history)
             
             for idx, item in enumerate(history_items):
                 description_parts = []
@@ -1571,14 +1614,7 @@ class BrowserAgentService:
         
         try:
             # Get history items/steps
-            history_items = []
-            if hasattr(history, 'history') and isinstance(history.history, list):
-                history_items = history.history
-            elif hasattr(history, '__iter__') and not isinstance(history, (str, bytes)):
-                try:
-                    history_items = list(history)
-                except Exception:
-                    pass
+            history_items = self._extract_history_items(history)
             
             logger.info(f"Extracting bounding boxes from {len(history_items)} history items")
             
@@ -1896,16 +1932,14 @@ class BrowserAgentService:
         else:
             task_instruction = "Complete the task"
 
-        task_prompt = f"{task_instruction}. Complete this task on the {url}."
+        task_prompt = task_instruction
+        if url:
+            task_prompt = f"{task_prompt} (Website: {url})"
 
-        # Add persona context if available
+        prompt = f"Complete this task: {task_prompt}"
         if persona:
-            return (
-                f"Complete the task based on the persona: {task_prompt}\n"
-                f"Persona: {persona}\n"
-            )
-        else:
-            return f"Task: {task_prompt}"
+            prompt = f"{prompt}\nPersona: {persona}"
+        return prompt
 
     def _extract_base64_data(self, screenshot_data: Any) -> str:
         """Best-effort extraction of base64 payload from screenshot blobs."""

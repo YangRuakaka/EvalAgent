@@ -128,7 +128,7 @@ if [[ -f "$ENV_PATH" ]]; then
     if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
       key="$(echo "${BASH_REMATCH[1]}" | xargs)"
       value="${BASH_REMATCH[2]}"
-      value="$(echo "$value" | sed -e 's/^\s*//' -e 's/\s*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+      value="$(echo "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
 
       case "$key" in
         OPENAI_API_KEY)

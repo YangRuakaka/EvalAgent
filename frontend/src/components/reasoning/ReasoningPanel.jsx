@@ -686,13 +686,44 @@ const ReasoningPanel = ({
 		}
 	}, [isEvidenceHighlightEnabled]);
 
+	useEffect(() => {
+		if (!hoveredHighlight) {
+			return undefined;
+		}
+
+		const handleMouseMove = (event) => {
+			const target = event.target;
+			if (!(target instanceof Element)) {
+				setHoveredHighlight(null);
+				return;
+			}
+
+			if (!target.closest('.highlight-interactive')) {
+				setHoveredHighlight(null);
+			}
+		};
+
+		const handleWindowBlur = () => {
+			setHoveredHighlight(null);
+		};
+
+		document.addEventListener('mousemove', handleMouseMove, true);
+		window.addEventListener('blur', handleWindowBlur);
+
+		return () => {
+			document.removeEventListener('mousemove', handleMouseMove, true);
+			window.removeEventListener('blur', handleWindowBlur);
+		};
+	}, [hoveredHighlight]);
+
 	const handleHighlightHover = useCallback((data) => {
 		if (!data) {
 			setHoveredHighlight(null);
 			return;
 		}
 		const { event, reasoning, verdict } = data;
-		const rect = event.target.getBoundingClientRect();
+		const hoverTarget = event.currentTarget || event.target;
+		const rect = hoverTarget.getBoundingClientRect();
 		setHoveredHighlight({
 			x: rect.left + rect.width / 2,
 			y: rect.top,

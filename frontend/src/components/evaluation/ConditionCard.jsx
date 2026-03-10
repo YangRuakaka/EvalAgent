@@ -27,6 +27,36 @@ const ConditionCard = ({
 		};
 	}, [condition]);
 
+	const criteriaAssessments = useMemo(() => {
+		const criteriaList = Array.isArray(condition.criteria) ? condition.criteria : [];
+
+		return criteriaList.map((criterion, index) => {
+			const criterionName = criterion?.title
+				|| criterion?.name
+				|| criterion?.id
+				|| criterion?.criteria_id
+				|| `Criteria ${index + 1}`;
+			const rawAssessment = criterion?.overall_assessment
+				|| criterion?.overallAssessment
+				|| criterion?.assessment
+				|| criterion?.evaluateStatus
+				|| criterion?.verdict;
+			const normalizedAssessment = typeof rawAssessment === 'string'
+				? rawAssessment.toLowerCase()
+				: 'unknown';
+
+			const status = ['pass', 'fail', 'partial'].includes(normalizedAssessment)
+				? normalizedAssessment
+				: 'unknown';
+
+			return {
+				key: criterion?.id || criterion?.criteria_id || `${criterionName}-${index}`,
+				name: criterionName,
+				status,
+			};
+		});
+	}, [condition.criteria]);
+
 	const handleDragStart = useCallback((e) => {
 		e.dataTransfer.effectAllowed = 'move';
 		// Removed setDragImage to rely on default browser behavior which is more robust
@@ -48,20 +78,6 @@ const ConditionCard = ({
 			onDragEnd={onDragEnd}
 			onClick={handleClick}
 		>
-			<div
-				className={`condition-card__status-top-right ${displayInfo.isDone ? (displayInfo.isSuccessful ? 'condition-card__status-top-right--success' : 'condition-card__status-top-right--failure') : 'condition-card__status-top-right--pending'}`}
-			>
-				{displayInfo.isDone ? (
-					displayInfo.isSuccessful ? (
-						<CheckIcon className="condition-card__status-icon-large condition-card__status-icon--success" title="Success" />
-					) : (
-						<CrossIcon className="condition-card__status-icon-large condition-card__status-icon--failure" title="Failed" />
-					)
-				) : (
-					<div className="condition-card__status-pending-large" title="In Progress" />
-				)}
-			</div>
-
 			{/* Content */}
 			<div className="condition-card__content">
 				{/* Top Row: Model, Run Index */}
@@ -84,6 +100,35 @@ const ConditionCard = ({
 								#{displayInfo.runIndex}
 							</div>
 						</div>
+						</div>
+					</div>
+					<div className="condition-card__status-summary-top-right">
+						{criteriaAssessments.length > 0 && (
+							<div className="condition-card__criteria-pill-list" aria-label="Criteria assessment summary">
+								{criteriaAssessments.map((assessment) => (
+									<span
+										key={assessment.key}
+										className={`condition-card__criteria-pill condition-card__criteria-pill--${assessment.status}`}
+										title={`${assessment.name} - ${assessment.status}`}
+									>
+										<span className="condition-card__criteria-pill-name">{assessment.name}</span>
+										<span className="condition-card__criteria-pill-status">-{assessment.status}</span>
+									</span>
+								))}
+							</div>
+						)}
+						<div
+							className={`condition-card__status-top-right ${displayInfo.isDone ? (displayInfo.isSuccessful ? 'condition-card__status-top-right--success' : 'condition-card__status-top-right--failure') : 'condition-card__status-top-right--pending'}`}
+						>
+							{displayInfo.isDone ? (
+								displayInfo.isSuccessful ? (
+									<CheckIcon className="condition-card__status-icon-large condition-card__status-icon--success" title="Success" />
+								) : (
+									<CrossIcon className="condition-card__status-icon-large condition-card__status-icon--failure" title="Failed" />
+								)
+							) : (
+								<div className="condition-card__status-pending-large" title="In Progress" />
+							)}
 						</div>
 					</div>
 				</div>
@@ -113,6 +158,13 @@ ConditionCard.propTypes = {
 		persona: PropTypes.shape({
 			value: PropTypes.string,
 		}),
+		criteria: PropTypes.arrayOf(PropTypes.shape({
+			id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+			criteria_id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+			title: PropTypes.string,
+			name: PropTypes.string,
+			overall_assessment: PropTypes.string,
+		})),
 		metadata: PropTypes.object,
 		raw: PropTypes.object,
 	}).isRequired,

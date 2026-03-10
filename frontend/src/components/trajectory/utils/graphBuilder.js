@@ -790,6 +790,10 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 			totalScreenshots: occurrences.length,
 			totalNodes: nodes.length,
 			totalLinks: links.length,
+			hashingEnabled: useImageHash,
+			hashTaskCount: hashedTasks.length,
+			validHashCount,
+			isHashComplete: !useImageHash || validHashCount >= hashedTasks.length,
 			legend: sequences.map((sequence, index) => {
 				const conditionPersonaLabel = coerceText(sequence.conditionPersona);
 				const personaLabel = Array.isArray(sequence.personas) && sequence.personas.length

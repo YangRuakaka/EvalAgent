@@ -439,22 +439,6 @@ const TrajectoryVisualizer = ({
 			};
 		}
 
-		const cachedGraph = readCachedTrajectoryGraph(graphCacheKey);
-		if (cachedGraph) {
-			setGraph(cachedGraph);
-			setError(null);
-			setIsProcessing(false);
-			setIsRefiningGraph(false);
-			return () => {
-				isMounted = false;
-				cancelRefinement();
-			};
-		}
-
-		setIsProcessing(true);
-		setError(null);
-		setIsRefiningGraph(false);
-
 		const buildPreviewGraph = () => buildTrajectoryGraph(trajectory, {
 			hash: { hashSize: 16 },
 			hashConcurrency: 8,
@@ -470,6 +454,68 @@ const TrajectoryVisualizer = ({
 			usePreviewImage: shouldUsePreviewImage,
 			conditions: conditionsRef.current,
 		});
+
+		const startHashRefinement = () => {
+			if (!useImageHash) {
+				setIsRefiningGraph(false);
+				return;
+			}
+
+			setIsRefiningGraph(true);
+			cancelRefinement = scheduleIdleWork(() => {
+				buildTargetGraph()
+					.then((result) => {
+						if (!isMounted) {
+							return;
+						}
+
+						safeSetGraph(result);
+						writeCachedTrajectoryGraph(graphCacheKey, result);
+					})
+					.catch((err) => {
+						if (!isMounted) {
+							return;
+						}
+
+						console.error('[trajectory] Failed to refine graph', err);
+					})
+					.finally(() => {
+						if (!isMounted) {
+							return;
+						}
+
+						setIsRefiningGraph(false);
+					});
+			}, HASH_REFINEMENT_IDLE_TIMEOUT);
+		};
+
+		const cachedGraph = readCachedTrajectoryGraph(graphCacheKey);
+		if (cachedGraph) {
+			setGraph(cachedGraph);
+			setError(null);
+			setIsProcessing(false);
+
+			const cachedGraphHasHash = cachedGraph?.meta?.hashingEnabled === true;
+			const cachedGraphHashComplete = cachedGraph?.meta?.isHashComplete !== false;
+			const shouldRefineCachedGraph = useImageHash
+				&& !preferDirectHashBuild
+				&& (!cachedGraphHasHash || !cachedGraphHashComplete);
+
+			if (shouldRefineCachedGraph) {
+				startHashRefinement();
+			} else {
+				setIsRefiningGraph(false);
+			}
+
+			return () => {
+				isMounted = false;
+				cancelRefinement();
+			};
+		}
+
+		setIsProcessing(true);
+		setError(null);
+		setIsRefiningGraph(false);
 
 		if (preferDirectHashBuild) {
 			buildTargetGraph()
@@ -512,32 +558,7 @@ const TrajectoryVisualizer = ({
 					return;
 				}
 
-				setIsRefiningGraph(true);
-				cancelRefinement = scheduleIdleWork(() => {
-					buildTargetGraph()
-						.then((result) => {
-							if (!isMounted) {
-								return;
-							}
-
-							safeSetGraph(result);
-							writeCachedTrajectoryGraph(graphCacheKey, result);
-						})
-						.catch((err) => {
-							if (!isMounted) {
-								return;
-							}
-
-							console.error('[trajectory] Failed to refine graph', err);
-						})
-						.finally(() => {
-							if (!isMounted) {
-								return;
-							}
-
-							setIsRefiningGraph(false);
-						});
-				}, HASH_REFINEMENT_IDLE_TIMEOUT);
+				startHashRefinement();
 			})
 			.catch((err) => {
 				if (isMounted) {

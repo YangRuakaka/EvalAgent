@@ -11,6 +11,38 @@ import './TrajectoryVisualizer.css';
 
 const EMPTY_GRAPH = Object.freeze({ nodes: [], links: [], clusters: [], meta: {} });
 const HASH_REFINEMENT_IDLE_TIMEOUT = 600;
+const TRAJECTORY_GRAPH_CACHE_LIMIT = 12;
+const trajectoryGraphCache = new Map();
+
+const readCachedTrajectoryGraph = (cacheKey) => {
+	if (!cacheKey || !trajectoryGraphCache.has(cacheKey)) {
+		return null;
+	}
+
+	const cached = trajectoryGraphCache.get(cacheKey);
+	trajectoryGraphCache.delete(cacheKey);
+	trajectoryGraphCache.set(cacheKey, cached);
+	return cached;
+};
+
+const writeCachedTrajectoryGraph = (cacheKey, graph) => {
+	if (!cacheKey || !graph) {
+		return;
+	}
+
+	if (trajectoryGraphCache.has(cacheKey)) {
+		trajectoryGraphCache.delete(cacheKey);
+	}
+
+	trajectoryGraphCache.set(cacheKey, graph);
+
+	if (trajectoryGraphCache.size > TRAJECTORY_GRAPH_CACHE_LIMIT) {
+		const oldestKey = trajectoryGraphCache.keys().next().value;
+		if (oldestKey) {
+			trajectoryGraphCache.delete(oldestKey);
+		}
+	}
+};
 
 const scheduleIdleWork = (callback, timeout = 500) => {
 	if (typeof callback !== 'function') {
@@ -213,6 +245,7 @@ const LinkActionPopUp = ({ link, legendEntries, onClose }) => {
 };
 
 const TrajectoryVisualizer = ({
+	runId,
 	trajectory,
 	conditions,
 	useImageHashEnabled,
@@ -331,6 +364,33 @@ const TrajectoryVisualizer = ({
 			})
 			.join('||');
 	}, [conditions]);
+	const trajectorySummarySignature = useMemo(() => {
+		const details = Array.isArray(trajectory?.details) ? trajectory.details : [];
+		if (!details.length) {
+			return 'details:0';
+		}
+
+		const first = details[0] || {};
+		const last = details[details.length - 1] || {};
+		const firstId = first.id || first.step_id || first.run_index || 'f';
+		const lastId = last.id || last.step_id || last.run_index || 'l';
+		return `details:${details.length}|first:${String(firstId)}|last:${String(lastId)}`;
+	}, [trajectory]);
+	const graphCacheKey = useMemo(() => {
+		if (!hasTrajectory) {
+			return null;
+		}
+
+		const runKey = runId || 'active';
+		return [
+			String(runKey),
+			trajectorySummarySignature,
+			conditionsSignature,
+			useImageHash ? 'hash:on' : 'hash:off',
+			shouldUsePreviewImage ? 'preview:on' : 'preview:off',
+			`refresh:${refreshNonce}`,
+		].join('::');
+	}, [hasTrajectory, runId, trajectorySummarySignature, conditionsSignature, useImageHash, shouldUsePreviewImage, refreshNonce]);
 
 	useEffect(() => {
 		conditionsRef.current = Array.isArray(conditions) ? conditions : [];
@@ -379,6 +439,18 @@ const TrajectoryVisualizer = ({
 			};
 		}
 
+		const cachedGraph = readCachedTrajectoryGraph(graphCacheKey);
+		if (cachedGraph) {
+			setGraph(cachedGraph);
+			setError(null);
+			setIsProcessing(false);
+			setIsRefiningGraph(false);
+			return () => {
+				isMounted = false;
+				cancelRefinement();
+			};
+		}
+
 		setIsProcessing(true);
 		setError(null);
 		setIsRefiningGraph(false);
@@ -407,6 +479,7 @@ const TrajectoryVisualizer = ({
 					}
 
 					safeSetGraph(result);
+					writeCachedTrajectoryGraph(graphCacheKey, result);
 					setIsProcessing(false);
 				})
 				.catch((err) => {
@@ -432,6 +505,7 @@ const TrajectoryVisualizer = ({
 				}
 
 				safeSetGraph(previewGraph);
+				writeCachedTrajectoryGraph(graphCacheKey, previewGraph);
 				setIsProcessing(false);
 
 				if (!useImageHash) {
@@ -447,6 +521,7 @@ const TrajectoryVisualizer = ({
 							}
 
 							safeSetGraph(result);
+							writeCachedTrajectoryGraph(graphCacheKey, result);
 						})
 						.catch((err) => {
 							if (!isMounted) {
@@ -478,7 +553,7 @@ const TrajectoryVisualizer = ({
 			isMounted = false;
 			cancelRefinement();
 		};
-	}, [hasTrajectory, trajectory, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage, refreshNonce]);
+	}, [hasTrajectory, trajectory, graphCacheKey, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage, refreshNonce]);
 
 
 	const legendEntries = useMemo(() => {
@@ -934,6 +1009,7 @@ const TrajectoryVisualizer = ({
 };
 
 TrajectoryVisualizer.propTypes = {
+	runId: PropTypes.string,
 	trajectory: PropTypes.shape({
 		steps: PropTypes.number,
 		maxReturn: PropTypes.number,
@@ -965,6 +1041,7 @@ TrajectoryVisualizer.propTypes = {
 };
 
 TrajectoryVisualizer.defaultProps = {
+	runId: null,
 	trajectory: undefined,
 	conditions: [],
 	useImageHashEnabled: undefined,

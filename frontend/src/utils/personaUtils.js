@@ -18,7 +18,11 @@ export const assignPersonaNames = (personas) => {
 	const counts = {};
 
 	return personas.map((persona) => {
-		const baseName = getPersonaBaseName(persona.content);
+		const originalName = persona.originalName;
+		let baseName = (typeof originalName === 'string' && originalName.trim().length > 0)
+			? originalName.trim()
+			: getPersonaBaseName(persona.content);
+
 		const nextCount = (counts[baseName] || 0) + 1;
 		counts[baseName] = nextCount;
 		const suffix = nextCount === 1 ? '' : String(nextCount - 1).padStart(2, '0');

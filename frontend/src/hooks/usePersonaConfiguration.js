@@ -107,9 +107,17 @@ export const usePersonaConfiguration = () => {
 
 		const personaContent = personaResult.content;
 		const newId = `persona-${Date.now()}`;
+		const inputName = typeof formData.name === 'string' ? formData.name.trim() : '';
+		const safeOriginalName = inputName.length > 0 ? inputName : 'Persona';
+		
 		const nextGallery = assignPersonaNames([
 			...personaGallery,
-			{ id: newId, content: personaContent, name: '' },
+			{ 
+				id: newId, 
+				content: personaContent, 
+				name: safeOriginalName, // Temporary name before assignment
+				originalName: safeOriginalName 
+			},
 		]);
 
 		// Add to gallery and select new persona, then hide the generated result

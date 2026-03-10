@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     BROWSER_AGENT_RUN_OUTPUT_DIR: str = "browser_agent_runs"
     # Legacy setting kept for backward compatibility with existing deployments.
     BROWSER_AGENT_OUTPUT_DIR: str = "history_logs"
-    BROWSER_AGENT_MAX_STEPS: int = 30
+    BROWSER_AGENT_MAX_STEPS: int = 20
     BROWSER_AGENT_MAX_CONCURRENT: int = 4  # Max concurrent browser agents per run
     BROWSER_AGENT_MAX_CONCURRENT_CAP: int = 4  # Safety cap to avoid too many concurrent browser sessions
     BROWSER_AGENT_CONCURRENCY_FALLBACK_ENABLED: bool = True  # Auto rollback to lower concurrency on resource/startup pressure

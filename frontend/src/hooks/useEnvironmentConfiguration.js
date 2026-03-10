@@ -349,6 +349,13 @@ export const useEnvironmentConfiguration = (
 						}
 
 						if (data?.status === 'failed' || data?.status === 'cancelled') {
+							const runResults = Array.isArray(data?.results) ? data.results : [];
+							if (runResults.length) {
+								setEnvironmentRunResult(runResults);
+								if (typeof onAddRun === 'function') {
+									onAddRun({ results: runResults }, { activate: false });
+								}
+							}
 							setEnvironmentRunError(data?.error || 'Browser agent run failed.');
 							emitEnvironmentRunState({
 								runId,
@@ -380,6 +387,13 @@ export const useEnvironmentConfiguration = (
 						}
 
 						if (data?.status === 'failed' || data?.status === 'cancelled') {
+							const runResults = Array.isArray(data?.results) ? data.results : [];
+							if (runResults.length) {
+								setEnvironmentRunResult(runResults);
+								if (typeof onAddRun === 'function') {
+									onAddRun({ results: runResults }, { activate: false });
+								}
+							}
 							setEnvironmentRunError(data?.error || 'Browser agent run failed.');
 						}
 

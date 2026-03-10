@@ -128,6 +128,7 @@ class BrowserAgentService:
     _LOG_HANDLER_INSTALL_LOCK = threading.Lock()
     _LOG_HANDLER_INSTALLED = False
     _ACTIVE_RUN_STATUSES = {"queued", "running"}
+    _MAX_AGENT_STEPS_CAP = 20
 
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -865,12 +866,18 @@ class BrowserAgentService:
                 )
 
         except asyncio.TimeoutError:
+            timeout_error = f"Run timed out after {timeout} seconds"
+            fallback_results = self._build_failed_results_for_request(
+                request=request,
+                run_id=run_id,
+                final_result=timeout_error,
+            )
             runtime_stats = self._get_run_runtime_stats(run_id)
             self._set_run_status(
                 run_id,
                 "failed",
-                results=None,
-                error=f"Run timed out after {timeout} seconds",
+                results=fallback_results,
+                error=timeout_error,
                 runtime=runtime_stats,
             )
             logger.warning("Background run timed out | run_id=%s timeout=%ds", run_id, timeout)
@@ -890,11 +897,16 @@ class BrowserAgentService:
             self._append_run_log(run_id, f"Background execution cancelled | run_id={run_id}")
 
         except Exception as exc:
+            fallback_results = self._build_failed_results_for_request(
+                request=request,
+                run_id=run_id,
+                final_result=str(exc),
+            )
             runtime_stats = self._get_run_runtime_stats(run_id)
             self._set_run_status(
                 run_id,
                 "failed",
-                results=None,
+                results=fallback_results,
                 error=str(exc),
                 runtime=runtime_stats,
             )
@@ -980,6 +992,27 @@ class BrowserAgentService:
             })
 
         return processed
+
+    def _build_failed_results_for_request(
+        self,
+        *,
+        request: BrowserAgentRunRequest,
+        run_id: str,
+        final_result: str,
+    ) -> list:
+        failed_results: List[BrowserAgentRunResult] = []
+        for persona in request.personas:
+            for model_name in request.models:
+                for run_index in range(1, request.run_times + 1):
+                    failed_results.append(
+                        self._build_failed_run_result(
+                            model_name=model_name,
+                            run_index=run_index,
+                            persona=persona,
+                            final_result=final_result,
+                        )
+                    )
+        return self._post_process_results(request, failed_results, run_id=run_id)
 
     # ── End background run management ──────────────────────────────────
 
@@ -1156,7 +1189,8 @@ class BrowserAgentService:
                 generate_gif=False,
             )
 
-            max_steps = self._settings.BROWSER_AGENT_MAX_STEPS
+            configured_max_steps = int(getattr(self._settings, "BROWSER_AGENT_MAX_STEPS", self._MAX_AGENT_STEPS_CAP))
+            max_steps = max(1, min(configured_max_steps, self._MAX_AGENT_STEPS_CAP))
             history = await self._run_agent_with_compatible_loop(agent, max_steps=max_steps)
 
             # Log history object details for debugging
@@ -1936,7 +1970,7 @@ class BrowserAgentService:
         if url:
             task_prompt = f"{task_prompt} (Website: {url})"
 
-        prompt = f"Complete this task: {task_prompt}"
+        prompt = f"Complete this task based on the following persona: {task_prompt}"
         if persona:
             prompt = f"{prompt}\nPersona: {persona}"
         return prompt

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import './ConfigurationCommon.css';
 import './EnvironmentSetting.css';
 import EditVariationModal from '../common/EditVariationModal';
+import { TARGET_BASE_URL, TARGET_URL_OPTIONS } from '../../config/runtimeConfig';
 
 
 const EnvironmentSetting = ({
@@ -271,15 +272,12 @@ const EnvironmentSetting = ({
                   value={environmentTaskUrl}
                   onChange={(e) => handleTaskUrlChange(e.target.value)}
                   list="task-url-options"
-                  placeholder="http://34.55.136.249:3000/..."
+                  placeholder={`${TARGET_BASE_URL}/...`}
                 />
                 <datalist id="task-url-options">
-                  <option value="http://34.55.136.249:3000/riverbuy" label="RiverBuy" />
-                  <option value="http://34.55.136.249:3000/flight" label="Flight" />
-                  <option value="http://34.55.136.249:3000/grumble" label="Grumble" />
-                  <option value="http://34.55.136.249:3000/zoomcar" label="Zoomcar" />
-                  <option value="http://34.55.136.249:3000/stayscape" label="StayScape" />
-                  <option value="http://34.55.136.249:3000/dwellio" label="Dwellio" />
+                  {TARGET_URL_OPTIONS.map((option) => (
+                    <option key={option.path} value={option.value} label={option.label} />
+                  ))}
                 </datalist>
               </div>
 

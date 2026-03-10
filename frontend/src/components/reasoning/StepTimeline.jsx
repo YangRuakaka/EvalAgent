@@ -121,7 +121,7 @@ const StepTimeline = ({
 	/**
 	 * 渲染单个step的evaluation指示器
 	 */
-	const renderEvaluationIndicators = (step, stepIndex) => {
+	const renderEvaluationIndicators = (step, stepIndex, isSelected = false) => {
 		if (!showEvidenceHighlights) {
 			return null;
 		}
@@ -138,7 +138,7 @@ const StepTimeline = ({
 		}
 		
 		return (
-			<div className="step-evaluation-indicators">
+			<div className={`step-evaluation-indicators ${isSelected ? 'step-evaluation-indicators--selected' : ''}`}>
 				{evals.map((evaluation, idx) => {
 					const status = (evaluation.evaluateStatus || evaluation.verdict || 'unable_to_evaluate').toLowerCase();
 					
@@ -235,7 +235,7 @@ const StepTimeline = ({
 								</button>
 								
 								{/* Evaluation指示器 */}
-								{renderEvaluationIndicators(step, index)}
+								{renderEvaluationIndicators(step, index, isSelected)}
 
 								{isSelected && step.screenshot && (
 									<button

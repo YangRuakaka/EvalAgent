@@ -1,4 +1,6 @@
 
+import { API_BASE_URL } from '../../config/runtimeConfig';
+
 const sanitizeBaseUrl = (value) => {
   if (!value) {
     return '';
@@ -12,7 +14,7 @@ const sanitizeBaseUrl = (value) => {
 };
 
 const defaultConfig = {
-  baseUrl: sanitizeBaseUrl(process.env.REACT_APP_API_BASE_URL || 'https://eval-agent-backend-588077581214.us-central1.run.app/api/v1/'),
+  baseUrl: sanitizeBaseUrl(API_BASE_URL),
   enableNetwork: true,
 };
 

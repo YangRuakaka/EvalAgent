@@ -303,6 +303,12 @@ async def _process_single_criterion(
         
         # Map to response format
         logger.info(f"Mapping evaluation result. Verdict: {eval_result.verdict}, Relevant steps: {eval_result.relevant_steps}")
+
+        normalized_overall_verdict = (
+            EvaluateStatus(eval_result.verdict.lower())
+            if eval_result.verdict.lower() in ["pass", "fail", "partial"]
+            else EvaluateStatus.UNKNOWN
+        )
         
         involved_steps_list = []
         
@@ -336,7 +342,7 @@ async def _process_single_criterion(
                 
                 # Fallback to overall verdict if step verdict is missing
                 if not step_verdict:
-                    step_verdict = EvaluateStatus(eval_result.verdict.lower()) if eval_result.verdict.lower() in ["pass", "fail", "partial"] else EvaluateStatus.UNKNOWN
+                    step_verdict = normalized_overall_verdict
                 
                 # Determine reasoning
                 step_reasoning = "; ".join([ev.reasoning for ev in ev_list if ev.reasoning])
@@ -358,6 +364,60 @@ async def _process_single_criterion(
                     steps=[step_idx]
                 )
                 involved_steps_list.append(step_detail)
+
+        if not involved_steps_list:
+            raw_relevant_steps = [
+                step_idx
+                for step_idx in (eval_result.relevant_steps or [])
+                if isinstance(step_idx, int)
+            ]
+            valid_relevant_steps = sorted(
+                {
+                    step_idx
+                    for step_idx in raw_relevant_steps
+                    if 0 <= step_idx < len(all_steps)
+                }
+            )
+
+            if not valid_relevant_steps and raw_relevant_steps:
+                one_based_candidates = {
+                    step_idx - 1
+                    for step_idx in raw_relevant_steps
+                    if 1 <= step_idx <= len(all_steps)
+                }
+                valid_relevant_steps = sorted(
+                    {
+                        step_idx
+                        for step_idx in one_based_candidates
+                        if 0 <= step_idx < len(all_steps)
+                    }
+                )
+
+            if valid_relevant_steps:
+                logger.warning(
+                    "No grounded highlighted evidence for criterion '%s'; fallback to relevant_steps=%s",
+                    crit.title,
+                    valid_relevant_steps,
+                )
+                involved_steps_list.append(
+                    StepEvaluationDetail(
+                        granularity=target_granularity,
+                        evaluateStatus=normalized_overall_verdict,
+                        reasoning=eval_result.reasoning or "No grounded highlighted evidence returned by evaluator.",
+                        highlighted_evidence=[],
+                        confidenceScore=_compute_step_confidence(
+                            [],
+                            float(eval_result.confidence_score or 0.0),
+                        ),
+                        steps=valid_relevant_steps,
+                    )
+                )
+            else:
+                logger.warning(
+                    "No grounded highlighted evidence and no valid relevant_steps for criterion '%s' (raw_relevant_steps=%s)",
+                    crit.title,
+                    raw_relevant_steps,
+                )
         
         logger.info(f"Created {len(involved_steps_list)} StepEvaluationDetail objects")
         

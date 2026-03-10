@@ -33,15 +33,6 @@ const VALUE_VARIATION_OPTIONS = [
 	{ value: 'health conscious', label: 'Health Conscious', color: '#e0e7ff', textColor: '#4338ca' },
 ];
 
-const ENVIRONMENT_TARGET_BASE_URL = 'http://localhost:3000';
-
-// eslint-disable-next-line no-unused-vars
-const createEnvironmentTargetOption = (path, label) => ({
-	value: `${ENVIRONMENT_TARGET_BASE_URL}${path}`,
-	label,
-	path,
-});
-
 const ENVIRONMENT_MODEL_OPTIONS = [
 	{ value: 'deepseek-chat', label: 'DeepSeek Chat' },
 	{ value: 'gpt-4o', label: 'OpenAI GPT-4o' },

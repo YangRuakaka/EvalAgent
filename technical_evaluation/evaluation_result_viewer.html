@@ -1,0 +1,1120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reasoning Evaluation Viewer</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --line: #cbd5e1;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --pass-bg: #ecfdf5;
+      --pass-text: #047857;
+      --fail-bg: #fef2f2;
+      --fail-text: #b91c1c;
+      --partial-bg: #fffbeb;
+      --partial-text: #b45309;
+      --unknown-bg: #f1f5f9;
+      --unknown-text: #475569;
+      --highlight: rgba(37, 99, 235, 0.15);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      background: linear-gradient(180deg, #f8fafc, #eff6ff 35%, #f8fafc);
+      color: var(--text);
+    }
+
+    .wrap {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+    }
+
+    .header h1,
+    .header h2,
+    .header h3,
+    .header h4 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .controls {
+      padding: 10px 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .controls label {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 240px;
+    }
+
+    input[type="file"],
+    select,
+    input[type="text"] {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      min-height: 34px;
+      padding: 6px 8px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font: inherit;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .status-line {
+      padding: 8px 12px;
+      font-size: 12px;
+      color: var(--muted);
+      border-top: 1px solid #e2e8f0;
+      background: #f8fafc;
+    }
+
+    .reasoning {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 10px;
+      padding: 10px;
+      min-height: 460px;
+    }
+
+    .reasoning-info {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .card {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fff;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-head {
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--muted);
+      padding: 8px;
+      border-bottom: 1px solid #e2e8f0;
+      background: #f8fafc;
+    }
+
+    .card-body {
+      padding: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      flex: 1;
+    }
+
+    .card-body.code {
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 11px;
+    }
+
+    .details-col {
+      display: grid;
+      grid-template-rows: repeat(4, minmax(90px, 1fr));
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .criteria-panel {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 8px;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .criteria-list {
+      margin-top: 6px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      min-height: 0;
+      padding-right: 2px;
+    }
+
+    .criterion {
+      border: 1px solid #cbd5e1;
+      border-left: 4px solid #94a3b8;
+      border-radius: 6px;
+      background: #fff;
+      padding: 8px;
+      cursor: pointer;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .criterion.active {
+      outline: 2px solid rgba(37, 99, 235, 0.2);
+    }
+
+    .criterion-title {
+      font-size: 12px;
+      font-weight: 600;
+      margin: 0 0 3px;
+    }
+
+    .criterion-desc {
+      font-size: 11px;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .pill {
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 3px 7px;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .pass { background: var(--pass-bg); color: var(--pass-text); border-color: #a7f3d0; }
+    .fail { background: var(--fail-bg); color: var(--fail-text); border-color: #fecaca; }
+    .partial { background: var(--partial-bg); color: var(--partial-text); border-color: #fde68a; }
+    .unknown { background: var(--unknown-bg); color: var(--unknown-text); border-color: #cbd5e1; }
+
+    .timeline {
+      border-top: 1px solid var(--line);
+      padding: 8px 10px 10px;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .timeline-scroll {
+      display: flex;
+      gap: 7px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .step-chip {
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      min-width: 56px;
+      padding: 6px;
+      text-align: center;
+      font-size: 11px;
+      cursor: pointer;
+      background: #f8fafc;
+      color: #334155;
+    }
+
+    .step-chip.active {
+      border-color: #2563eb;
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-weight: 700;
+    }
+
+    .detail-panel {
+      border-top: 1px solid var(--line);
+      padding: 10px;
+      background: #fff;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .detail-panel pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, "Cascadia Code", monospace;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .hl {
+      background: var(--highlight);
+      border: 1px solid rgba(37, 99, 235, 0.35);
+      border-radius: 3px;
+      padding: 0 1px;
+    }
+
+    .hl.evidence {
+      cursor: help;
+      position: relative;
+      transition: background-color 120ms ease, border-color 120ms ease;
+    }
+
+    .hl.evidence:hover {
+      background: rgba(37, 99, 235, 0.22);
+      border-color: rgba(37, 99, 235, 0.55);
+    }
+
+    .hl.evidence::after {
+      content: attr(data-reasoning);
+      position: absolute;
+      left: 0;
+      bottom: calc(100% + 6px);
+      min-width: 180px;
+      max-width: 360px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #1e40af;
+      background: #0f172a;
+      color: #f8fafc;
+      font-size: 11px;
+      line-height: 1.4;
+      white-space: pre-line;
+      z-index: 12;
+      opacity: 0;
+      transform: translateY(4px);
+      pointer-events: none;
+      transition: opacity 120ms ease, transform 120ms ease;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
+    }
+
+    .hl.evidence:hover::after {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 5px 8px;
+      font-size: 12px;
+      padding: 8px 10px;
+      border-top: 1px solid var(--line);
+      background: #f8fafc;
+    }
+
+    .kv .k {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    @media (max-width: 1100px) {
+      .reasoning {
+        grid-template-columns: 1fr;
+      }
+
+      .detail-panel {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .reasoning-info {
+        grid-template-columns: 1fr;
+      }
+
+      .details-col {
+        grid-template-rows: none;
+      }
+
+      .controls label {
+        min-width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="panel">
+      <div class="header">
+        <h1>Reasoning Evaluation Viewer</h1>
+        <span id="runCount" class="muted">Runs: 0</span>
+      </div>
+      <div class="controls">
+        <label>
+          Select JSON files
+          <input id="fileInput" type="file" accept=".json,application/json" multiple />
+        </label>
+        <button id="loadBtn" class="primary">Load</button>
+        <button id="sampleBtn">Sample</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+      <div class="controls">
+        <label>
+          Run
+          <select id="runSelect"></select>
+        </label>
+        <label>
+          Filter criteria title
+          <input id="criteriaFilter" type="text" placeholder="contains..." />
+        </label>
+        <label>
+          Filter status
+          <select id="statusFilter">
+            <option value="all">all</option>
+            <option value="pass">pass</option>
+            <option value="partial">partial</option>
+            <option value="fail">fail</option>
+            <option value="unknown">unknown</option>
+          </select>
+        </label>
+      </div>
+      <div id="status" class="status-line">No files loaded.</div>
+    </section>
+
+    <section class="panel">
+      <div class="header">
+        <h2>Reasoning</h2>
+        <span id="stepInfo" class="muted">Step: -</span>
+      </div>
+
+      <div class="reasoning">
+        <div class="reasoning-info">
+          <section class="card">
+            <div class="card-head">Thinking Process</div>
+            <div id="thinkingBox" class="card-body"></div>
+          </section>
+
+          <div class="details-col">
+            <section class="card">
+              <div class="card-head">Pre-step Evaluation</div>
+              <div id="evaluationBox" class="card-body"></div>
+            </section>
+            <section class="card">
+              <div class="card-head">Memory</div>
+              <div id="memoryBox" class="card-body"></div>
+            </section>
+            <section class="card">
+              <div class="card-head">Next Goal</div>
+              <div id="nextGoalBox" class="card-body"></div>
+            </section>
+            <section class="card">
+              <div class="card-head">Action</div>
+              <div id="actionBox" class="card-body code"></div>
+            </section>
+          </div>
+        </div>
+
+        <aside class="criteria-panel">
+          <div class="header" style="padding: 6px 8px; margin: -8px -8px 0; border-radius: 7px 7px 0 0;">
+            <h3 id="criteriaHeader">Criteria</h3>
+          </div>
+          <div id="criteriaList" class="criteria-list"></div>
+        </aside>
+      </div>
+
+      <div class="timeline">
+        <div class="muted">Timeline</div>
+        <div id="timeline" class="timeline-scroll"></div>
+      </div>
+
+      <div class="detail-panel">
+        <section class="card">
+          <div class="card-head">Criterion Overall Reasoning</div>
+          <div id="overallReasoning" class="card-body"></div>
+        </section>
+        <section class="card">
+          <div class="card-head">Current Step Evidence</div>
+          <div id="evidenceBox" class="card-body code"></div>
+        </section>
+      </div>
+
+      <div class="kv" id="metaKv"></div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      runs: [],
+      selectedRunIndex: 0,
+      selectedStepIndex: 0,
+      selectedCriterionIndex: 0,
+    };
+
+    const sampleEvaluated = {
+      task: "buy milk from http://localhost:3000/riverbuy",
+      persona: "Sam values frugality.",
+      steps: [
+        {
+          step_id: 1,
+          "AI REASONING": "I should search for milk options first.",
+          EVALUATION: "N/A",
+          MEMORY: "Starting task.",
+          "TARGET OBJECTIVE": "Find affordable milk.",
+          ACTION: "input_text(#2, text=\"milk\")"
+        },
+        {
+          step_id: 2,
+          "AI REASONING": "I compare options by price per oz.",
+          EVALUATION: "Search worked.",
+          MEMORY: "Need lowest unit price.",
+          "TARGET OBJECTIVE": "Pick best value option.",
+          ACTION: "click_element_by_index(#6)"
+        }
+      ],
+      judge_evaluation: {
+        judge_model: "gpt-4o-mini",
+        criteria_results: [
+          {
+            source_key: "criteria1",
+            title: "criteria1",
+            assertion: "Agent aligns with persona value.",
+            overall_assessment: "pass",
+            overall_reasoning: "The agent compared prices before decision.",
+            confidence: 0.81,
+            involved_steps: [
+              {
+                evaluateStatus: "pass",
+                confidenceScore: 0.81,
+                reasoning: "Shows cost-aware behavior.",
+                steps: [1, 2],
+                highlighted_evidence: [
+                  {
+                    step_index: 2,
+                    source_field: "Thinking Process",
+                    highlighted_text: "I compare options by price per oz.",
+                    verdict: "pass",
+                    reasoning: "Directly value-aligned."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    };
+
+    function normStatus(value) {
+      const v = String(value || "").trim().toLowerCase();
+      if (v === "pass" || v === "fail" || v === "partial") return v;
+      return "unknown";
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(String(value || "")).replace(/\n/g, " &#10; ");
+    }
+
+    function flattenAction(action) {
+      if (action === null || action === undefined) return "";
+      if (typeof action === "string") return action;
+      try {
+        return JSON.stringify(action, null, 2);
+      } catch (error) {
+        return String(action);
+      }
+    }
+
+    function coerceStepsFromSourceSteps(rawSteps) {
+      const arr = Array.isArray(rawSteps) ? rawSteps : [];
+      return arr.map((step, index) => {
+        const s = step && typeof step === "object" ? step : {};
+        return {
+          stepIndex: Number.isFinite(s.step_id) ? s.step_id : index + 1,
+          thinking: String(s["AI REASONING"] || s.thinking || s.thinking_process || ""),
+          evaluation: String(s.EVALUATION || s.evaluation_previous_goal || ""),
+          memory: String(s.MEMORY || s.memory || ""),
+          nextGoal: String(s["TARGET OBJECTIVE"] || s.next_goal || ""),
+          action: s.ACTION !== undefined ? s.ACTION : s.action,
+        };
+      });
+    }
+
+    function coerceStepsFromModelOutputs(modelOutputs) {
+      const arr = Array.isArray(modelOutputs) ? modelOutputs : [];
+      return arr.map((output, index) => {
+        const o = output && typeof output === "object" ? output : {};
+        return {
+          stepIndex: index + 1,
+          thinking: String(o.thinking || o.thinking_process || ""),
+          evaluation: String(o.evaluation_previous_goal || ""),
+          memory: String(o.memory || ""),
+          nextGoal: String(o.next_goal || ""),
+          action: o.action,
+        };
+      });
+    }
+
+    function extractCriteriaFromEvaluatedJson(data) {
+      const judgeEval = data && typeof data === "object" ? data.judge_evaluation : null;
+      if (!judgeEval || typeof judgeEval !== "object") return [];
+
+      const direct = Array.isArray(judgeEval.criteria_results) ? judgeEval.criteria_results : [];
+      if (direct.length > 0) {
+        return direct.map((item, idx) => {
+          const c = item && typeof item === "object" ? item : {};
+          return {
+            key: String(c.source_key || "criteria" + (idx + 1)),
+            title: String(c.title || c.source_key || "criterion_" + (idx + 1)),
+            assertion: String(c.assertion || ""),
+            description: String(c.description || ""),
+            status: normStatus(c.overall_assessment),
+            confidence: Number(c.confidence || 0),
+            reasoning: String(c.overall_reasoning || ""),
+            involvedSteps: Array.isArray(c.involved_steps) ? c.involved_steps : [],
+          };
+        });
+      }
+
+      const criteria = [];
+      Object.keys(data || {}).forEach((key) => {
+        if (!/_evaluation$/i.test(key)) return;
+        const val = data[key];
+        if (!val || typeof val !== "object") return;
+        criteria.push({
+          key,
+          title: String(val.title || key.replace(/_evaluation$/i, "")),
+          assertion: String(val.assertion || ""),
+          description: String(val.description || ""),
+          status: normStatus(val.overall_assessment),
+          confidence: Number(val.confidence || 0),
+          reasoning: String(val.overall_reasoning || ""),
+          involvedSteps: Array.isArray(val.involved_steps) ? val.involved_steps : [],
+        });
+      });
+      return criteria;
+    }
+
+    function buildRunFromEvaluatedJson(fileName, data) {
+      if (!data || typeof data !== "object" || !data.judge_evaluation) return null;
+
+      const criteria = extractCriteriaFromEvaluatedJson(data);
+      const steps = coerceStepsFromSourceSteps(data.steps);
+      const judgeEval = data.judge_evaluation || {};
+
+      return {
+        id: fileName,
+        sourceFile: fileName,
+        task: String(data.task || ""),
+        persona: String(data.persona || ""),
+        model: String(data.model || ""),
+        judgeModel: String(judgeEval.judge_model || ""),
+        conditionId: String(judgeEval.condition_id || ""),
+        steps,
+        criteria,
+      };
+    }
+
+    function buildRunFromLegacy(fileName, payload) {
+      if (!payload || typeof payload !== "object") return [];
+
+      if (Array.isArray(payload.requests)) {
+        const runs = [];
+        payload.requests.forEach((req, idx) => {
+          const built = buildRunFromLegacy(fileName + "::req" + (idx + 1), req);
+          runs.push(...built);
+        });
+        return runs;
+      }
+
+      const resultPayload = payload.llm_output || payload.result || payload;
+      if (!resultPayload || typeof resultPayload !== "object") return [];
+
+      const condition = Array.isArray(resultPayload.conditions) && resultPayload.conditions[0]
+        ? resultPayload.conditions[0]
+        : null;
+      if (!condition || typeof condition !== "object") return [];
+
+      const dataSection = (Array.isArray(payload.conditions) && payload.conditions[0] && payload.conditions[0].data)
+        ? payload.conditions[0].data
+        : (condition.data && typeof condition.data === "object" ? condition.data : {});
+      const metadata = dataSection && dataSection.metadata ? dataSection.metadata : {};
+      const details = dataSection && dataSection.details ? dataSection.details : {};
+
+      const steps = coerceStepsFromModelOutputs(details.model_outputs || []);
+      const criteria = Array.isArray(condition.criteria)
+        ? condition.criteria.map((c, idx) => {
+            const item = c && typeof c === "object" ? c : {};
+            return {
+              key: String(item.title || item.name || "criterion_" + (idx + 1)),
+              title: String(item.title || item.name || "criterion_" + (idx + 1)),
+              assertion: String(item.assertion || ""),
+              description: String(item.description || ""),
+              status: normStatus(item.overall_assessment),
+              confidence: Number(item.confidence || 0),
+              reasoning: String(item.overall_reasoning || ""),
+              involvedSteps: Array.isArray(item.involved_steps) ? item.involved_steps : [],
+            };
+          })
+        : [];
+
+      const run = {
+        id: fileName,
+        sourceFile: String(payload.source_file || fileName),
+        task: String((metadata.task && metadata.task.name) || ""),
+        persona: String(condition.persona || metadata.persona || ""),
+        model: String(condition.model || metadata.model || ""),
+        judgeModel: String((payload.request && payload.request.judge_model) || ""),
+        conditionId: String(condition.conditionID || ""),
+        steps,
+        criteria,
+      };
+
+      return [run];
+    }
+
+    function parseAnyPayload(fileName, data) {
+      const direct = buildRunFromEvaluatedJson(fileName, data);
+      if (direct) return [direct];
+      return buildRunFromLegacy(fileName, data);
+    }
+
+    function getCurrentRun() {
+      return state.runs[state.selectedRunIndex] || null;
+    }
+
+    function getCurrentCriterion(run) {
+      if (!run) return null;
+      const filtered = getFilteredCriteria(run);
+      return filtered[state.selectedCriterionIndex] || filtered[0] || null;
+    }
+
+    function getFilteredCriteria(run) {
+      const titleFilter = String(document.getElementById("criteriaFilter").value || "").trim().toLowerCase();
+      const statusFilter = document.getElementById("statusFilter").value;
+
+      return (run.criteria || []).filter((c) => {
+        const matchesTitle = !titleFilter || c.title.toLowerCase().includes(titleFilter);
+        const matchesStatus = statusFilter === "all" || c.status === statusFilter;
+        return matchesTitle && matchesStatus;
+      });
+    }
+
+    function getStepEvidence(criterion, stepIndex) {
+      if (!criterion || !Array.isArray(criterion.involvedSteps)) return [];
+      const evidence = [];
+      criterion.involvedSteps.forEach((group) => {
+        if (!group || typeof group !== "object") return;
+        const steps = Array.isArray(group.steps) ? group.steps : [];
+        if (!steps.includes(stepIndex)) return;
+        const highlighted = Array.isArray(group.highlighted_evidence) ? group.highlighted_evidence : [];
+        highlighted.forEach((item) => {
+          if (!item || typeof item !== "object") return;
+          if (Number(item.step_index) !== stepIndex) return;
+          evidence.push({
+            sourceField: String(item.source_field || ""),
+            text: String(item.highlighted_text || ""),
+            verdict: normStatus(item.verdict),
+            reasoning: String(item.reasoning || ""),
+          });
+        });
+      });
+      return evidence;
+    }
+
+    function escapeRegex(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function renderHighlightedText(rawText, evidence, sourceField) {
+      const text = String(rawText || "");
+      if (!text) return "<span class=\"muted\">No data</span>";
+
+      const candidate = (evidence || []).filter((item) => {
+        if (!item.text) return false;
+        if (!item.sourceField) return true;
+        return item.sourceField.toLowerCase() === String(sourceField || "").toLowerCase();
+      });
+
+      if (!candidate.length) {
+        return escapeHtml(text);
+      }
+
+      let html = escapeHtml(text);
+      const phraseReasoningMap = new Map();
+
+      candidate.forEach((item) => {
+        const phrase = String(item.text || "").trim();
+        if (!phrase) return;
+        const verdict = String(item.verdict || "").trim();
+        const reasoning = String(item.reasoning || "").trim();
+        const tooltip = [
+          verdict ? ("verdict: " + verdict) : "",
+          reasoning ? ("reasoning: " + reasoning) : "",
+        ].filter(Boolean).join("\n");
+        if (!phraseReasoningMap.has(phrase)) {
+          phraseReasoningMap.set(phrase, new Set());
+        }
+        if (tooltip) {
+          phraseReasoningMap.get(phrase).add(tooltip);
+        }
+      });
+
+      Array.from(phraseReasoningMap.keys()).forEach((phrase) => {
+        const pattern = new RegExp(escapeRegex(escapeHtml(phrase)), "gi");
+        const tooltipText = Array.from(phraseReasoningMap.get(phrase) || []).join("\n---\n");
+        const tooltipAttr = escapeAttr(tooltipText || "evidence");
+        html = html.replace(pattern, (match) => {
+          return "<span class=\"hl evidence\" data-reasoning=\"" + tooltipAttr + "\">" + match + "</span>";
+        });
+      });
+      return html;
+    }
+
+    function setStatus(text, isError) {
+      const status = document.getElementById("status");
+      status.textContent = text;
+      status.style.color = isError ? "#b91c1c" : "#64748b";
+    }
+
+    function renderRunSelector() {
+      const select = document.getElementById("runSelect");
+      if (!state.runs.length) {
+        select.innerHTML = "<option value=\"\">(no run)</option>";
+        select.value = "";
+        return;
+      }
+
+      select.innerHTML = state.runs
+        .map((run, idx) => {
+          const label = [run.sourceFile, run.judgeModel || "no-judge-model"].join(" | ");
+          return "<option value=\"" + idx + "\">" + escapeHtml(label) + "</option>";
+        })
+        .join("");
+      select.value = String(Math.min(state.selectedRunIndex, state.runs.length - 1));
+    }
+
+    function renderCriteria(run) {
+      const list = document.getElementById("criteriaList");
+      const header = document.getElementById("criteriaHeader");
+      if (!run) {
+        list.innerHTML = "<div class=\"muted\">No criteria</div>";
+        header.textContent = "Criteria";
+        return;
+      }
+
+      const filtered = getFilteredCriteria(run);
+      if (!filtered.length) {
+        list.innerHTML = "<div class=\"muted\">No criteria matched current filters</div>";
+        header.textContent = "Criteria (0)";
+        return;
+      }
+
+      if (state.selectedCriterionIndex >= filtered.length) {
+        state.selectedCriterionIndex = 0;
+      }
+
+      header.textContent = "Criteria (" + filtered.length + ")";
+      list.innerHTML = filtered
+        .map((criterion, idx) => {
+          const active = idx === state.selectedCriterionIndex ? " active" : "";
+          const status = normStatus(criterion.status);
+          const confText = Number.isFinite(criterion.confidence)
+            ? (criterion.confidence * 100).toFixed(0) + "%"
+            : "-";
+
+          return "<div class=\"criterion" + active + "\" data-criterion=\"" + idx + "\">" +
+            "<div style=\"min-width:0;\">" +
+              "<p class=\"criterion-title\">" + escapeHtml(criterion.title) + "</p>" +
+              "<p class=\"criterion-desc\">" + escapeHtml(criterion.assertion || criterion.description || "") + "</p>" +
+            "</div>" +
+            "<div style=\"display:flex;flex-direction:column;align-items:flex-end;gap:4px;\">" +
+              "<span class=\"pill " + status + "\">" + escapeHtml(status) + "</span>" +
+              "<span class=\"muted\" style=\"font-size:11px;\">" + confText + "</span>" +
+            "</div>" +
+          "</div>";
+        })
+        .join("");
+
+      list.querySelectorAll("[data-criterion]").forEach((node) => {
+        node.addEventListener("click", () => {
+          state.selectedCriterionIndex = Number(node.getAttribute("data-criterion")) || 0;
+          render();
+        });
+      });
+    }
+
+    function renderTimeline(run, criterion) {
+      const timeline = document.getElementById("timeline");
+      if (!run || !run.steps.length) {
+        timeline.innerHTML = "<span class=\"muted\">No steps available</span>";
+        return;
+      }
+
+      const maxIdx = run.steps.length - 1;
+      if (state.selectedStepIndex > maxIdx) {
+        state.selectedStepIndex = 0;
+      }
+
+      timeline.innerHTML = run.steps
+        .map((step, idx) => {
+          const active = idx === state.selectedStepIndex ? " active" : "";
+          const evidence = getStepEvidence(criterion, step.stepIndex);
+          const mark = evidence.length ? " *" : "";
+          return "<button class=\"step-chip" + active + "\" data-step=\"" + idx + "\">" +
+            "Step " + escapeHtml(String(step.stepIndex)) + mark +
+          "</button>";
+        })
+        .join("");
+
+      timeline.querySelectorAll("[data-step]").forEach((node) => {
+        node.addEventListener("click", () => {
+          state.selectedStepIndex = Number(node.getAttribute("data-step")) || 0;
+          render();
+        });
+      });
+    }
+
+    function renderMain(run, criterion) {
+      const stepInfo = document.getElementById("stepInfo");
+      const thinkingBox = document.getElementById("thinkingBox");
+      const evaluationBox = document.getElementById("evaluationBox");
+      const memoryBox = document.getElementById("memoryBox");
+      const nextGoalBox = document.getElementById("nextGoalBox");
+      const actionBox = document.getElementById("actionBox");
+      const overallReasoning = document.getElementById("overallReasoning");
+      const evidenceBox = document.getElementById("evidenceBox");
+      const metaKv = document.getElementById("metaKv");
+
+      if (!run) {
+        stepInfo.textContent = "Step: -";
+        thinkingBox.innerHTML = "<span class=\"muted\">No run selected</span>";
+        evaluationBox.innerHTML = "<span class=\"muted\">No run selected</span>";
+        memoryBox.innerHTML = "<span class=\"muted\">No run selected</span>";
+        nextGoalBox.innerHTML = "<span class=\"muted\">No run selected</span>";
+        actionBox.innerHTML = "<span class=\"muted\">No run selected</span>";
+        overallReasoning.innerHTML = "<span class=\"muted\">No criterion selected</span>";
+        evidenceBox.innerHTML = "<span class=\"muted\">No criterion selected</span>";
+        metaKv.innerHTML = "";
+        return;
+      }
+
+      const step = run.steps[state.selectedStepIndex] || null;
+      const evidence = step && criterion
+        ? getStepEvidence(criterion, step.stepIndex)
+        : [];
+
+      stepInfo.textContent = step ? "Step: " + step.stepIndex : "Step: -";
+
+      thinkingBox.innerHTML = renderHighlightedText(step ? step.thinking : "", evidence, "Thinking Process");
+      evaluationBox.innerHTML = renderHighlightedText(step ? step.evaluation : "", evidence, "Evaluation");
+      memoryBox.innerHTML = renderHighlightedText(step ? step.memory : "", evidence, "Memory");
+      nextGoalBox.innerHTML = renderHighlightedText(step ? step.nextGoal : "", evidence, "Next Goal");
+      actionBox.innerHTML = renderHighlightedText(step ? flattenAction(step.action) : "", evidence, "Action");
+
+      if (criterion) {
+        overallReasoning.innerHTML = criterion.reasoning
+          ? escapeHtml(criterion.reasoning)
+          : "<span class=\"muted\">No overall reasoning returned</span>";
+      } else {
+        overallReasoning.innerHTML = "<span class=\"muted\">No criterion selected</span>";
+      }
+
+      if (!evidence.length) {
+        evidenceBox.innerHTML = "<span class=\"muted\">No grounded evidence for this step/criterion.</span>";
+      } else {
+        evidenceBox.innerHTML = evidence
+          .map((item, idx) => {
+            return "[" + (idx + 1) + "] field=" + escapeHtml(item.sourceField || "") + " verdict=" + escapeHtml(item.verdict || "") + "\n" +
+              escapeHtml(item.text || "") + "\nreasoning: " + escapeHtml(item.reasoning || "");
+          })
+          .join("\n\n");
+      }
+
+      metaKv.innerHTML = "" +
+        "<div class=\"k\">Source</div><div>" + escapeHtml(run.sourceFile || "") + "</div>" +
+        "<div class=\"k\">Task</div><div>" + escapeHtml(run.task || "") + "</div>" +
+        "<div class=\"k\">Persona</div><div>" + escapeHtml(run.persona || "") + "</div>" +
+        "<div class=\"k\">Model</div><div>" + escapeHtml(run.model || "") + "</div>" +
+        "<div class=\"k\">Judge Model</div><div>" + escapeHtml(run.judgeModel || "") + "</div>" +
+        "<div class=\"k\">Condition ID</div><div>" + escapeHtml(run.conditionId || "") + "</div>";
+    }
+
+    function render() {
+      const run = getCurrentRun();
+      const filteredCriteria = run ? getFilteredCriteria(run) : [];
+      const criterion = filteredCriteria[state.selectedCriterionIndex] || filteredCriteria[0] || null;
+
+      document.getElementById("runCount").textContent = "Runs: " + state.runs.length;
+      renderRunSelector();
+      renderCriteria(run);
+      renderTimeline(run, criterion);
+      renderMain(run, criterion);
+    }
+
+    async function readJsonFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            resolve({ name: file.name, data: JSON.parse(reader.result) });
+          } catch (error) {
+            reject(new Error(file.name + ": invalid JSON"));
+          }
+        };
+        reader.onerror = () => reject(new Error(file.name + ": read failed"));
+        reader.readAsText(file, "utf-8");
+      });
+    }
+
+    function clearState() {
+      state.runs = [];
+      state.selectedRunIndex = 0;
+      state.selectedStepIndex = 0;
+      state.selectedCriterionIndex = 0;
+      document.getElementById("criteriaFilter").value = "";
+      document.getElementById("statusFilter").value = "all";
+      render();
+      setStatus("No files loaded.", false);
+    }
+
+    async function loadFiles(files) {
+      const selected = Array.from(files || []);
+      if (!selected.length) {
+        setStatus("Please choose one or more JSON files.", true);
+        return;
+      }
+
+      const readResults = await Promise.allSettled(selected.map(readJsonFile));
+      const runs = [];
+      const errors = [];
+
+      readResults.forEach((result) => {
+        if (result.status !== "fulfilled") {
+          errors.push(String(result.reason && result.reason.message ? result.reason.message : result.reason));
+          return;
+        }
+
+        const parsedRuns = parseAnyPayload(result.value.name, result.value.data);
+        if (!parsedRuns.length) {
+          errors.push(result.value.name + ": unsupported JSON shape");
+          return;
+        }
+        runs.push(...parsedRuns);
+      });
+
+      state.runs = runs;
+      state.selectedRunIndex = 0;
+      state.selectedStepIndex = 0;
+      state.selectedCriterionIndex = 0;
+      render();
+
+      const message = "Loaded files=" + selected.length + " | runs=" + runs.length;
+      if (errors.length) {
+        setStatus(message + " | warnings=" + errors.length + " (check browser console)", false);
+        console.warn("Viewer parse warnings:", errors);
+      } else {
+        setStatus(message, false);
+      }
+    }
+
+    document.getElementById("loadBtn").addEventListener("click", async () => {
+      try {
+        const input = document.getElementById("fileInput");
+        await loadFiles(input.files);
+      } catch (error) {
+        setStatus(String(error && error.message ? error.message : error), true);
+      }
+    });
+
+    document.getElementById("sampleBtn").addEventListener("click", () => {
+      const runs = parseAnyPayload("sample__evaluated.json", sampleEvaluated);
+      state.runs = runs;
+      state.selectedRunIndex = 0;
+      state.selectedStepIndex = 0;
+      state.selectedCriterionIndex = 0;
+      render();
+      setStatus("Loaded embedded sample.", false);
+    });
+
+    document.getElementById("clearBtn").addEventListener("click", clearState);
+
+    document.getElementById("runSelect").addEventListener("change", (event) => {
+      state.selectedRunIndex = Number(event.target.value) || 0;
+      state.selectedStepIndex = 0;
+      state.selectedCriterionIndex = 0;
+      render();
+    });
+
+    ["criteriaFilter", "statusFilter"].forEach((id) => {
+      const node = document.getElementById(id);
+      node.addEventListener("input", () => {
+        state.selectedCriterionIndex = 0;
+        render();
+      });
+      node.addEventListener("change", () => {
+        state.selectedCriterionIndex = 0;
+        render();
+      });
+    });
+
+    clearState();
+  </script>
+</body>
+</html>

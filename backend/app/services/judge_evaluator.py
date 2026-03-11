@@ -588,7 +588,14 @@ class JudgeEvaluatorService:
                 model_name=model_name,
             )
         except Exception as exc:
-            logger.warning("Global behavior overview failed, using fallback summary: %s", exc)
+            logger.warning(
+                "Global behavior overview failed, using fallback summary: task=%s model=%s steps=%d error_type=%s error=%s",
+                task_name,
+                model_name,
+                len(all_steps),
+                type(exc).__name__,
+                exc,
+            )
             return {
                 "overall_behavior_summary": "",
                 "phases": [
@@ -886,6 +893,13 @@ class JudgeEvaluatorService:
             )
 
         try:
+            logger.info(
+                "[judge][criterion-start] task=%s criterion=%s model=%s total_steps=%d",
+                task_name,
+                criterion_name,
+                model_name,
+                len(all_steps),
+            )
             if not global_overview:
                 global_overview = await self._build_global_behavior_overview_async(
                     task_name=task_name,
@@ -894,6 +908,12 @@ class JudgeEvaluatorService:
                     all_steps=all_steps,
                     model_name=model_name,
                 )
+            logger.info(
+                "[judge][global-overview] criterion=%s phases=%d key_phases=%d",
+                criterion_name,
+                len(global_overview.get("phases", []) if isinstance(global_overview, dict) else []),
+                len(global_overview.get("key_phase_ids", []) if isinstance(global_overview, dict) else []),
+            )
 
             interpreted = await self._interpret_criterion_dimensions_async(
                 criterion_name=criterion_name,
@@ -911,6 +931,14 @@ class JudgeEvaluatorService:
             pass_signals = interpreted.get("pass_signals", [])
             fail_signals = interpreted.get("fail_signals", [])
             phase_selection_heuristics = interpreted.get("phase_selection_heuristics", [])
+            logger.info(
+                "[judge][interpretation] criterion=%s dimensions=%d pass_signals=%d fail_signals=%d heuristics=%d",
+                criterion_name,
+                len(dimensions) if isinstance(dimensions, list) else 0,
+                len(pass_signals) if isinstance(pass_signals, list) else 0,
+                len(fail_signals) if isinstance(fail_signals, list) else 0,
+                len(phase_selection_heuristics) if isinstance(phase_selection_heuristics, list) else 0,
+            )
 
             segmentation = await self._segment_phases_by_dimensions_async(
                 criterion_name=criterion_name,
@@ -928,6 +956,13 @@ class JudgeEvaluatorService:
             target_phases = [phase for phase in phases if str(phase.get("phase_id")) in relevant_ids]
             if not target_phases:
                 target_phases = phases
+            logger.info(
+                "[judge][segmentation] criterion=%s total_phases=%d relevant_phase_ids=%s target_phases=%d",
+                criterion_name,
+                len(phases) if isinstance(phases, list) else 0,
+                sorted(str(pid) for pid in relevant_ids),
+                len(target_phases),
+            )
 
             configured_step_limit = (
                 int(step_max_concurrency)
@@ -935,10 +970,27 @@ class JudgeEvaluatorService:
                 else int(getattr(settings, "JUDGE_EVALUATION_STEP_MAX_CONCURRENCY", 8) or 8)
             )
             semaphore = asyncio.Semaphore(max(1, configured_step_limit))
+            logger.info(
+                "[judge][phase-eval] criterion=%s step_max_concurrency=%d",
+                criterion_name,
+                max(1, configured_step_limit),
+            )
 
             async def _run(phase: Dict[str, Any]) -> EvaluationResult:
                 async with semaphore:
-                    return await self._evaluate_phase_with_dimensions_async(
+                    phase_id = str(phase.get("phase_id", "unknown"))
+                    step_indices = [
+                        i for i in phase.get("step_indices", [])
+                        if isinstance(i, int)
+                    ] if isinstance(phase, dict) else []
+                    logger.info(
+                        "[judge][phase-start] criterion=%s phase_id=%s step_count=%d step_indices=%s",
+                        criterion_name,
+                        phase_id,
+                        len(step_indices),
+                        step_indices,
+                    )
+                    phase_result = await self._evaluate_phase_with_dimensions_async(
                         criterion_name=criterion_name,
                         criterion_assertion=criterion_assertion,
                         criterion_intent=criterion_intent,
@@ -954,6 +1006,15 @@ class JudgeEvaluatorService:
                         all_steps=all_steps,
                         model_name=model_name,
                     )
+                    logger.info(
+                        "[judge][phase-end] criterion=%s phase_id=%s verdict=%s confidence=%.2f evidence=%d",
+                        criterion_name,
+                        phase_id,
+                        phase_result.verdict,
+                        float(phase_result.confidence_score or 0.0),
+                        len(phase_result.highlighted_evidence or []),
+                    )
+                    return phase_result
 
             phase_results = await asyncio.gather(*[_run(p) for p in target_phases])
             phase_results = [r for r in phase_results if isinstance(r, EvaluationResult)]
@@ -1002,6 +1063,13 @@ class JudgeEvaluatorService:
             )[:500]
             final.used_granularity = Granularity.PHASE_LEVEL
             final = final.model_copy(update={"verdict": self._normalize_binary_verdict(final.verdict)})
+            logger.info(
+                "[judge][criterion-end] task=%s criterion=%s final_verdict=%s final_confidence=%.2f",
+                task_name,
+                criterion_name,
+                final.verdict,
+                float(final.confidence_score or 0.0),
+            )
             return final
         except Exception as exc:
             logger.error("Unified criterion evaluation failed for '%s': %s", criterion_name, exc)

@@ -21,6 +21,7 @@
       --unknown-bg: #f1f5f9;
       --unknown-text: #475569;
       --highlight: rgba(37, 99, 235, 0.15);
+      --card-body-height: 170px;
     }
 
     * {
@@ -167,7 +168,10 @@
       overflow: auto;
       white-space: pre-wrap;
       word-break: break-word;
-      flex: 1;
+      height: var(--card-body-height);
+      min-height: var(--card-body-height);
+      max-height: var(--card-body-height);
+      flex: none;
     }
 
     .card-body.code {
@@ -314,7 +318,6 @@
 
     .hl.evidence {
       cursor: help;
-      position: relative;
       transition: background-color 120ms ease, border-color 120ms ease;
     }
 
@@ -323,13 +326,12 @@
       border-color: rgba(37, 99, 235, 0.55);
     }
 
-    .hl.evidence::after {
-      content: attr(data-reasoning);
-      position: absolute;
+    .evidence-tooltip {
+      position: fixed;
       left: 0;
-      bottom: calc(100% + 6px);
+      top: 0;
       min-width: 180px;
-      max-width: 360px;
+      max-width: 420px;
       padding: 6px 8px;
       border-radius: 6px;
       border: 1px solid #1e40af;
@@ -338,7 +340,7 @@
       font-size: 11px;
       line-height: 1.4;
       white-space: pre-line;
-      z-index: 12;
+      z-index: 9999;
       opacity: 0;
       transform: translateY(4px);
       pointer-events: none;
@@ -346,7 +348,7 @@
       box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
     }
 
-    .hl.evidence:hover::after {
+    .evidence-tooltip.visible {
       opacity: 1;
       transform: translateY(0);
     }
@@ -387,6 +389,10 @@
 
       .controls label {
         min-width: 100%;
+      }
+
+      :root {
+        --card-body-height: 150px;
       }
     }
   </style>
@@ -491,6 +497,8 @@
     </section>
   </div>
 
+  <div id="hoverTooltip" class="evidence-tooltip" role="tooltip" aria-hidden="true"></div>
+
   <script>
     const state = {
       runs: [],
@@ -571,6 +579,21 @@
       return escapeHtml(String(value || "")).replace(/\n/g, " &#10; ");
     }
 
+    function normalizeFieldKey(value) {
+      const compact = String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "");
+
+      if (!compact) return "";
+      if (compact === "thinking" || compact === "thinkingprocess" || compact === "aireasoning") return "thinking";
+      if (compact === "evaluation" || compact === "prestepevaluation" || compact === "evaluationpreviousgoal") return "evaluation";
+      if (compact === "memory") return "memory";
+      if (compact === "nextgoal" || compact === "targetobjective") return "nextgoal";
+      if (compact === "action") return "action";
+      return compact;
+    }
+
     function flattenAction(action) {
       if (action === null || action === undefined) return "";
       if (typeof action === "string") return action;
@@ -585,8 +608,9 @@
       const arr = Array.isArray(rawSteps) ? rawSteps : [];
       return arr.map((step, index) => {
         const s = step && typeof step === "object" ? step : {};
+        const parsedStepId = Number(s.step_id);
         return {
-          stepIndex: Number.isFinite(s.step_id) ? s.step_id : index + 1,
+          stepIndex: Number.isFinite(parsedStepId) ? parsedStepId : index + 1,
           thinking: String(s["AI REASONING"] || s.thinking || s.thinking_process || ""),
           evaluation: String(s.EVALUATION || s.evaluation_previous_goal || ""),
           memory: String(s.MEMORY || s.memory || ""),
@@ -756,17 +780,41 @@
       });
     }
 
-    function getStepEvidence(criterion, stepIndex) {
+    function createStepMatcher(stepIndex, stepArrayIndex) {
+      const candidateStepNumbers = new Set();
+      const addCandidate = (value) => {
+        const n = Number(value);
+        if (Number.isFinite(n)) candidateStepNumbers.add(n);
+      };
+
+      addCandidate(stepIndex);
+      addCandidate(stepArrayIndex);
+      addCandidate(Number(stepIndex) - 1);
+      addCandidate(Number(stepArrayIndex) + 1);
+
+      return (value) => {
+        const n = Number(value);
+        return Number.isFinite(n) && candidateStepNumbers.has(n);
+      };
+    }
+
+    function getStepEvidence(criterion, stepIndex, stepArrayIndex) {
       if (!criterion || !Array.isArray(criterion.involvedSteps)) return [];
+      const matchesStep = createStepMatcher(stepIndex, stepArrayIndex);
+
       const evidence = [];
       criterion.involvedSteps.forEach((group) => {
         if (!group || typeof group !== "object") return;
         const steps = Array.isArray(group.steps) ? group.steps : [];
-        if (!steps.includes(stepIndex)) return;
+        if (steps.length && !steps.some((value) => matchesStep(value))) return;
+
         const highlighted = Array.isArray(group.highlighted_evidence) ? group.highlighted_evidence : [];
         highlighted.forEach((item) => {
           if (!item || typeof item !== "object") return;
-          if (Number(item.step_index) !== stepIndex) return;
+
+          const hasStepIndex = item.step_index !== undefined && item.step_index !== null && String(item.step_index).trim() !== "";
+          if (hasStepIndex && !matchesStep(item.step_index)) return;
+
           evidence.push({
             sourceField: String(item.source_field || ""),
             text: String(item.highlighted_text || ""),
@@ -778,6 +826,31 @@
       return evidence;
     }
 
+    function getStepVerdicts(criterion, stepIndex, stepArrayIndex) {
+      if (!criterion || !Array.isArray(criterion.involvedSteps)) return [];
+      const matchesStep = createStepMatcher(stepIndex, stepArrayIndex);
+
+      const verdicts = [];
+      criterion.involvedSteps.forEach((group) => {
+        if (!group || typeof group !== "object") return;
+
+        const steps = Array.isArray(group.steps) ? group.steps : [];
+        const highlighted = Array.isArray(group.highlighted_evidence) ? group.highlighted_evidence : [];
+        const matchesBySteps = steps.length ? steps.some((value) => matchesStep(value)) : false;
+        const matchesByEvidence = highlighted.some((item) => item && matchesStep(item.step_index));
+
+        if (!matchesBySteps && !matchesByEvidence) return;
+
+        verdicts.push({
+          verdict: normStatus(group.evaluateStatus || group.verdict),
+          reasoning: String(group.reasoning || ""),
+          confidence: Number(group.confidenceScore),
+        });
+      });
+
+      return verdicts;
+    }
+
     function escapeRegex(value) {
       return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
@@ -786,10 +859,12 @@
       const text = String(rawText || "");
       if (!text) return "<span class=\"muted\">No data</span>";
 
+      const sourceKey = normalizeFieldKey(sourceField);
+
       const candidate = (evidence || []).filter((item) => {
         if (!item.text) return false;
         if (!item.sourceField) return true;
-        return item.sourceField.toLowerCase() === String(sourceField || "").toLowerCase();
+        return normalizeFieldKey(item.sourceField) === sourceKey;
       });
 
       if (!candidate.length) {
@@ -843,7 +918,8 @@
 
       select.innerHTML = state.runs
         .map((run, idx) => {
-          const label = [run.sourceFile, run.judgeModel || "no-judge-model"].join(" | ");
+          const seq = run.seq || (idx + 1);
+          const label = ["#" + seq, run.sourceFile, run.judgeModel || "no-judge-model"].join(" | ");
           return "<option value=\"" + idx + "\">" + escapeHtml(label) + "</option>";
         })
         .join("");
@@ -915,10 +991,11 @@
       timeline.innerHTML = run.steps
         .map((step, idx) => {
           const active = idx === state.selectedStepIndex ? " active" : "";
-          const evidence = getStepEvidence(criterion, step.stepIndex);
-          const mark = evidence.length ? " *" : "";
+          const evidence = getStepEvidence(criterion, step.stepIndex, idx);
+          const verdicts = getStepVerdicts(criterion, step.stepIndex, idx);
+          const mark = (evidence.length || verdicts.length) ? " *" : "";
           return "<button class=\"step-chip" + active + "\" data-step=\"" + idx + "\">" +
-            "Step " + escapeHtml(String(step.stepIndex)) + mark +
+            "Step " + escapeHtml(String(idx + 1)) + mark +
           "</button>";
         })
         .join("");
@@ -957,10 +1034,13 @@
 
       const step = run.steps[state.selectedStepIndex] || null;
       const evidence = step && criterion
-        ? getStepEvidence(criterion, step.stepIndex)
+        ? getStepEvidence(criterion, step.stepIndex, state.selectedStepIndex)
+        : [];
+      const stepVerdicts = step && criterion
+        ? getStepVerdicts(criterion, step.stepIndex, state.selectedStepIndex)
         : [];
 
-      stepInfo.textContent = step ? "Step: " + step.stepIndex : "Step: -";
+      stepInfo.textContent = step ? "Step: " + (state.selectedStepIndex + 1) : "Step: -";
 
       thinkingBox.innerHTML = renderHighlightedText(step ? step.thinking : "", evidence, "Thinking Process");
       evaluationBox.innerHTML = renderHighlightedText(step ? step.evaluation : "", evidence, "Evaluation");
@@ -976,15 +1056,26 @@
         overallReasoning.innerHTML = "<span class=\"muted\">No criterion selected</span>";
       }
 
-      if (!evidence.length) {
+      if (!evidence.length && !stepVerdicts.length) {
         evidenceBox.innerHTML = "<span class=\"muted\">No grounded evidence for this step/criterion.</span>";
       } else {
-        evidenceBox.innerHTML = evidence
+        const verdictText = stepVerdicts
           .map((item, idx) => {
-            return "[" + (idx + 1) + "] field=" + escapeHtml(item.sourceField || "") + " verdict=" + escapeHtml(item.verdict || "") + "\n" +
+            const confText = Number.isFinite(item.confidence) ? " confidence=" + (item.confidence * 100).toFixed(0) + "%" : "";
+            const why = item.reasoning ? item.reasoning : "(no reasoning)";
+            return "[Step Verdict " + (idx + 1) + "] verdict=" + escapeHtml(item.verdict || "unknown") + confText + "\n" +
+              "reasoning: " + escapeHtml(why);
+          })
+          .join("\n\n");
+
+        const evidenceText = evidence
+          .map((item, idx) => {
+            return "[Evidence " + (idx + 1) + "] field=" + escapeHtml(item.sourceField || "") + " verdict=" + escapeHtml(item.verdict || "") + "\n" +
               escapeHtml(item.text || "") + "\nreasoning: " + escapeHtml(item.reasoning || "");
           })
           .join("\n\n");
+
+        evidenceBox.innerHTML = [verdictText, evidenceText].filter(Boolean).join("\n\n");
       }
 
       metaKv.innerHTML = "" +
@@ -1059,7 +1150,7 @@
         runs.push(...parsedRuns);
       });
 
-      state.runs = runs;
+      state.runs = runs.map((run, idx) => ({ ...run, seq: idx + 1 }));
       state.selectedRunIndex = 0;
       state.selectedStepIndex = 0;
       state.selectedCriterionIndex = 0;
@@ -1084,7 +1175,8 @@
     });
 
     document.getElementById("sampleBtn").addEventListener("click", () => {
-      const runs = parseAnyPayload("sample__evaluated.json", sampleEvaluated);
+      const runs = parseAnyPayload("sample__evaluated.json", sampleEvaluated)
+        .map((run, idx) => ({ ...run, seq: idx + 1 }));
       state.runs = runs;
       state.selectedRunIndex = 0;
       state.selectedStepIndex = 0;
@@ -1113,6 +1205,65 @@
         render();
       });
     });
+
+    const hoverTooltip = document.getElementById("hoverTooltip");
+    let hoverTarget = null;
+
+    function updateHoverTooltipPosition(clientX, clientY) {
+      if (!hoverTooltip || !hoverTooltip.classList.contains("visible")) return;
+
+      const gap = 12;
+      let x = clientX + gap;
+      let y = clientY + gap;
+      const rect = hoverTooltip.getBoundingClientRect();
+
+      if (x + rect.width > window.innerWidth - 8) {
+        x = Math.max(8, window.innerWidth - rect.width - 8);
+      }
+      if (y + rect.height > window.innerHeight - 8) {
+        y = Math.max(8, clientY - rect.height - gap);
+      }
+
+      hoverTooltip.style.left = x + "px";
+      hoverTooltip.style.top = y + "px";
+    }
+
+    function showHoverTooltip(target, event) {
+      const text = String(target.getAttribute("data-reasoning") || "evidence").trim();
+      hoverTooltip.textContent = text;
+      hoverTooltip.classList.add("visible");
+      hoverTooltip.setAttribute("aria-hidden", "false");
+      updateHoverTooltipPosition(event.clientX, event.clientY);
+    }
+
+    function hideHoverTooltip() {
+      hoverTooltip.classList.remove("visible");
+      hoverTooltip.setAttribute("aria-hidden", "true");
+      hoverTarget = null;
+    }
+
+    document.addEventListener("mouseover", (event) => {
+      const node = event.target.closest ? event.target.closest(".hl.evidence") : null;
+      if (!node) return;
+      hoverTarget = node;
+      showHoverTooltip(node, event);
+    });
+
+    document.addEventListener("mousemove", (event) => {
+      if (!hoverTarget) return;
+      updateHoverTooltipPosition(event.clientX, event.clientY);
+    });
+
+    document.addEventListener("mouseout", (event) => {
+      if (!hoverTarget) return;
+      const fromNode = event.target.closest ? event.target.closest(".hl.evidence") : null;
+      const toNode = event.relatedTarget && event.relatedTarget.closest ? event.relatedTarget.closest(".hl.evidence") : null;
+      if (!fromNode || fromNode !== hoverTarget || toNode === hoverTarget) return;
+      hideHoverTooltip();
+    });
+
+    window.addEventListener("scroll", hideHoverTooltip, true);
+    window.addEventListener("resize", hideHoverTooltip);
 
     clearState();
   </script>

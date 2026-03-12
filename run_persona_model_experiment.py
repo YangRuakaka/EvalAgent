@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -163,16 +164,34 @@ class PersonaConfig:
 # ---------------------------------------------------------------------------
 TASKS: List[TaskConfig] = [
     TaskConfig(
-        name="Buy milk",
-        url="http://34.55.136.249:3000/riverbuy",
-        description="Buy milk with the persona's decision style.",
+        name="Book flight",
+        url="http://34.55.136.249:3000/flight",
+        description="Book a flight from ORD to LAX.",
     ),
+    TaskConfig(
+        name="Rent a car",
+        url="http://34.55.136.249:3000/zoomcar",
+        description="Rent a car for a family vacation.",
+    )
+
 ]
 
 PERSONAS: List[PersonaConfig] = [
     PersonaConfig(
         value="Frugality",
         content="You maximize value for money and avoid unnecessary spending.",
+    ),
+    PersonaConfig(
+        value="Sustainability",
+        content="You prioritize environmentally friendly and socially responsible choices.",
+    ),
+    PersonaConfig(
+        value="Comfort",
+        content="You prioritize a comfortable and enjoyable travel experience.",
+    ),
+    PersonaConfig(
+        value="Luxury",
+        content="You prioritize comfort and premium experiences, even at higher costs.",
     ),
 ]
 
@@ -387,6 +406,40 @@ def _format_result_line(result: Any) -> str:
     )
 
 
+def _cleanup_history_artifacts(history_file: Path) -> list[Path]:
+    removed: list[Path] = []
+
+    if history_file.exists() and history_file.is_file():
+        history_file.unlink(missing_ok=True)
+        removed.append(history_file)
+
+    screenshot_dir = history_file.parent / "screenshots" / history_file.stem
+    if screenshot_dir.exists() and screenshot_dir.is_dir():
+        shutil.rmtree(screenshot_dir, ignore_errors=True)
+        removed.append(screenshot_dir)
+
+    return removed
+
+
+def _cleanup_failed_result_artifacts(result: Any) -> None:
+    history_path_raw = str(getattr(result, "history_path", "") or "").strip()
+    if not history_path_raw:
+        return
+
+    # Only clean up explicit run artifacts; never touch cwd placeholders.
+    if history_path_raw in {".", "./", ".\\"}:
+        return
+
+    history_file = _resolve_history_file(history_path_raw)
+    removed_paths = _cleanup_history_artifacts(history_file)
+    if removed_paths:
+        logging.warning(
+            "Cleaned failed run artifacts | history_path=%s removed=%s",
+            history_path_raw,
+            [str(path) for path in removed_paths],
+        )
+
+
 async def run_experiment(
     run_times: int,
     strict_schema: bool,
@@ -418,6 +471,9 @@ async def run_experiment(
 
     service = bindings.BrowserAgentService()
     generated_files: list[Path] = []
+    skipped_failed_runs = 0
+    skipped_invalid_runs = 0
+    failed_tasks = 0
 
     for task_index, task in enumerate(tasks, start=1):
         request = _build_request(task, run_times=run_times, bindings=bindings)
@@ -432,23 +488,90 @@ async def run_experiment(
             run_id,
         )
 
-        results = await service.run(request, run_id=run_id)
+        try:
+            results = await service.run(request, run_id=run_id)
+        except Exception as exc:
+            failed_tasks += 1
+            logging.exception(
+                "Task execution failed, continuing with next task | task=%s run_id=%s error=%s",
+                task.name,
+                run_id,
+                exc,
+            )
+            continue
+
         if not results:
-            raise RuntimeError(f"No results returned for task '{task.name}'")
+            failed_tasks += 1
+            logging.warning(
+                "No results returned for task, continuing with next task | task=%s run_id=%s",
+                task.name,
+                run_id,
+            )
+            continue
 
         for result in results:
             logging.info(_format_result_line(result))
-            history_file = _resolve_history_file(result.history_path)
+
+            if bool(result.has_errors) or not bool(result.is_successful):
+                skipped_failed_runs += 1
+                _cleanup_failed_result_artifacts(result)
+                logging.warning(
+                    "Skipping failed run result | task=%s model=%s run_index=%s",
+                    task.name,
+                    result.model,
+                    result.run_index,
+                )
+                continue
+
+            history_path_raw = str(getattr(result, "history_path", "") or "").strip()
+            if not history_path_raw:
+                skipped_invalid_runs += 1
+                logging.warning(
+                    "Skipping result without history_path | task=%s model=%s run_index=%s",
+                    task.name,
+                    result.model,
+                    result.run_index,
+                )
+                continue
+
+            history_file = _resolve_history_file(history_path_raw)
             if not history_file.exists() or not history_file.is_file():
-                raise FileNotFoundError(f"History file not found: {history_file}")
+                skipped_invalid_runs += 1
+                logging.warning(
+                    "Skipping result with missing history file | task=%s model=%s run_index=%s history_path=%s",
+                    task.name,
+                    result.model,
+                    result.run_index,
+                    history_file,
+                )
+                continue
 
             if strict_schema:
-                _validate_history_json(history_file)
+                try:
+                    _validate_history_json(history_file)
+                except Exception as exc:
+                    skipped_invalid_runs += 1
+                    removed_paths = _cleanup_history_artifacts(history_file)
+                    logging.warning(
+                        "Skipping run due to schema validation failure | task=%s model=%s run_index=%s error=%s removed=%s",
+                        task.name,
+                        result.model,
+                        result.run_index,
+                        exc,
+                        [str(path) for path in removed_paths],
+                    )
+                    continue
 
             generated_files.append(history_file)
 
     unique_files = sorted({path.resolve() for path in generated_files})
-    logging.info("Experiment finished successfully | generated_json_files=%d", len(unique_files))
+    logging.info(
+        "Experiment finished | generated_json_files=%d skipped_failed_runs=%d skipped_invalid_runs=%d failed_tasks=%d",
+        len(unique_files),
+        skipped_failed_runs,
+        skipped_invalid_runs,
+        failed_tasks,
+    )
     for history_file in unique_files:
         print(str(history_file))
 

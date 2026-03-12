@@ -2,71 +2,45 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import importlib
 import json
 import logging
 import os
 import re
 import shutil
 import sys
+import tempfile
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-BACKEND_DIR: Path | None = None
-ROOT_DIR: Path | None = None
-BACKEND_DIR_ENV = "BROWSER_AGENT_BACKEND_DIR"
 
-
-def _normalize_backend_dir(candidate: Path) -> Path | None:
-    resolved = candidate.resolve()
-    if (resolved / "app").is_dir():
-        return resolved
-
-    nested_backend = resolved / "backend"
-    if (nested_backend / "app").is_dir():
-        return nested_backend.resolve()
-
-    return None
-
-
-def _resolve_backend_and_root_dirs(explicit_backend_dir: str | None) -> tuple[Path | None, Path | None]:
-    candidates: list[Path] = []
-
-    if explicit_backend_dir:
-        candidates.append(Path(explicit_backend_dir))
-
-    env_backend_dir = os.getenv(BACKEND_DIR_ENV)
-    if env_backend_dir:
-        candidates.append(Path(env_backend_dir))
-
-    candidates.extend([SCRIPT_DIR, SCRIPT_DIR.parent, Path.cwd(), Path.cwd().parent])
-
-    seen: set[Path] = set()
-    for candidate in candidates:
-        normalized = _normalize_backend_dir(candidate)
-        if normalized is None or normalized in seen:
-            continue
-        seen.add(normalized)
-        return normalized, normalized.parent
-
-    return None, None
-
-
-def _configure_backend_import_path(backend_dir: Path | None) -> None:
-    if backend_dir is None:
-        return
-
-    backend_dir_str = str(backend_dir)
-    if backend_dir_str not in sys.path:
-        sys.path.insert(0, backend_dir_str)
-
+# Directly set provider key here if you do not want to use .env.
+# Leave empty or placeholder to fall back to environment variables.
 
 def _strip_wrapping_quotes(value: str) -> str:
     stripped = value.strip()
     if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {'"', "'"}:
         return stripped[1:-1]
+    return stripped
+
+
+def _normalize_hardcoded_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    stripped = value.strip()
+    if not stripped:
+        return None
+
+    if stripped.startswith("<PUT_YOUR_") and stripped.endswith("_HERE>"):
+        return None
+
     return stripped
 
 
@@ -94,14 +68,13 @@ def _load_env_file(env_path: Path, override: bool = False) -> int:
     return loaded
 
 
-def _bootstrap_env(backend_dir: Path | None, root_dir: Path | None) -> None:
-    env_candidates: list[Path] = []
-    env_candidates.extend([Path.cwd() / ".env", SCRIPT_DIR / ".env"])
-
-    if backend_dir is not None:
-        env_candidates.append(backend_dir / ".env")
-    if root_dir is not None:
-        env_candidates.append(root_dir / ".env")
+def _bootstrap_env() -> None:
+    env_candidates = [
+        Path.cwd() / ".env",
+        Path.cwd() / "backend" / ".env",
+        SCRIPT_DIR / ".env",
+        SCRIPT_DIR / "backend" / ".env",
+    ]
 
     loaded = 0
     seen: set[Path] = set()
@@ -117,35 +90,6 @@ def _bootstrap_env(backend_dir: Path | None, root_dir: Path | None) -> None:
 
 
 @dataclass(frozen=True)
-class BackendBindings:
-    get_settings: Any
-    BrowserAgentPersona: Any
-    BrowserAgentRunRequest: Any
-    BrowserAgentTask: Any
-    BrowserAgentService: Any
-
-
-def _import_backend_bindings() -> BackendBindings:
-    try:
-        from app.core.config import get_settings
-        from app.schemas.browser_agent import BrowserAgentPersona, BrowserAgentRunRequest, BrowserAgentTask
-        from app.services.browser_agent_runner import BrowserAgentService
-    except Exception as exc:
-        raise RuntimeError(
-            "Failed to import app modules. Provide --backend-dir <path-to-backend>, "
-            f"set {BACKEND_DIR_ENV}, or install the backend package in this environment."
-        ) from exc
-
-    return BackendBindings(
-        get_settings=get_settings,
-        BrowserAgentPersona=BrowserAgentPersona,
-        BrowserAgentRunRequest=BrowserAgentRunRequest,
-        BrowserAgentTask=BrowserAgentTask,
-        BrowserAgentService=BrowserAgentService,
-    )
-
-
-@dataclass(frozen=True)
 class TaskConfig:
     name: str
     url: str
@@ -158,6 +102,90 @@ class PersonaConfig:
     content: str
 
 
+@dataclass(frozen=True)
+class StandaloneSettings:
+    output_dir: Path
+    max_steps: int
+    enable_screenshots: bool
+    max_screenshots: int
+    force_threaded_run_on_windows: bool
+    llm_temperature: float
+    deepseek_api_key: Optional[str]
+    openai_api_key: Optional[str]
+    anthropic_api_key: Optional[str]
+    gemini_api_key: Optional[str]
+    deepseek_base_url: str
+    llm_base_url: Optional[str]
+    openai_base_url: Optional[str]
+    anthropic_base_url: Optional[str]
+    gemini_base_url: Optional[str]
+    ollama_base_url: str
+
+    @staticmethod
+    def from_env(output_dir_override: str | None = None) -> "StandaloneSettings":
+        output_raw = (output_dir_override or os.getenv("BROWSER_AGENT_RUN_OUTPUT_DIR") or "").strip()
+        if output_raw:
+            output_dir = Path(output_raw).expanduser()
+            if not output_dir.is_absolute():
+                output_dir = (Path.cwd() / output_dir).resolve()
+        else:
+            output_dir = (SCRIPT_DIR / "browser_agent_runs").resolve()
+
+        return StandaloneSettings(
+            output_dir=output_dir,
+            max_steps=_env_int("BROWSER_AGENT_MAX_STEPS", default=20, min_value=1),
+            enable_screenshots=_env_bool("BROWSER_AGENT_ENABLE_SCREENSHOTS", default=True),
+            max_screenshots=_env_int("BROWSER_AGENT_MAX_SCREENSHOTS", default=3, min_value=0),
+            force_threaded_run_on_windows=_env_bool(
+                "BROWSER_AGENT_FORCE_THREADED_RUN_ON_WINDOWS",
+                default=True,
+            ),
+            llm_temperature=_env_float("DEFAULT_LLM_TEMPERATURE", default=0.0),
+            deepseek_api_key=(
+                _normalize_hardcoded_key(HARDCODED_DEEPSEEK_API_KEY)
+                or _env_optional("DEEPSEEK_API_KEY")
+            ),
+            openai_api_key=(
+                _normalize_hardcoded_key(HARDCODED_OPENAI_API_KEY)
+                or _env_optional("OPENAI_API_KEY")
+            ),
+            anthropic_api_key=_env_optional("ANTHROPIC_API_KEY"),
+            gemini_api_key=_env_optional("GEMINI_API_KEY"),
+            deepseek_base_url=(os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip(),
+            llm_base_url=_env_optional("LLM_BASE_URL"),
+            openai_base_url=_env_optional("OPENAI_BASE_URL"),
+            anthropic_base_url=_env_optional("ANTHROPIC_BASE_URL"),
+            gemini_base_url=_env_optional("GEMINI_BASE_URL"),
+            ollama_base_url=(os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").strip(),
+        )
+
+
+@dataclass(frozen=True)
+class ScreenshotArtifact:
+    path: str
+    base64_content: str | None = None
+
+
+@dataclass(frozen=True)
+class RunContext:
+    run_id: str
+    history_path: Path
+    screenshots_dir: Path
+
+
+@dataclass(frozen=True)
+class RunResult:
+    model: str
+    run_index: int
+    is_done: bool
+    is_successful: bool
+    has_errors: bool
+    number_of_steps: int
+    total_duration_seconds: float
+    final_result: Any
+    history_path: str
+
+
 # ---------------------------------------------------------------------------
 # Edit this block only.
 # Team members can safely change tasks/personas/models/run_times here.
@@ -168,27 +196,26 @@ TASKS: List[TaskConfig] = [
         url="http://34.55.136.249:3000/flight",
         description="Book a flight from ORD to LAX.",
     ),
-    # TaskConfig(
-    #     name="Rent a car",
-    #     url="http://34.55.136.249:3000/zoomcar",
-    #     description="Rent a car for a family vacation.",
-    # )
-
+    TaskConfig(
+        name="Rent a car",
+        url="http://34.55.136.249:3000/zoomcar",
+        description="Rent a car for a family vacation.",
+    ),
 ]
 
 PERSONAS: List[PersonaConfig] = [
-    # PersonaConfig(
-    #     value="Frugality",
-    #     content="You maximize value for money and avoid unnecessary spending.",
-    # ),
-    # PersonaConfig(
-    #     value="Sustainability",
-    #     content="You prioritize environmentally friendly and socially responsible choices.",
-    # ),
-    # PersonaConfig(
-    #     value="Comfort",
-    #     content="You prioritize a comfortable and enjoyable travel experience.",
-    # ),
+    PersonaConfig(
+        value="Frugality",
+        content="You maximize value for money and avoid unnecessary spending.",
+    ),
+    PersonaConfig(
+        value="Sustainability",
+        content="You prioritize environmentally friendly and socially responsible choices.",
+    ),
+    PersonaConfig(
+        value="Comfort",
+        content="You prioritize a comfortable and enjoyable travel experience.",
+    ),
     PersonaConfig(
         value="Luxury",
         content="You prioritize comfort and premium experiences, even at higher costs.",
@@ -222,6 +249,47 @@ EXPECTED_DETAILS_FIELDS = [
 ]
 
 
+def _env_optional(name: str) -> Optional[str]:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _env_int(name: str, default: int, min_value: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        parsed = int(raw.strip())
+    except ValueError:
+        return default
+    return parsed if parsed >= min_value else min_value
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        return default
+
+
 def _configure_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
@@ -238,26 +306,23 @@ def _slugify(value: str) -> str:
 
 
 def _build_run_id(task_name: str, task_index: int) -> str:
-    from datetime import datetime, timezone
-
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return f"exp_{task_index:02d}_{_slugify(task_name)}_{stamp}"
 
 
+def _to_portable_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(Path.cwd().resolve()).as_posix()
+    except Exception:
+        return str(resolved)
+
+
 def _resolve_history_file(path_str: str) -> Path:
     candidate = Path(path_str)
-    if candidate.is_absolute() and candidate.exists():
+    if candidate.is_absolute():
         return candidate.resolve()
-
-    checks = [(Path.cwd() / candidate).resolve()]
-    if BACKEND_DIR is not None:
-        checks.append((BACKEND_DIR / candidate).resolve())
-
-    for item in checks:
-        if item.exists() and item.is_file():
-            return item
-
-    return checks[0]
+    return (Path.cwd() / candidate).resolve()
 
 
 def _resolve_screenshot_file(path_str: str, history_file: Path) -> Path | None:
@@ -272,8 +337,6 @@ def _resolve_screenshot_file(path_str: str, history_file: Path) -> Path | None:
         possible.append(candidate.resolve())
     else:
         possible.append((Path.cwd() / candidate).resolve())
-        if BACKEND_DIR is not None:
-            possible.append((BACKEND_DIR / candidate).resolve())
         possible.append((history_file.parent / candidate).resolve())
 
         parts = [part for part in candidate.parts if part not in {"", "."}]
@@ -282,13 +345,6 @@ def _resolve_screenshot_file(path_str: str, history_file: Path) -> Path | None:
             suffix = Path(*parts[idx + 1 :]) if idx + 1 < len(parts) else None
             if suffix is not None:
                 possible.append((history_file.parent / "screenshots" / suffix).resolve())
-                if BACKEND_DIR is not None:
-                    possible.extend(
-                        [
-                            (BACKEND_DIR / "browser_agent_runs" / "screenshots" / suffix).resolve(),
-                            (BACKEND_DIR / "history_logs" / "screenshots" / suffix).resolve(),
-                        ]
-                    )
 
     seen: set[Path] = set()
     for path_item in possible:
@@ -350,20 +406,6 @@ def _validate_history_json(history_file: Path) -> dict:
     return payload
 
 
-def _build_request(task: TaskConfig, run_times: int, bindings: BackendBindings) -> Any:
-    personas = [
-        bindings.BrowserAgentPersona(value=item.value, content=item.content)
-        for item in PERSONAS
-    ]
-
-    return bindings.BrowserAgentRunRequest(
-        task=bindings.BrowserAgentTask(name=task.name, url=task.url, description=task.description),
-        personas=personas,
-        models=list(MODELS),
-        run_times=run_times,
-    )
-
-
 def _validate_experiment_config(run_times: int) -> None:
     if not TASKS:
         raise ValueError("TASKS is empty. Add at least one task.")
@@ -394,7 +436,7 @@ def _override_tasks_website_url(tasks: list[TaskConfig], website_url: str | None
     ]
 
 
-def _format_result_line(result: Any) -> str:
+def _format_result_line(result: RunResult) -> str:
     final_result = str(result.final_result or "").replace("\n", " ").strip()
     if len(final_result) > 120:
         final_result = final_result[:117] + "..."
@@ -421,12 +463,11 @@ def _cleanup_history_artifacts(history_file: Path) -> list[Path]:
     return removed
 
 
-def _cleanup_failed_result_artifacts(result: Any) -> None:
+def _cleanup_failed_result_artifacts(result: RunResult) -> None:
     history_path_raw = str(getattr(result, "history_path", "") or "").strip()
     if not history_path_raw:
         return
 
-    # Only clean up explicit run artifacts; never touch cwd placeholders.
     if history_path_raw in {".", "./", ".\\"}:
         return
 
@@ -440,43 +481,577 @@ def _cleanup_failed_result_artifacts(result: Any) -> None:
         )
 
 
+class StandaloneBrowserAgentService:
+    def __init__(self, settings: StandaloneSettings) -> None:
+        self._settings = settings
+        self._output_dir = settings.output_dir.resolve()
+        self._output_dir.mkdir(parents=True, exist_ok=True)
+
+    async def run_task(
+        self,
+        *,
+        task: TaskConfig,
+        personas: list[PersonaConfig],
+        models: list[str],
+        run_times: int,
+        task_run_id: str,
+    ) -> list[RunResult]:
+        results: list[RunResult] = []
+        for persona in personas:
+            for model_name in models:
+                for run_index in range(1, run_times + 1):
+                    result = await self._run_single(
+                        task=task,
+                        persona=persona,
+                        model_name=model_name,
+                        run_index=run_index,
+                        task_run_id=task_run_id,
+                    )
+                    results.append(result)
+        return results
+
+    def validate_model_credentials(self, models: list[str]) -> None:
+        missing: list[tuple[str, str]] = []
+        for model_name in models:
+            provider = self._resolve_provider_from_model(model_name)
+            if provider == "ollama":
+                continue
+            if not self._api_key_for_provider(provider):
+                missing.append((model_name, provider))
+
+        if not missing:
+            return
+
+        details = ", ".join(
+            [f"model='{model}' provider='{provider}'" for model, provider in missing]
+        )
+        raise RuntimeError(
+            "Missing API keys for configured models. "
+            "Set hardcoded provider keys in this file (for example HARDCODED_DEEPSEEK_API_KEY or HARDCODED_OPENAI_API_KEY), "
+            "or configure provider env vars. "
+            f"Details: {details}"
+        )
+
+    async def _run_single(
+        self,
+        *,
+        task: TaskConfig,
+        persona: PersonaConfig,
+        model_name: str,
+        run_index: int,
+        task_run_id: str,
+    ) -> RunResult:
+        agent = None
+        tmp_profile: str | None = None
+
+        try:
+            llm = self._get_browser_use_llm(model_name)
+            from browser_use import Agent, BrowserSession
+
+            tmp_profile = tempfile.mkdtemp(prefix="bu_profile_")
+            browser_kwargs: dict[str, Any] = {
+                "headless": True,
+                "user_data_dir": tmp_profile,
+                "storage_state": None,
+                "keep_alive": False,
+                "is_local": True,
+                "use_cloud": False,
+                "cloud_browser": False,
+                "args": [
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-setuid-sandbox",
+                    "--no-zygote",
+                    "--disable-software-rasterizer",
+                    "--disable-extensions",
+                    "--disable-background-networking",
+                    "--disable-default-apps",
+                    "--disable-sync",
+                    "--no-first-run",
+                ],
+            }
+
+            browser_session = BrowserSession(**browser_kwargs)
+            context = self._prepare_run_context(task_run_id=task_run_id)
+
+            agent = Agent(
+                browser_session=browser_session,
+                task=self._compose_agent_task(task=task, content=persona.content),
+                llm=llm,
+                use_vision=True,
+                save_conversation_path=str(context.screenshots_dir),
+                use_judge=False,
+                generate_gif=False,
+            )
+
+            history = await self._run_agent_with_compatible_loop(agent, max_steps=self._settings.max_steps)
+
+            summary_payload = {
+                "is_done": self._ensure_bool(self._safe_call(history, "is_done")),
+                "is_successful": self._ensure_bool(self._safe_call(history, "is_successful")),
+                "has_errors": self._ensure_bool(self._safe_call(history, "has_errors")),
+                "number_of_steps": self._ensure_int(self._safe_call(history, "number_of_steps")),
+                "total_duration_seconds": self._ensure_float(self._safe_call(history, "total_duration_seconds")),
+                "final_result": self._to_serializable(self._safe_call(history, "final_result")),
+            }
+
+            screenshot_artifacts = self._save_screenshots(history, context)
+            history_payload = self._build_history_payload(
+                task=task,
+                persona=persona,
+                model_name=model_name,
+                run_index=run_index,
+                run_id=context.run_id,
+                history=history,
+                screenshots=screenshot_artifacts,
+                summary=summary_payload,
+            )
+
+            context.history_path.write_text(
+                json.dumps(history_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            return RunResult(
+                model=model_name,
+                run_index=run_index,
+                is_done=summary_payload["is_done"],
+                is_successful=summary_payload["is_successful"],
+                has_errors=summary_payload["has_errors"],
+                number_of_steps=summary_payload["number_of_steps"],
+                total_duration_seconds=summary_payload["total_duration_seconds"],
+                final_result=summary_payload["final_result"],
+                history_path=str(context.history_path.resolve()),
+            )
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return RunResult(
+                model=model_name,
+                run_index=run_index,
+                is_done=False,
+                is_successful=False,
+                has_errors=True,
+                number_of_steps=0,
+                total_duration_seconds=0.0,
+                final_result=str(exc),
+                history_path="",
+            )
+        finally:
+            await self._close_agent_resources(agent)
+            if tmp_profile and os.path.isdir(tmp_profile):
+                shutil.rmtree(tmp_profile, ignore_errors=True)
+
+    def _prepare_run_context(self, task_run_id: str) -> RunContext:
+        run_uuid = str(uuid.uuid4())
+        run_id = f"{task_run_id}_{run_uuid}"
+        history_path = self._output_dir / f"{run_id}.json"
+        screenshots_dir = self._output_dir / "screenshots" / run_id
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+        return RunContext(run_id=run_id, history_path=history_path, screenshots_dir=screenshots_dir)
+
+    def _get_browser_use_llm(self, model_name: str) -> Any:
+        provider = self._resolve_provider_from_model(model_name)
+        class_map = {
+            "deepseek": "ChatDeepSeek",
+            "openai": "ChatOpenAI",
+            "anthropic": "ChatAnthropic",
+            "gemini": "ChatGemini",
+            "ollama": "ChatOllama",
+        }
+
+        class_name = class_map[provider]
+        try:
+            llm_module = importlib.import_module("browser_use.llm")
+            llm_cls = getattr(llm_module, class_name)
+        except (ImportError, AttributeError) as exc:
+            raise RuntimeError(
+                "browser-use LLM adapters are unavailable. Install browser-use with required extras."
+            ) from exc
+
+        kwargs: dict[str, Any] = {"model": model_name}
+        if provider != "ollama":
+            api_key = self._api_key_for_provider(provider)
+            if not api_key:
+                raise RuntimeError(f"Missing API key for provider '{provider}' and model '{model_name}'.")
+            kwargs["api_key"] = api_key
+            base_url = self._base_url_for_provider(provider)
+            if base_url:
+                kwargs["base_url"] = base_url
+            kwargs["temperature"] = self._settings.llm_temperature
+
+        return llm_cls(**kwargs)
+
+    def _resolve_provider_from_model(self, model_name: str) -> str:
+        normalized = (model_name or "").strip().lower()
+        if "deepseek" in normalized:
+            return "deepseek"
+        if normalized.startswith("claude"):
+            return "anthropic"
+        if "gemini" in normalized:
+            return "gemini"
+        if (
+            "ollama" in normalized
+            or normalized.startswith("llama")
+            or normalized.startswith("mistral")
+            or normalized.startswith("phi")
+        ):
+            return "ollama"
+        if normalized.startswith("gpt") or normalized.startswith("o"):
+            return "openai"
+        return "openai"
+
+    def _api_key_for_provider(self, provider: str) -> str | None:
+        if provider == "deepseek":
+            return self._settings.deepseek_api_key
+        if provider == "openai":
+            return self._settings.openai_api_key
+        if provider == "anthropic":
+            return self._settings.anthropic_api_key
+        if provider == "gemini":
+            return self._settings.gemini_api_key
+        return None
+
+    def _base_url_for_provider(self, provider: str) -> str | None:
+        if provider == "deepseek":
+            return self._settings.deepseek_base_url
+        if provider == "openai":
+            return self._settings.openai_base_url or self._settings.llm_base_url
+        if provider == "anthropic":
+            return self._settings.anthropic_base_url
+        if provider == "gemini":
+            return self._settings.gemini_base_url
+        if provider == "ollama":
+            return self._settings.ollama_base_url
+        return None
+
+    async def _run_agent_with_compatible_loop(self, agent: Any, *, max_steps: int) -> Any:
+        if sys.platform.startswith("win") and self._settings.force_threaded_run_on_windows:
+            return await asyncio.to_thread(self._run_agent_in_proactor_loop, agent, max_steps)
+        return await agent.run(max_steps=max_steps)
+
+    def _run_agent_in_proactor_loop(self, agent: Any, max_steps: int) -> Any:
+        policy = asyncio.WindowsProactorEventLoopPolicy()
+        loop = policy.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(agent.run(max_steps=max_steps))
+        finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:
+                pass
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    async def _close_resource(self, resource: Any) -> None:
+        if resource is None:
+            return
+        for method_name in ("close", "aclose", "shutdown", "stop", "__aexit__"):
+            if not hasattr(resource, method_name):
+                continue
+            try:
+                close_result = getattr(resource, method_name)()
+                if asyncio.iscoroutine(close_result):
+                    await close_result
+            except Exception:
+                pass
+            break
+
+    async def _close_agent_resources(self, agent: Any) -> None:
+        if agent is None:
+            return
+        await self._close_resource(agent)
+        await self._close_resource(getattr(agent, "browser_session", None))
+
+    def _compose_agent_task(self, *, task: TaskConfig, content: str) -> str:
+        persona = (content or "").strip()
+        url = (task.url or "").strip()
+        name = (task.name or "").strip()
+        description = (task.description or "").strip()
+
+        if description:
+            task_instruction = description
+            if name and name.lower() not in description.lower():
+                task_instruction = f"{name}: {description}"
+        elif name:
+            task_instruction = name
+        else:
+            task_instruction = "Complete the task"
+
+        task_prompt = task_instruction
+        if url:
+            task_prompt = f"{task_prompt} (Website: {url})"
+
+        prompt = f"Complete this task based on the following persona: {task_prompt}"
+        if persona:
+            prompt = f"{prompt}\nPersona: {persona}"
+        return prompt
+
+    def _save_screenshots(self, history: Any, context: RunContext) -> list[ScreenshotArtifact]:
+        if not self._settings.enable_screenshots:
+            return []
+
+        artifacts: list[ScreenshotArtifact] = []
+
+        screenshot_paths_attr = getattr(history, "screenshot_paths", None)
+        if callable(screenshot_paths_attr):
+            try:
+                path_items = screenshot_paths_attr(return_none_if_not_screenshot=False)
+            except TypeError:
+                path_items = screenshot_paths_attr()
+            except Exception:
+                path_items = None
+
+            if path_items:
+                cleaned_paths = [Path(str(p)) for p in path_items if p]
+                if self._settings.max_screenshots > 0:
+                    cleaned_paths = cleaned_paths[: self._settings.max_screenshots]
+
+                for index, source_path in enumerate(cleaned_paths, start=1):
+                    try:
+                        if not source_path.exists():
+                            continue
+                        image_bytes = source_path.read_bytes()
+                    except Exception:
+                        continue
+
+                    extension = source_path.suffix.lower() if source_path.suffix else ".png"
+                    target_path = context.screenshots_dir / f"screenshot_{index:03d}{extension}"
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    target_path.write_bytes(image_bytes)
+                    artifacts.append(ScreenshotArtifact(path=str(target_path), base64_content=None))
+
+                if artifacts:
+                    return artifacts
+
+        screenshots_attr = getattr(history, "screenshots", None)
+        if callable(screenshots_attr):
+            try:
+                screenshots = screenshots_attr()
+            except Exception:
+                screenshots = None
+        else:
+            screenshots = screenshots_attr
+
+        if not screenshots:
+            return artifacts
+
+        screenshot_list = list(screenshots)
+        if self._settings.max_screenshots > 0:
+            screenshot_list = screenshot_list[: self._settings.max_screenshots]
+
+        for index, screenshot_data in enumerate(screenshot_list, start=1):
+            if not screenshot_data:
+                continue
+
+            encoded_str = self._extract_base64_data(screenshot_data)
+            if not encoded_str:
+                continue
+
+            try:
+                image_bytes = base64.b64decode(encoded_str)
+            except Exception:
+                continue
+
+            extension = self._guess_image_extension(screenshot_data)
+            target_path = context.screenshots_dir / f"screenshot_{index:03d}{extension}"
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(image_bytes)
+            artifacts.append(ScreenshotArtifact(path=str(target_path), base64_content=None))
+
+        return artifacts
+
+    def _extract_base64_data(self, screenshot_data: Any) -> str:
+        if isinstance(screenshot_data, (bytes, bytearray)):
+            return base64.b64encode(screenshot_data).decode("utf-8")
+
+        if isinstance(screenshot_data, str):
+            _, _, encoded = screenshot_data.partition(",")
+            return encoded or screenshot_data
+
+        if isinstance(screenshot_data, dict):
+            for key in ("data", "content", "image"):
+                value = screenshot_data.get(key)
+                if isinstance(value, str):
+                    return value
+
+        return str(screenshot_data)
+
+    def _guess_image_extension(self, screenshot_data: Any) -> str:
+        if isinstance(screenshot_data, str):
+            lower = screenshot_data.lower()
+            if "image/jpeg" in lower or "image/jpg" in lower:
+                return ".jpg"
+            if "image/webp" in lower:
+                return ".webp"
+        return ".png"
+
+    def _extract_history_items(self, history: Any) -> list[Any]:
+        if hasattr(history, "history") and isinstance(history.history, list):
+            return history.history
+        if hasattr(history, "__iter__") and not isinstance(history, (str, bytes)):
+            try:
+                return list(history)
+            except Exception:
+                return []
+        return []
+
+    def _extract_action_descriptions(self, history: Any, max_items: int) -> list[Any]:
+        descriptions: list[Any] = [None] * max_items
+        history_items = self._extract_history_items(history)
+
+        for idx, item in enumerate(history_items[:max_items]):
+            parts: list[str] = []
+            if hasattr(item, "state") and hasattr(item.state, "result"):
+                result = item.state.result
+                if isinstance(result, str) and result.strip():
+                    parts.append(result.strip()[:200])
+            if hasattr(item, "model_output"):
+                model_output = item.model_output
+                action = getattr(model_output, "action", None)
+                if action is not None:
+                    parts.append(f"Action: {str(action)[:150]}")
+            if parts:
+                descriptions[idx] = " | ".join(parts)
+
+        return descriptions
+
+    def _build_history_payload(
+        self,
+        *,
+        task: TaskConfig,
+        persona: PersonaConfig,
+        model_name: str,
+        run_index: int,
+        run_id: str,
+        history: Any,
+        screenshots: list[ScreenshotArtifact],
+        summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        step_descriptions = self._extract_action_descriptions(history, max_items=len(screenshots))
+
+        return {
+            "metadata": {
+                "id": run_id,
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "task": {
+                    "name": task.name,
+                    "description": task.description,
+                    "url": task.url,
+                },
+                "persona": {
+                    "value": persona.value,
+                    "content": persona.content,
+                },
+                "model": model_name,
+                "run_index": run_index,
+            },
+            "summary": {
+                "is_done": self._ensure_bool(summary.get("is_done")),
+                "is_successful": self._ensure_bool(summary.get("is_successful")),
+                "has_errors": self._ensure_bool(summary.get("has_errors")),
+                "number_of_steps": self._ensure_int(summary.get("number_of_steps")),
+                "total_duration_seconds": self._ensure_float(summary.get("total_duration_seconds")),
+                "final_result": self._to_serializable(summary.get("final_result")),
+            },
+            "details": {
+                "screenshots": [_to_portable_path(Path(artifact.path)) for artifact in screenshots],
+                "step_descriptions": step_descriptions,
+                "model_outputs": self._to_serializable(self._safe_call(history, "model_outputs")),
+                "last_action": self._to_serializable(self._safe_call(history, "last_action")),
+                "structured_output": self._to_serializable(getattr(history, "structured_output", None)),
+            },
+        }
+
+    def _safe_call(self, obj: Any, method_name: str) -> Any:
+        attr = getattr(obj, method_name, None)
+        if callable(attr):
+            try:
+                return attr()
+            except Exception:
+                return None
+        return attr
+
+    def _to_serializable(self, value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, dict):
+            return {str(k): self._to_serializable(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [self._to_serializable(item) for item in value]
+        if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
+            try:
+                return self._to_serializable(value.model_dump())
+            except Exception:
+                return str(value)
+        if hasattr(value, "dict") and callable(getattr(value, "dict")):
+            try:
+                return self._to_serializable(value.dict())
+            except Exception:
+                return str(value)
+        if hasattr(value, "__dict__"):
+            try:
+                return self._to_serializable(vars(value))
+            except Exception:
+                return str(value)
+        return str(value)
+
+    def _ensure_bool(self, value: Any) -> bool:
+        return bool(value)
+
+    def _ensure_int(self, value: Any) -> int:
+        try:
+            return int(value)
+        except Exception:
+            return 0
+
+    def _ensure_float(self, value: Any) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return 0.0
+
+
 async def run_experiment(
     run_times: int,
     strict_schema: bool,
-    bindings: BackendBindings,
+    settings: StandaloneSettings,
     website_url: str | None = None,
 ) -> None:
     _validate_experiment_config(run_times)
     tasks = _override_tasks_website_url(TASKS, website_url)
 
-    settings = bindings.get_settings()
-    if not getattr(settings, "BROWSER_AGENT_ENABLE_SCREENSHOTS", True):
-        raise RuntimeError(
-            "BROWSER_AGENT_ENABLE_SCREENSHOTS is false. "
-            "Enable screenshots to keep artifacts identical to browser-agent run outputs."
-        )
-
     total_jobs = len(tasks) * len(PERSONAS) * len(MODELS) * run_times
     logging.info(
-        "Starting experiment | tasks=%d personas=%d models=%d run_times=%d total_jobs=%d",
+        "Starting experiment | tasks=%d personas=%d models=%d run_times=%d total_jobs=%d output_dir=%s",
         len(tasks),
         len(PERSONAS),
         len(MODELS),
         run_times,
         total_jobs,
+        settings.output_dir,
     )
+
+    if not settings.enable_screenshots:
+        logging.warning("BROWSER_AGENT_ENABLE_SCREENSHOTS is false. details.screenshots will be empty.")
 
     if website_url is not None:
         logging.info("Applying website URL override to all tasks | website_url=%s", tasks[0].url)
 
-    service = bindings.BrowserAgentService()
+    service = StandaloneBrowserAgentService(settings=settings)
+    service.validate_model_credentials(MODELS)
+
     generated_files: list[Path] = []
     skipped_failed_runs = 0
     skipped_invalid_runs = 0
     failed_tasks = 0
 
     for task_index, task in enumerate(tasks, start=1):
-        request = _build_request(task, run_times=run_times, bindings=bindings)
         run_id = _build_run_id(task.name, task_index)
 
         logging.info(
@@ -489,7 +1064,13 @@ async def run_experiment(
         )
 
         try:
-            results = await service.run(request, run_id=run_id)
+            results = await service.run_task(
+                task=task,
+                personas=PERSONAS,
+                models=MODELS,
+                run_times=run_times,
+                task_run_id=run_id,
+            )
         except Exception as exc:
             failed_tasks += 1
             logging.exception(
@@ -580,17 +1161,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Run browser-agent experiments across TASKS x PERSONAS x MODELS and "
-            "persist artifacts using the exact BrowserAgentService format."
+            "persist artifacts from this standalone script."
         )
-    )
-    parser.add_argument(
-        "--backend-dir",
-        type=str,
-        default=None,
-        help=(
-            "Path to backend directory (or repository root containing backend/) that provides app.* modules. "
-            f"Can also be set via {BACKEND_DIR_ENV}."
-        ),
     )
     parser.add_argument(
         "--run-times",
@@ -614,32 +1186,30 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override TaskConfig.url for all tasks in this run.",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Output directory for generated JSON and screenshots. Auto-created if missing.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
-    global BACKEND_DIR, ROOT_DIR
-
     args = parse_args()
 
-    BACKEND_DIR, ROOT_DIR = _resolve_backend_and_root_dirs(args.backend_dir)
-    _configure_backend_import_path(BACKEND_DIR)
-    _bootstrap_env(BACKEND_DIR, ROOT_DIR)
-    bindings = _import_backend_bindings()
-
+    _bootstrap_env()
     _configure_logging(verbose=args.verbose)
 
-    if BACKEND_DIR is not None:
-        logging.info("Using backend directory: %s", BACKEND_DIR)
-    else:
-        logging.info("Using installed backend package (no local backend dir detected)")
+    settings = StandaloneSettings.from_env(output_dir_override=args.output_dir)
+    logging.info("Using standalone output directory: %s", settings.output_dir)
 
     try:
         asyncio.run(
             run_experiment(
                 run_times=args.run_times,
                 strict_schema=not args.no_strict_schema,
-                bindings=bindings,
+                settings=settings,
                 website_url=args.website_url,
             )
         )

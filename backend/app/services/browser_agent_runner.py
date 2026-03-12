@@ -1037,13 +1037,58 @@ class BrowserAgentService:
         return any(indicator in error_str for indicator in api_error_indicators)
 
     @staticmethod
+    def _ensure_python_bin_in_path() -> None:
+        """Ensure current interpreter's bin dir is discoverable for helper CLIs."""
+        python_bin = str(Path(sys.executable).resolve().parent)
+        current_path = os.environ.get("PATH", "")
+        path_parts = current_path.split(os.pathsep) if current_path else []
+        if python_bin in path_parts:
+            return
+
+        os.environ["PATH"] = (
+            python_bin
+            if not current_path
+            else f"{python_bin}{os.pathsep}{current_path}"
+        )
+
+    @staticmethod
+    def _has_command(command_name: str) -> bool:
+        import shutil
+
+        return shutil.which(command_name) is not None
+
+    @staticmethod
+    def _install_playwright_chromium() -> bool:
+        """Try to install Playwright Chromium without relying on uvx."""
+        import subprocess
+
+        cmd = [sys.executable, "-m", "playwright", "install", "chromium"]
+        try:
+            proc = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            output_lines = (proc.stdout or "").strip().splitlines()
+            if output_lines:
+                logger.info("Playwright install completed: %s", output_lines[-1])
+            else:
+                logger.info("Playwright install completed with no stdout output")
+            return True
+        except Exception as exc:
+            logger.warning("Playwright chromium install failed via %s: %s", " ".join(cmd), exc)
+            return False
+
+    @staticmethod
     def _find_chrome_executable() -> Optional[str]:
         """Detect available Chrome / Chromium binary.
 
         Checks (in order):
         1. CHROME_PATH / CHROMIUM_PATH env vars
-        2. Common Linux system paths
-        3. Playwright-installed Chromium
+        2. Common system paths (Linux/macOS)
+        3. Playwright-installed Chromium (Linux/macOS/Windows)
         4. ``shutil.which`` fallback
         """
         import shutil
@@ -1054,13 +1099,22 @@ class BrowserAgentService:
             if path and os.path.isfile(path) and os.access(path, os.X_OK):
                 return path
 
-        # 2. Common system paths (linux Docker images)
+        # 2. Common system paths (Linux + macOS)
         system_paths = [
             "/usr/bin/chromium",
             "/usr/bin/chromium-browser",
             "/usr/bin/google-chrome",
             "/usr/bin/google-chrome-stable",
             "/usr/lib/chromium/chromium",
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            str(Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            str(
+                Path.home()
+                / "Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+            ),
+            str(Path.home() / "Applications/Chromium.app/Contents/MacOS/Chromium"),
         ]
         for p in system_paths:
             if os.path.isfile(p) and os.access(p, os.X_OK):
@@ -1069,11 +1123,34 @@ class BrowserAgentService:
         # 3. Playwright-managed Chromium
         try:
             from pathlib import Path as _Path
-            pw_cache = _Path.home() / ".cache" / "ms-playwright"
-            if pw_cache.exists():
-                for chrome_dir in sorted(pw_cache.glob("chromium-*/chrome-linux/chrome"), reverse=True):
-                    if chrome_dir.is_file() and os.access(str(chrome_dir), os.X_OK):
-                        return str(chrome_dir)
+
+            pw_cache_candidates = [
+                _Path.home() / ".cache" / "ms-playwright",
+                _Path.home() / "Library" / "Caches" / "ms-playwright",
+            ]
+            browser_patterns = [
+                "chromium-*/chrome-linux/chrome",
+                "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+                "chromium-*/chrome-mac/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+                "chromium-*/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium",
+                "chromium-*/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+                "chromium-*/chrome-mac-x64/Chromium.app/Contents/MacOS/Chromium",
+                "chromium-*/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+                "chromium-*/chrome-win/chrome.exe",
+                "chromium_headless_shell-*/chrome-headless-shell-linux/headless_shell",
+                "chromium_headless_shell-*/chrome-headless-shell-mac/chrome-headless-shell",
+                "chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+                "chromium_headless_shell-*/chrome-headless-shell-mac-x64/chrome-headless-shell",
+                "chromium_headless_shell-*/chrome-headless-shell-win64/chrome-headless-shell.exe",
+            ]
+
+            for pw_cache in pw_cache_candidates:
+                if not pw_cache.exists():
+                    continue
+                for pattern in browser_patterns:
+                    for chrome_bin in sorted(pw_cache.glob(pattern), reverse=True):
+                        if chrome_bin.is_file() and os.access(str(chrome_bin), os.X_OK):
+                            return str(chrome_bin)
         except Exception:
             pass
 
@@ -1133,18 +1210,35 @@ class BrowserAgentService:
             from browser_use import Agent, BrowserSession
             import tempfile
 
+            # Ensure helper binaries from the current Python env (e.g. uvx) are discoverable.
+            self._ensure_python_bin_in_path()
+
             # Create a temporary profile directory for this run
             tmp_profile = tempfile.mkdtemp(prefix="bu_profile_")
 
             # Detect the Chromium / Chrome executable path
             # Priority: env var > common system paths
             chrome_executable = self._find_chrome_executable()
+            if not chrome_executable and not self._has_command("uvx"):
+                logger.warning(
+                    "No browser executable found and uvx is unavailable. "
+                    "Attempting fallback install via playwright module."
+                )
+                if self._install_playwright_chromium():
+                    chrome_executable = self._find_chrome_executable()
+
             if chrome_executable:
                 logger.info(f"Using browser executable: {chrome_executable}")
             else:
+                if not self._has_command("uvx"):
+                    raise BrowserAgentExecutionError(
+                        "No Chrome/Chromium executable found and 'uvx' is unavailable. "
+                        f"Install Chromium with '{sys.executable} -m playwright install chromium', "
+                        "or install uv (which provides uvx), or set CHROME_PATH/CHROMIUM_PATH."
+                    )
+
                 logger.warning(
-                    "No explicit Chrome/Chromium binary found; "
-                    "browser_use will try to auto-detect."
+                    "No explicit Chrome/Chromium binary found; browser_use will try to auto-detect."
                 )
 
             # Build BrowserSession kwargs
@@ -1156,6 +1250,7 @@ class BrowserAgentService:
                 is_local=True,
                 use_cloud=False,
                 cloud_browser=False,
+                highlight_elements=False,
                 args=[
                     "--no-sandbox",
                     "--disable-dev-shm-usage",

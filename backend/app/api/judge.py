@@ -666,7 +666,8 @@ async def _gather_with_limit(
 async def _rank_conditions_with_llm(
     criterion: ExperimentCriterion,
     condition_evaluations: dict,
-    results: List[ConditionResult]
+    results: List[ConditionResult],
+    judge_model: Optional[str] = None,
 ) -> tuple[List[RankingItem], str]:
     """
     Use LLM to rank conditions for a specific criterion.
@@ -741,7 +742,7 @@ Please return results in JSON format:
 """
     
     try:
-        llm = get_chat_llm()
+        llm = get_chat_llm(model=judge_model) if judge_model else get_chat_llm()
         response = await asyncio.to_thread(
             lambda: llm.invoke([HumanMessage(content=prompt)])
         )
@@ -840,7 +841,8 @@ def _fallback_ranking(
 
 async def _generate_multi_condition_assessment(
     results: List[ConditionResult],
-    criteria: List[ExperimentCriterion]
+    criteria: List[ExperimentCriterion],
+    judge_model: Optional[str] = None,
 ) -> Optional[MultiConditionAssessment]:
     """
     Generate multi-condition assessment comparing all conditions against each criterion.
@@ -878,7 +880,12 @@ async def _generate_multi_condition_assessment(
         
         # Use LLM to rank conditions (or fallback to default ranking)
         try:
-            ranking_items, ranking_reasoning = await _rank_conditions_with_llm(criterion, criterion_results, results)
+            ranking_items, ranking_reasoning = await _rank_conditions_with_llm(
+                criterion,
+                criterion_results,
+                results,
+                judge_model=judge_model,
+            )
         except Exception as e:
             logger.warning(f"Failed to run LLM ranking for criterion '{criterion.title}': {e}")
             ranking_items = _fallback_ranking(criterion_results, results)
@@ -1155,7 +1162,11 @@ async def evaluate_experiment(
             logger.warning("Skipping invalid condition result: %s", cond_id)
     
     # 7. Generate multi-condition assessment if there are 2+ conditions
-    multi_condition_assessment = await _generate_multi_condition_assessment(condition_results, request.criteria)
+    multi_condition_assessment = await _generate_multi_condition_assessment(
+        condition_results,
+        request.criteria,
+        judge_model=request.judge_model,
+    )
     
     # Create response
     response = ExperimentEvaluationResponse(conditions=condition_results, multi_condition_assessment=multi_condition_assessment)

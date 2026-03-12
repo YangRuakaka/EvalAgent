@@ -168,27 +168,27 @@ TASKS: List[TaskConfig] = [
         url="http://34.55.136.249:3000/flight",
         description="Book a flight from ORD to LAX.",
     ),
-    TaskConfig(
-        name="Rent a car",
-        url="http://34.55.136.249:3000/zoomcar",
-        description="Rent a car for a family vacation.",
-    )
+    # TaskConfig(
+    #     name="Rent a car",
+    #     url="http://34.55.136.249:3000/zoomcar",
+    #     description="Rent a car for a family vacation.",
+    # )
 
 ]
 
 PERSONAS: List[PersonaConfig] = [
-    PersonaConfig(
-        value="Frugality",
-        content="You maximize value for money and avoid unnecessary spending.",
-    ),
-    PersonaConfig(
-        value="Sustainability",
-        content="You prioritize environmentally friendly and socially responsible choices.",
-    ),
-    PersonaConfig(
-        value="Comfort",
-        content="You prioritize a comfortable and enjoyable travel experience.",
-    ),
+    # PersonaConfig(
+    #     value="Frugality",
+    #     content="You maximize value for money and avoid unnecessary spending.",
+    # ),
+    # PersonaConfig(
+    #     value="Sustainability",
+    #     content="You prioritize environmentally friendly and socially responsible choices.",
+    # ),
+    # PersonaConfig(
+    #     value="Comfort",
+    #     content="You prioritize a comfortable and enjoyable travel experience.",
+    # ),
     PersonaConfig(
         value="Luxury",
         content="You prioritize comfort and premium experiences, even at higher costs.",

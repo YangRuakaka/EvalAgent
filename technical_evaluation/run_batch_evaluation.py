@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -225,10 +226,6 @@ def _coerce_payload(payload: dict[str, Any]) -> dict[str, Any]:
     judge_model = payload.get("judge_model")
     if isinstance(judge_model, str) and judge_model.strip():
         normalized["judge_model"] = judge_model.strip()
-
-    forced_granularity = payload.get("forced_granularity")
-    if isinstance(forced_granularity, str) and forced_granularity.strip():
-        normalized["forced_granularity"] = forced_granularity.strip()
 
     return normalized
 
@@ -856,7 +853,6 @@ async def run_batch(
     results_dir: Path,
     pattern: str,
     fail_fast: bool,
-    forced_granularity: str | None,
     run_tag: str | None,
     emit_annotatable_output: bool,
     max_files: int | None,
@@ -866,7 +862,10 @@ async def run_batch(
     json_pattern: str,
     criteria_for_dataset_json: list[dict[str, str]] | None,
     fixed_batch_id: str | None,
+    request_max_concurrency: int,
+    skip_existing: bool,
 ) -> int:
+    batch_started_at = time.perf_counter()
     results_dir.mkdir(parents=True, exist_ok=True)
 
     batch_id = (fixed_batch_id or "").strip() or _timestamp()
@@ -899,13 +898,14 @@ async def run_batch(
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "dataset_dir": str(dataset_dir),
         "results_dir": str(results_dir),
-        "forced_granularity": forced_granularity,
         "run_tag": run_tag,
         "input_mode": input_mode,
         "json_pattern": json_pattern,
         "max_files": max_files,
         "max_conditions_per_request": max_conditions_per_request,
         "judge_models": judge_models or [],
+        "request_max_concurrency": max(1, int(request_max_concurrency or 1)),
+        "skip_existing": bool(skip_existing),
         "files": [],
     }
     if normalized_dataset_json_dir is not None:
@@ -913,12 +913,22 @@ async def run_batch(
 
     total_requests = 0
     success_requests = 0
+    failed_requests = 0
+    skipped_requests = 0
 
     condition_lookup_dirs: list[Path] = []
     condition_payload_cache: dict[str, dict[str, Any] | None] = {}
     if emit_annotatable_output and input_mode != "dataset_json":
         condition_lookup_dirs = get_condition_lookup_dirs(settings)
         summary["condition_lookup_dirs"] = [str(path) for path in condition_lookup_dirs]
+
+    effective_request_concurrency = max(1, int(request_max_concurrency or 1))
+    if fail_fast and effective_request_concurrency > 1:
+        print("[INFO] --fail-fast enabled; forcing request concurrency to 1")
+        effective_request_concurrency = 1
+
+    request_jobs: list[dict[str, Any]] = []
+    stop_after_build = False
 
     for source in input_sources:
         file_result: dict[str, Any] = {
@@ -927,6 +937,8 @@ async def run_batch(
             "warnings": [],
             "requests": [],
         }
+        summary["files"].append(file_result)
+        file_result_index = len(summary["files"]) - 1
 
         try:
             file_result["warnings"].extend(source.warnings)
@@ -936,9 +948,6 @@ async def run_batch(
 
             for idx, payload in enumerate(source.payloads, start=1):
                 base_payload = copy.deepcopy(payload)
-
-                if forced_granularity:
-                    base_payload["forced_granularity"] = forced_granularity
 
                 original_conditions = base_payload.get("conditions")
                 if (
@@ -970,8 +979,6 @@ async def run_batch(
                     suffix_parts = []
                     if run_tag:
                         suffix_parts.append(run_tag)
-                    if forced_granularity:
-                        suffix_parts.append(forced_granularity)
                     if model_name:
                         suffix_parts.append(f"judge-{_safe_filename_token(model_name)}")
                     if len(model_candidates) > 1:
@@ -990,94 +997,191 @@ async def run_batch(
                         "judge_model": payload_for_run.get("judge_model"),
                         "condition_count": len(payload_for_run.get("conditions", [])) if isinstance(payload_for_run.get("conditions"), list) else None,
                         "output_file": output_name,
-                        "status": "ok",
+                        "status": "pending",
                     }
-
-                    try:
-                        result = await run_single_request(payload_for_run)
-
-                        if input_mode == "dataset_json" and isinstance(source.source_json_data, dict):
-                            output_payload = _build_dataset_json_appended_output(
-                                source_json_data=source.source_json_data,
-                                source_file=source.source_name,
-                                request_payload=payload_for_run,
-                                llm_output=result,
-                                source_criteria_mapping=source.source_criteria_mapping,
-                                output_file=output_name,
-                            )
-                            output_path.write_text(
-                                json.dumps(output_payload, indent=2, ensure_ascii=False),
-                                encoding="utf-8",
-                            )
-                        else:
-                            annotatable_output_name = output_name.replace("__result.json", "__annotatable.json")
-                            annotatable_output_path = results_dir / annotatable_output_name
-
-                            output_path.write_text(
-                                json.dumps(
-                                    {
-                                        "source_file": source.source_name,
-                                        "request_index": idx,
-                                        "request": payload_for_run,
-                                        "result": result,
-                                    },
-                                    indent=2,
-                                    ensure_ascii=False,
-                                ),
-                                encoding="utf-8",
-                            )
-
-                            if emit_annotatable_output:
-                                annotatable_package = _build_annotatable_request_package(
-                                    source_file=source.source_name,
-                                    request_index=idx,
-                                    request_payload=payload_for_run,
-                                    llm_output=result,
-                                    condition_lookup_dirs=condition_lookup_dirs,
-                                    condition_payload_cache=condition_payload_cache,
-                                )
-                                annotatable_output_path.write_text(
-                                    json.dumps(annotatable_package, indent=2, ensure_ascii=False),
-                                    encoding="utf-8",
-                                )
-                                request_item["annotatable_output_file"] = annotatable_output_name
-                                if annotatable_package.get("warnings"):
-                                    file_result["warnings"].extend(annotatable_package["warnings"])
-
-                        success_requests += 1
-                    except Exception as exc:
-                        request_item["status"] = "error"
-                        request_item["error"] = str(exc)
-                        file_result["status"] = "partial_error"
-                        if fail_fast:
-                            file_result["requests"].append(request_item)
-                            raise
-
                     file_result["requests"].append(request_item)
+                    request_jobs.append(
+                        {
+                            "source": source,
+                            "file_result_index": file_result_index,
+                            "request_result_index": len(file_result["requests"]) - 1,
+                            "request_index": idx,
+                            "payload_for_run": payload_for_run,
+                            "output_name": output_name,
+                            "output_path": output_path,
+                        }
+                    )
 
         except Exception as exc:
             file_result["status"] = "error"
             file_result["error"] = str(exc)
             if fail_fast:
-                summary["files"].append(file_result)
+                stop_after_build = True
                 break
 
-        summary["files"].append(file_result)
+    async def _run_request_job(job: dict[str, Any]) -> dict[str, Any]:
+        source: InputSourceRequests = job["source"]
+        payload_for_run: dict[str, Any] = job["payload_for_run"]
+        output_path: Path = job["output_path"]
+        output_name: str = job["output_name"]
+        request_index = int(job["request_index"])
+
+        started_at = time.perf_counter()
+        request_update: dict[str, Any] = {
+            "status": "ok",
+        }
+        file_warnings: list[str] = []
+
+        annotatable_output_name: str | None = None
+        annotatable_output_path: Path | None = None
+        if input_mode != "dataset_json":
+            annotatable_output_name = output_name.replace("__result.json", "__annotatable.json")
+            annotatable_output_path = results_dir / annotatable_output_name
+
+        skip_allowed = False
+        if skip_existing and output_path.exists():
+            if not emit_annotatable_output or input_mode == "dataset_json":
+                skip_allowed = True
+            elif annotatable_output_path is not None and annotatable_output_path.exists():
+                skip_allowed = True
+
+        if skip_allowed:
+            request_update["status"] = "skipped"
+            request_update["skip_reason"] = "output_exists"
+            request_update["duration_seconds"] = round(time.perf_counter() - started_at, 3)
+            if emit_annotatable_output and annotatable_output_name:
+                request_update["annotatable_output_file"] = annotatable_output_name
+            return {
+                "file_result_index": job["file_result_index"],
+                "request_result_index": job["request_result_index"],
+                "request_update": request_update,
+                "file_warnings": file_warnings,
+            }
+
+        try:
+            result = await run_single_request(payload_for_run)
+
+            if input_mode == "dataset_json" and isinstance(source.source_json_data, dict):
+                output_payload = _build_dataset_json_appended_output(
+                    source_json_data=source.source_json_data,
+                    source_file=source.source_name,
+                    request_payload=payload_for_run,
+                    llm_output=result,
+                    source_criteria_mapping=source.source_criteria_mapping,
+                    output_file=output_name,
+                )
+                output_path.write_text(
+                    json.dumps(output_payload, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            else:
+                output_path.write_text(
+                    json.dumps(
+                        {
+                            "source_file": source.source_name,
+                            "request_index": request_index,
+                            "request": payload_for_run,
+                            "result": result,
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                if emit_annotatable_output and annotatable_output_path is not None and annotatable_output_name is not None:
+                    annotatable_package = _build_annotatable_request_package(
+                        source_file=source.source_name,
+                        request_index=request_index,
+                        request_payload=payload_for_run,
+                        llm_output=result,
+                        condition_lookup_dirs=condition_lookup_dirs,
+                        condition_payload_cache=condition_payload_cache,
+                    )
+                    annotatable_output_path.write_text(
+                        json.dumps(annotatable_package, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                    request_update["annotatable_output_file"] = annotatable_output_name
+                    if annotatable_package.get("warnings"):
+                        file_warnings.extend(annotatable_package["warnings"])
+
+        except Exception as exc:
+            request_update["status"] = "error"
+            request_update["error"] = str(exc)
+
+        request_update["duration_seconds"] = round(time.perf_counter() - started_at, 3)
+        return {
+            "file_result_index": job["file_result_index"],
+            "request_result_index": job["request_result_index"],
+            "request_update": request_update,
+            "file_warnings": file_warnings,
+        }
+
+    def _apply_job_result(job_result: dict[str, Any]) -> None:
+        nonlocal success_requests, failed_requests, skipped_requests
+
+        file_result_index = int(job_result["file_result_index"])
+        request_result_index = int(job_result["request_result_index"])
+        file_result = summary["files"][file_result_index]
+        request_item = file_result["requests"][request_result_index]
+        request_update = job_result.get("request_update") or {}
+
+        request_item.update(request_update)
+        file_warnings = job_result.get("file_warnings") or []
+        if file_warnings:
+            file_result["warnings"].extend(file_warnings)
+
+        status = str(request_item.get("status") or "")
+        if status == "ok":
+            success_requests += 1
+        elif status == "skipped":
+            skipped_requests += 1
+        elif status == "error":
+            failed_requests += 1
+            if file_result.get("status") == "ok":
+                file_result["status"] = "partial_error"
+
+    if not stop_after_build:
+        if effective_request_concurrency > 1:
+            semaphore = asyncio.Semaphore(effective_request_concurrency)
+
+            async def _guarded_run(job: dict[str, Any]) -> dict[str, Any]:
+                async with semaphore:
+                    return await _run_request_job(job)
+
+            job_results = await asyncio.gather(*[_guarded_run(job) for job in request_jobs])
+            for job_result in job_results:
+                _apply_job_result(job_result)
+        else:
+            for job in request_jobs:
+                job_result = await _run_request_job(job)
+                _apply_job_result(job_result)
+
+                request_update = job_result.get("request_update") or {}
+                if fail_fast and request_update.get("status") == "error":
+                    break
 
     summary["finished_at"] = datetime.now().isoformat(timespec="seconds")
+    summary["duration_seconds"] = round(time.perf_counter() - batch_started_at, 3)
     summary["total_files"] = len(summary["files"])
     summary["total_requests"] = total_requests
+    summary["executed_requests"] = success_requests + failed_requests
+    summary["skipped_requests"] = skipped_requests
     summary["success_requests"] = success_requests
-    summary["failed_requests"] = total_requests - success_requests
+    summary["failed_requests"] = failed_requests
 
     summary_path = results_dir / f"batch_summary_{batch_id}.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[DONE] Batch: {batch_id}")
     print(f"[DONE] Summary: {summary_path}")
-    print(f"[DONE] Requests: success={success_requests}, failed={total_requests - success_requests}")
+    print(
+        f"[DONE] Requests: success={success_requests}, skipped={skipped_requests}, "
+        f"failed={failed_requests}, total={total_requests}"
+    )
 
-    return 0 if (total_requests > 0 and success_requests == total_requests) else 2
+    return 0 if (total_requests > 0 and failed_requests == 0 and (success_requests + skipped_requests) == total_requests) else 2
 
 
 def main() -> int:
@@ -1119,12 +1223,6 @@ def main() -> int:
         help="Stop immediately on first error",
     )
     parser.add_argument(
-        "--forced-granularity",
-        choices=["step_level", "phase_level", "global_summary"],
-        default=None,
-        help="Force all criteria to a single granularity baseline",
-    )
-    parser.add_argument(
         "--run-tag",
         default=None,
         help="Optional tag appended to output file names for experiment tracking",
@@ -1162,6 +1260,17 @@ def main() -> int:
         default=None,
         help="Optional fixed batch id to overwrite summary/merged outputs (e.g. latest)",
     )
+    parser.add_argument(
+        "--request-max-concurrency",
+        type=int,
+        default=1,
+        help="Max number of batch requests to evaluate concurrently (default: 1, preserving original serial behavior)",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip requests whose output files already exist (for incremental reruns)",
+    )
     args = parser.parse_args()
 
     dataset_dir = Path(args.dataset_dir).resolve()
@@ -1192,7 +1301,6 @@ def main() -> int:
             results_dir=results_dir,
             pattern=args.pattern,
             fail_fast=args.fail_fast,
-            forced_granularity=args.forced_granularity,
             run_tag=args.run_tag,
             emit_annotatable_output=not args.skip_annotatable_output,
             max_files=args.max_files,
@@ -1202,6 +1310,8 @@ def main() -> int:
             json_pattern=args.json_pattern,
             criteria_for_dataset_json=criteria_for_dataset_json,
             fixed_batch_id=fixed_batch_id,
+            request_max_concurrency=args.request_max_concurrency,
+            skip_existing=args.skip_existing,
         )
     )
 

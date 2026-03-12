@@ -35,14 +35,8 @@ class JudgeEvaluatorService:
     def __init__(
         self,
         llm_factory: ChatLLMFactory,
-        decomposer: Any = None,
-        granularity_analyzer: Any = None,
-        step_aggregator: Any = None,
     ):
         self.llm_factory = llm_factory
-        self.decomposer = decomposer
-        self.granularity_analyzer = granularity_analyzer
-        self.step_aggregator = step_aggregator
         self._setup_templates()
 
     def _setup_templates(self) -> None:
@@ -708,9 +702,6 @@ class JudgeEvaluatorService:
         criterion_assertion: str,
         task_name: str,
         criterion_intent: str,
-        phase_selection_heuristics: List[str],
-        global_overview: Dict[str, Any],
-        evaluation_dimensions: List[Dict[str, Any]],
         all_steps: List[Dict[str, Any]],
         model_name: Optional[str],
     ) -> Dict[str, Any]:
@@ -721,9 +712,6 @@ class JudgeEvaluatorService:
             "criterion_name": criterion_name,
             "criterion_assertion": criterion_assertion,
             "criterion_intent": criterion_intent,
-            "phase_selection_heuristics": json.dumps(phase_selection_heuristics, ensure_ascii=False),
-            "global_phases_overview": json.dumps(global_overview.get("phases", []), ensure_ascii=False, indent=2),
-            "evaluation_dimensions": json.dumps(evaluation_dimensions, ensure_ascii=False, indent=2),
             "steps_text": self._format_steps_for_unified_segmentation(all_steps),
         }
 
@@ -732,8 +720,6 @@ class JudgeEvaluatorService:
         response_data = self._extract_json_object(response_text) or {}
 
         raw_phases = response_data.get("phases", [])
-        if (not isinstance(raw_phases, list) or not raw_phases) and isinstance(global_overview.get("phases"), list):
-            raw_phases = global_overview.get("phases", [])
 
         phases = self._sanitize_phase_output(
             raw_phases=raw_phases,
@@ -752,10 +738,6 @@ class JudgeEvaluatorService:
                 if phase.get("relevant_to_evaluation", False)
             ]
         if not relevant_phase_ids:
-            key_phase_ids = global_overview.get("key_phase_ids", [])
-            if isinstance(key_phase_ids, list):
-                relevant_phase_ids = [str(pid) for pid in key_phase_ids if isinstance(pid, (str, int))]
-        if not relevant_phase_ids:
             relevant_phase_ids = [phase["phase_id"] for phase in phases]
 
         return {
@@ -770,16 +752,14 @@ class JudgeEvaluatorService:
         criterion_assertion: str,
         criterion_intent: str,
         persona_task_alignment: str,
-        pass_signals: List[str],
-        fail_signals: List[str],
         global_behavior_summary: str,
         task_name: str,
         personas: List[str],
         models: List[str],
-        evaluation_dimensions: List[Dict[str, Any]],
         phase: Dict[str, Any],
         all_steps: List[Dict[str, Any]],
         model_name: Optional[str],
+        enable_evidence_expansion: bool = False,
     ) -> EvaluationResult:
         phase_id = str(phase.get("phase_id", "phase_unknown"))
         phase_summary = str(phase.get("phase_summary", ""))
@@ -802,10 +782,7 @@ class JudgeEvaluatorService:
             "criterion_assertion": criterion_assertion,
             "criterion_intent": criterion_intent,
             "persona_task_alignment": persona_task_alignment,
-            "pass_signals": json.dumps(pass_signals, ensure_ascii=False),
-            "fail_signals": json.dumps(fail_signals, ensure_ascii=False),
             "global_behavior_summary": global_behavior_summary,
-            "evaluation_dimensions": json.dumps(evaluation_dimensions, ensure_ascii=False, indent=2),
             "phase_id": phase_id,
             "phase_summary": phase_summary,
             "phase_steps_context": self._build_phase_steps_context(all_steps, step_indices),
@@ -830,17 +807,18 @@ class JudgeEvaluatorService:
             all_steps=all_steps,
             model_name=model_name,
         )
-        result.highlighted_evidence = await self._expand_phase_evidence_if_needed_async(
-            base_evidence=result.highlighted_evidence or [],
-            criterion_name=criterion_name,
-            criterion_assertion=criterion_assertion,
-            task_name=task_name,
-            phase_id=phase_id,
-            phase_summary=phase_summary,
-            step_indices=step_indices,
-            all_steps=all_steps,
-            model_name=model_name,
-        )
+        if enable_evidence_expansion:
+            result.highlighted_evidence = await self._expand_phase_evidence_if_needed_async(
+                base_evidence=result.highlighted_evidence or [],
+                criterion_name=criterion_name,
+                criterion_assertion=criterion_assertion,
+                task_name=task_name,
+                phase_id=phase_id,
+                phase_summary=phase_summary,
+                step_indices=step_indices,
+                all_steps=all_steps,
+                model_name=model_name,
+            )
         dimension_assessments: List[Dict[str, Any]] = []
         if isinstance(result.model_extra, dict):
             raw_dimensions = result.model_extra.get("dimension_assessments", [])
@@ -900,44 +878,15 @@ class JudgeEvaluatorService:
                 model_name,
                 len(all_steps),
             )
-            if not global_overview:
-                global_overview = await self._build_global_behavior_overview_async(
-                    task_name=task_name,
-                    personas=personas,
-                    models=models,
-                    all_steps=all_steps,
-                    model_name=model_name,
-                )
-            logger.info(
-                "[judge][global-overview] criterion=%s phases=%d key_phases=%d",
-                criterion_name,
-                len(global_overview.get("phases", []) if isinstance(global_overview, dict) else []),
-                len(global_overview.get("key_phase_ids", []) if isinstance(global_overview, dict) else []),
-            )
+            criterion_intent = criterion_assertion
+            persona_task_alignment = ""
+            global_behavior_summary = ""
+            if isinstance(global_overview, dict):
+                global_behavior_summary = str(global_overview.get("overall_behavior_summary", ""))
 
-            interpreted = await self._interpret_criterion_dimensions_async(
-                criterion_name=criterion_name,
-                criterion_assertion=criterion_assertion,
-                criterion_description=criterion_description or "",
-                task_name=task_name,
-                personas=personas,
-                models=models,
-                global_overview=global_overview,
-                model_name=model_name,
-            )
-            dimensions = interpreted.get("evaluation_dimensions", [])
-            criterion_intent = str(interpreted.get("criterion_intent", criterion_assertion))
-            persona_task_alignment = str(interpreted.get("persona_task_alignment", ""))
-            pass_signals = interpreted.get("pass_signals", [])
-            fail_signals = interpreted.get("fail_signals", [])
-            phase_selection_heuristics = interpreted.get("phase_selection_heuristics", [])
             logger.info(
-                "[judge][interpretation] criterion=%s dimensions=%d pass_signals=%d fail_signals=%d heuristics=%d",
+                "[judge][segmentation-mode] criterion=%s mode=criterion-based uses_global_overview_phases=false",
                 criterion_name,
-                len(dimensions) if isinstance(dimensions, list) else 0,
-                len(pass_signals) if isinstance(pass_signals, list) else 0,
-                len(fail_signals) if isinstance(fail_signals, list) else 0,
-                len(phase_selection_heuristics) if isinstance(phase_selection_heuristics, list) else 0,
             )
 
             segmentation = await self._segment_phases_by_dimensions_async(
@@ -945,9 +894,6 @@ class JudgeEvaluatorService:
                 criterion_assertion=criterion_assertion,
                 task_name=task_name,
                 criterion_intent=criterion_intent,
-                phase_selection_heuristics=phase_selection_heuristics,
-                global_overview=global_overview,
-                evaluation_dimensions=dimensions,
                 all_steps=all_steps,
                 model_name=model_name,
             )
@@ -957,7 +903,7 @@ class JudgeEvaluatorService:
             if not target_phases:
                 target_phases = phases
             logger.info(
-                "[judge][segmentation] criterion=%s total_phases=%d relevant_phase_ids=%s target_phases=%d",
+                "[judge][phase-selection] criterion=%s total_phases=%d selected_phase_ids=%s target_phases=%d",
                 criterion_name,
                 len(phases) if isinstance(phases, list) else 0,
                 sorted(str(pid) for pid in relevant_ids),
@@ -974,6 +920,10 @@ class JudgeEvaluatorService:
                 "[judge][phase-eval] criterion=%s step_max_concurrency=%d",
                 criterion_name,
                 max(1, configured_step_limit),
+            )
+
+            enable_evidence_expansion = bool(
+                getattr(settings, "JUDGE_ENABLE_PHASE_EVIDENCE_EXPANSION", False)
             )
 
             async def _run(phase: Dict[str, Any]) -> EvaluationResult:
@@ -995,16 +945,14 @@ class JudgeEvaluatorService:
                         criterion_assertion=criterion_assertion,
                         criterion_intent=criterion_intent,
                         persona_task_alignment=persona_task_alignment,
-                        pass_signals=pass_signals if isinstance(pass_signals, list) else [],
-                        fail_signals=fail_signals if isinstance(fail_signals, list) else [],
-                        global_behavior_summary=str(global_overview.get("overall_behavior_summary", "")),
+                        global_behavior_summary=global_behavior_summary,
                         task_name=task_name,
                         personas=personas,
                         models=models,
-                        evaluation_dimensions=dimensions,
                         phase=phase,
                         all_steps=all_steps,
                         model_name=model_name,
+                        enable_evidence_expansion=enable_evidence_expansion,
                     )
                     logger.info(
                         "[judge][phase-end] criterion=%s phase_id=%s verdict=%s confidence=%.2f evidence=%d",
@@ -1037,8 +985,7 @@ class JudgeEvaluatorService:
                 models=models,
                 criterion_intent=criterion_intent,
                 persona_task_alignment=persona_task_alignment,
-                evaluation_dimensions=dimensions,
-                global_behavior_summary=str(global_overview.get("overall_behavior_summary", "")),
+                global_behavior_summary=global_behavior_summary,
                 phase_results=phase_results,
                 target_phases=target_phases,
                 model_name=model_name or "gpt-4o-mini",
@@ -1058,7 +1005,7 @@ class JudgeEvaluatorService:
 
             final.aggregated_step_summary = (
                 f"Global-first phase evaluation. Relevant phases: {list(relevant_ids)}. "
-                f"Global reasoning: {str(global_overview.get('global_reasoning', ''))}. "
+                "Global reasoning: disabled in criterion-based segmentation mode. "
                 f"Segmentation reasoning: {segmentation.get('segmentation_reasoning', '')}"
             )[:500]
             final.used_granularity = Granularity.PHASE_LEVEL
@@ -1544,7 +1491,6 @@ class JudgeEvaluatorService:
         models: List[str],
         criterion_intent: str,
         persona_task_alignment: str,
-        evaluation_dimensions: List[Dict[str, Any]],
         global_behavior_summary: str,
         phase_results: List[EvaluationResult],
         target_phases: List[Dict[str, Any]],
@@ -1604,7 +1550,6 @@ class JudgeEvaluatorService:
                 "models": ", ".join(models) if models else "None",
                 "criterion_intent": criterion_intent,
                 "persona_task_alignment": persona_task_alignment,
-                "evaluation_dimensions": json.dumps(evaluation_dimensions, ensure_ascii=False, indent=2),
                 "global_behavior_summary": global_behavior_summary,
                 "phase_evaluations_summary": phase_evaluations_summary,
             }
@@ -1808,33 +1753,11 @@ class JudgeEvaluatorService:
         cache_decomposition: bool = True,
     ) -> JudgeEvaluationReport:
         del decomposer_model, cache_decomposition
-        logger.info("Starting unified batch evaluation for run: %s with %d criteria", run_id, len(criteria))
-
-        try:
-            global_overview = await self._build_global_behavior_overview_async(
-                task_name=task.name,
-                personas=personas,
-                models=models,
-                all_steps=all_steps,
-                model_name=evaluator_model,
-            )
-        except Exception as exc:
-            logger.warning("Global behavior overview failed in batch mode, fallback to single-phase default: %s", exc)
-            global_overview = {
-                "overall_behavior_summary": "",
-                "phases": [
-                    {
-                        "phase_id": "phase_0",
-                        "semantic_label": "Complete Execution",
-                        "step_indices": list(range(len(all_steps))),
-                        "phase_summary": f"Complete execution with {len(all_steps)} steps",
-                        "criticality": "high",
-                        "why_key": "Fallback due to global overview failure.",
-                    }
-                ],
-                "key_phase_ids": ["phase_0"],
-                "global_reasoning": "Fallback global overview due to upstream error.",
-            }
+        logger.info(
+            "Starting criterion-segmentation batch evaluation for run: %s with %d criteria",
+            run_id,
+            len(criteria),
+        )
 
         criterion_tasks = [
             self.evaluate_criterion_unified(
@@ -1846,43 +1769,23 @@ class JudgeEvaluatorService:
                 all_steps=all_steps,
                 model_name=evaluator_model,
                 criterion_description=criterion.get("description", ""),
-                global_overview=global_overview,
+                global_overview=None,
             )
             for criterion in criteria
         ]
         evaluation_results = await asyncio.gather(*criterion_tasks)
         overall_assessment = self._create_overall_assessment(evaluation_results)
 
-        global_phases = global_overview.get("phases", []) if isinstance(global_overview, dict) else []
-        subtask_clusters: List[StepCluster] = []
-        for idx, phase in enumerate(global_phases if isinstance(global_phases, list) else []):
-            if not isinstance(phase, dict):
-                continue
-            step_indices = [i for i in phase.get("step_indices", []) if isinstance(i, int)]
-            if not step_indices:
-                continue
-            subtask_clusters.append(
-                StepCluster(
-                    cluster_id=str(phase.get("phase_id", f"phase_{idx}")),
-                    semantic_label=str(phase.get("semantic_label", "Phase")),
-                    step_indices=step_indices,
-                    cluster_summary=str(phase.get("phase_summary", "")) or f"Phase {idx}",
-                    key_decisions=[str(phase.get("why_key", ""))] if str(phase.get("why_key", "")).strip() else [],
-                    dependencies=[],
-                )
+        subtask_clusters = [
+            StepCluster(
+                cluster_id="phase_0",
+                semantic_label="Unified Execution",
+                step_indices=list(range(len(all_steps))),
+                cluster_summary="Criterion-based segmentation is executed independently per criterion.",
+                key_decisions=[],
+                dependencies=[],
             )
-
-        if not subtask_clusters:
-            subtask_clusters = [
-                StepCluster(
-                    cluster_id="phase_0",
-                    semantic_label="Unified Execution",
-                    step_indices=list(range(len(all_steps))),
-                    cluster_summary="Unified architecture evaluates dynamic LLM-segmented phases.",
-                    key_decisions=[],
-                    dependencies=[],
-                )
-            ]
+        ]
 
         task_decomposition = TaskDecomposition(
             task_name=task.name,
@@ -1912,9 +1815,9 @@ class JudgeEvaluatorService:
                 "evaluator_model": evaluator_model,
                 "total_steps": len(all_steps),
                 "architecture": "unified",
-                "pipeline_style": "global-phase-global",
-                "global_behavior_summary": str(global_overview.get("overall_behavior_summary", ""))[:1000],
+                "pipeline_style": "criterion-phase-criterion",
+                "global_behavior_summary": "",
             },
         )
-        logger.info("Unified batch evaluation complete for run: %s", run_id)
+        logger.info("Criterion-segmentation batch evaluation complete for run: %s", run_id)
         return report

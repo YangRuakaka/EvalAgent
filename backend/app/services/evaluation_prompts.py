@@ -117,9 +117,6 @@ Output ONLY one JSON object in this exact schema:
                 "criterion_name",
                 "criterion_assertion",
                 "criterion_intent",
-                "phase_selection_heuristics",
-                "global_phases_overview",
-                "evaluation_dimensions",
                 "steps_text",
             ],
             template="""You are an expert in execution-trace analysis.
@@ -129,25 +126,16 @@ Criterion Name: {criterion_name}
 Criterion Assertion: {criterion_assertion}
 Criterion Intent: {criterion_intent}
 
-Phase Selection Heuristics:
-{phase_selection_heuristics}
-
-Global Phase Overview:
-{global_phases_overview}
-
-Evaluation Dimensions:
-{evaluation_dimensions}
-
 All Agent Steps:
 {steps_text}
 
 Your job:
-1) Use global phases as default structure when possible.
-2) If needed, refine/split/merge to fit this criterion.
-3) Ensure step indices are accurate and non-overlapping across phases.
-4) Mark which phases are evaluation-relevant under this criterion.
-5) Keep steps that form one coherent behavior chain in the same phase when possible.
-6) Prioritize phases where the agent makes decisions/tradeoffs/recovery actions; pure external waiting is only relevant when judging the agent's response strategy.
+1) Segment steps directly for this criterion (do NOT rely on any external pre-segmentation).
+2) Ensure step indices are accurate and non-overlapping across phases.
+3) Mark which phases are evaluation-relevant under this criterion.
+4) Keep steps that form one coherent behavior chain in the same phase when possible.
+5) Prioritize phases where the agent makes decisions/tradeoffs/recovery actions; pure external waiting is only relevant when judging the agent's response strategy.
+6) If criterion-relevant signals are sparse, still output a reasonable phase partition and explain relevance conservatively.
 
 Output ONLY one JSON object in this exact schema:
 {{
@@ -175,10 +163,7 @@ Output ONLY one JSON object in this exact schema:
                 "criterion_assertion",
                 "criterion_intent",
                 "persona_task_alignment",
-                "pass_signals",
-                "fail_signals",
                 "global_behavior_summary",
-                "evaluation_dimensions",
                 "phase_id",
                 "phase_summary",
                 "phase_steps_context",
@@ -192,8 +177,6 @@ Criterion Name: {criterion_name}
 Criterion Assertion: {criterion_assertion}
 Criterion Intent: {criterion_intent}
 Persona-Task Alignment Notes: {persona_task_alignment}
-Expected Pass Signals: {pass_signals}
-Expected Fail Signals: {fail_signals}
 
 Global Behavior Summary:
 {global_behavior_summary}
@@ -201,15 +184,12 @@ Global Behavior Summary:
 Personas/Values: {personas}
 Models Used: {models}
 
-Evaluation Dimensions:
-{evaluation_dimensions}
-
 Current Phase: {phase_id}
 Phase Summary: {phase_summary}
 Phase Steps (raw context):
 {phase_steps_context}
 
-Evaluate this phase against the criterion and dimensions.
+Evaluate this phase against the criterion.
 
 Epistemic context (must follow):
 - You are judging another agent's internal trace. Every field is self-reported text and may be incomplete, biased, or wrong.
@@ -232,13 +212,13 @@ Behavior attribution policy (must follow):
 
 Critical judging policy:
 - Judge the phase as a behavior chain across multiple steps, not as isolated quotes.
-- For each dimension, synthesize intent, action, and outcome signals across the phase before deciding status.
+- Synthesize intent, action, and outcome signals across the phase before deciding verdict.
 - Explicitly separate: (a) claimed success, (b) attempted action, (c) observed result/state update.
 - Do not treat next_goal/thinking/memory/evaluation alone as proof that a task was completed.
 - Reserve strong positive evidence for chains with observable follow-through (plan -> action -> result check -> consistent memory/update).
 - Do NOT give PASS from a single positive snippet if surrounding steps weaken, contradict, or fail to realize it.
-- If evidence is incomplete/ambiguous for a dimension, prefer PARTIAL or UNABLE_TO_EVALUATE over optimistic PASS.
-- When pass and fail signals coexist, weigh explicit failures, ignored constraints, and harmful tradeoffs heavily.
+- If evidence is incomplete/ambiguous, prefer PARTIAL or UNABLE_TO_EVALUATE over optimistic PASS.
+- When positive and negative signals coexist, weigh explicit failures, ignored constraints, and harmful tradeoffs heavily.
 - Reserve PASS for cases with coherent, sustained support across key steps.
 
 Rules for evidence:
@@ -254,7 +234,7 @@ Rules for evidence:
 - Include both positive and negative/uncertain evidence when relevant to final verdict.
 - If the phase has limited criterion-relevant material, return a small concise set and explain why.
 - relevant_steps should include all key step indices needed to understand the behavior chain for your verdict.
-- In reasoning and dimension_assessments, explicitly explain cross-step synthesis and any contradictions.
+- In reasoning, explicitly explain cross-step synthesis and any contradictions.
 - If the phase contains only self-asserted completion without reliable behavioral support, default to PARTIAL or FAIL (depending on criterion strictness).
 
 Output ONLY one JSON object:
@@ -264,13 +244,6 @@ Output ONLY one JSON object:
   "confidence_score": 0.0,
   "supporting_evidence": "...",
   "relevant_steps": [0, 1],
-  "dimension_assessments": [
-    {{
-      "dimension_name": "...",
-      "status": "PASS|FAIL|PARTIAL",
-      "reasoning": "..."
-    }}
-  ],
   "highlighted_evidence": [
     {{
       "step_index": 0,
@@ -368,7 +341,6 @@ Output ONLY one JSON object:
                 "models",
                 "criterion_intent",
                 "persona_task_alignment",
-                "evaluation_dimensions",
                 "global_behavior_summary",
                 "phase_evaluations_summary",
             ],
@@ -383,9 +355,6 @@ Models Used: {models}
 
 Criterion Intent: {criterion_intent}
 Persona-Task Alignment Notes: {persona_task_alignment}
-
-Evaluation Dimensions:
-{evaluation_dimensions}
 
 Global Behavior Summary:
 {global_behavior_summary}

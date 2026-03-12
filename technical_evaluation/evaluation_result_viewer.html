@@ -21,7 +21,7 @@
       --unknown-bg: #f1f5f9;
       --unknown-text: #475569;
       --highlight: rgba(37, 99, 235, 0.15);
-      --card-body-height: 170px;
+      --card-body-height: 130px;
     }
 
     * {
@@ -56,9 +56,18 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 10px;
       padding: 10px 12px;
       border-bottom: 1px solid var(--line);
       background: #f8fafc;
+    }
+
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
 
     .header h1,
@@ -91,7 +100,9 @@
 
     input[type="file"],
     select,
-    input[type="text"] {
+    input[type="text"],
+    input[type="number"],
+    textarea {
       border: 1px solid var(--line);
       border-radius: 6px;
       min-height: 34px;
@@ -130,14 +141,21 @@
       grid-template-columns: 2fr 1fr;
       gap: 10px;
       padding: 10px;
-      min-height: 460px;
+      min-height: 320px;
+      max-height: none;
+      align-items: stretch;
     }
 
     .reasoning-info {
       display: grid;
-      grid-template-columns: 1.4fr 1fr;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
       gap: 10px;
       min-height: 0;
+    }
+
+    .reasoning > *,
+    .reasoning-info > * {
+      min-width: 0;
     }
 
     .card {
@@ -179,11 +197,58 @@
       font-size: 11px;
     }
 
+    .card-body.fill-height {
+      height: auto;
+      min-height: 0;
+      max-height: none;
+      flex: 1;
+    }
+
     .details-col {
       display: grid;
-      grid-template-rows: repeat(4, minmax(90px, 1fr));
+      grid-template-rows: repeat(4, minmax(0, 1fr));
       gap: 10px;
       min-height: 0;
+    }
+
+    .details-col .card {
+      min-width: 0;
+    }
+
+    .criteria-detail {
+      margin-top: 6px;
+      border: 1px solid #dbeafe;
+      background: #f8fbff;
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 11px;
+      line-height: 1.45;
+      color: #1e293b;
+      overflow: auto;
+      max-height: 150px;
+    }
+
+    .criteria-detail-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .criteria-detail-title {
+      font-size: 12px;
+      font-weight: 700;
+      margin: 0;
+      color: #0f172a;
+    }
+
+    .criteria-detail-line {
+      margin: 0 0 5px;
+    }
+
+    .criteria-detail-line:last-child {
+      margin-bottom: 0;
     }
 
     .criteria-panel {
@@ -368,12 +433,328 @@
       font-weight: 600;
     }
 
+    .review-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 10px;
+      border-top: 1px solid var(--line);
+      background: #f8fafc;
+    }
+
+    .summary-stat {
+      border: 1px solid #dbeafe;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #ffffff, #f8fbff);
+      padding: 10px;
+      min-height: 78px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .summary-label {
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .summary-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .summary-note {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .review-grid {
+      display: grid;
+      grid-template-columns: minmax(300px, 1.05fr) minmax(420px, 1.4fr);
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .review-queue {
+      padding: 8px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 420px;
+      max-height: 780px;
+    }
+
+    .review-item {
+      border: 1px solid #cbd5e1;
+      border-left: 4px solid #94a3b8;
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .review-item.active {
+      border-color: #2563eb;
+      background: #eff6ff;
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+    }
+
+    .review-item-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .review-item-title {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .review-item-meta {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .review-item-preview {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #1e293b;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .review-scorecard {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 420px;
+    }
+
+    .score-banner {
+      border: 1px solid #dbeafe;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #f8fbff, #ffffff);
+      padding: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .score-banner-main {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .score-banner-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .score-banner-value {
+      font-size: 22px;
+      font-weight: 750;
+      color: #0f172a;
+    }
+
+    .score-banner-note {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .review-meta-grid {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 6px 10px;
+      font-size: 12px;
+    }
+
+    .review-meta-grid .k {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .review-text-box {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .score-legend {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 8px 10px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 8px;
+      background: #fcfdff;
+    }
+
+    .score-dimension-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .score-dimension {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .score-dimension-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .score-dimension-title {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .score-dimension-desc {
+      margin: 4px 0 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .score-buttons {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .score-btn {
+      min-width: 42px;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-weight: 700;
+    }
+
+    .score-btn.active {
+      background: #1d4ed8;
+      color: #fff;
+      border-color: #1d4ed8;
+    }
+
+    .tag-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tag-btn {
+      border-radius: 999px;
+      font-size: 12px;
+      padding: 5px 10px;
+      background: #fff;
+    }
+
+    .tag-btn.active {
+      background: #dbeafe;
+      border-color: #60a5fa;
+      color: #1d4ed8;
+    }
+
+    .review-form-row {
+      display: grid;
+      grid-template-columns: minmax(0, 180px) 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .review-form-row label {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .review-textarea {
+      min-height: 120px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+
+    .review-actions {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .review-completion {
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #eef2ff;
+      color: #4338ca;
+    }
+
+    .review-completion.pending {
+      background: #f1f5f9;
+      color: #475569;
+    }
+
+    .review-completion.partial {
+      background: #fffbeb;
+      color: #b45309;
+    }
+
+    .review-completion.complete {
+      background: #ecfdf5;
+      color: #047857;
+    }
+
+    .small-muted {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
     @media (max-width: 1100px) {
       .reasoning {
         grid-template-columns: 1fr;
       }
 
       .detail-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .review-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -392,7 +773,20 @@
       }
 
       :root {
-        --card-body-height: 150px;
+        --card-body-height: 110px;
+      }
+
+      .reasoning {
+        max-height: none;
+      }
+
+      .review-summary-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .review-form-row,
+      .review-meta-grid {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -419,6 +813,10 @@
           <select id="runSelect"></select>
         </label>
         <label>
+          Assessment criteria
+          <select id="criteriaSelect"></select>
+        </label>
+        <label>
           Filter criteria title
           <input id="criteriaFilter" type="text" placeholder="contains..." />
         </label>
@@ -439,14 +837,17 @@
     <section class="panel">
       <div class="header">
         <h2>Reasoning</h2>
-        <span id="stepInfo" class="muted">Step: -</span>
+        <div class="header-meta">
+          <span id="assessmentInfo" class="muted">Assessment: -</span>
+          <span id="stepInfo" class="muted">Step: -</span>
+        </div>
       </div>
 
       <div class="reasoning">
         <div class="reasoning-info">
           <section class="card">
             <div class="card-head">Thinking Process</div>
-            <div id="thinkingBox" class="card-body"></div>
+            <div id="thinkingBox" class="card-body fill-height"></div>
           </section>
 
           <div class="details-col">
@@ -471,7 +872,10 @@
 
         <aside class="criteria-panel">
           <div class="header" style="padding: 6px 8px; margin: -8px -8px 0; border-radius: 7px 7px 0 0;">
-            <h3 id="criteriaHeader">Criteria</h3>
+            <h3 id="criteriaHeader">Step Verdicts</h3>
+          </div>
+          <div id="criteriaDetail" class="criteria-detail">
+            <span class="muted">No criterion selected</span>
           </div>
           <div id="criteriaList" class="criteria-list"></div>
         </aside>
@@ -495,6 +899,57 @@
 
       <div class="kv" id="metaKv"></div>
     </section>
+
+    <section class="panel">
+      <div class="header">
+        <h2>Human Review</h2>
+        <div class="header-meta">
+          <span id="reviewProgress" class="muted">Reviewed: 0 / 0</span>
+          <span id="reviewAverage" class="muted">Average: -</span>
+        </div>
+      </div>
+      <div class="controls">
+        <label>
+          Reviewer
+          <input id="reviewerInput" type="text" placeholder="Reviewer name" />
+        </label>
+        <button id="chooseReviewSaveBtn">Choose Save File</button>
+        <button id="saveReviewBtn">Save Review JSON</button>
+        <button id="exportReviewBtn">Export Review JSON</button>
+        <label>
+          Import Review JSON
+          <input id="reviewImportInput" type="file" accept=".json,application/json" />
+        </label>
+      </div>
+      <div class="review-summary-grid">
+        <div class="summary-stat">
+          <div class="summary-label">Overall Assessment</div>
+          <div id="overallReviewStat" class="summary-value">0 / 0</div>
+          <div id="overallReviewNote" class="summary-note">No loaded criterion.</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-label">Step Verdicts</div>
+          <div id="stepReviewStat" class="summary-value">0 / 0</div>
+          <div id="stepReviewNote" class="summary-note">No loaded criterion.</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-label">Evidence Items</div>
+          <div id="evidenceReviewStat" class="summary-value">0 / 0</div>
+          <div id="evidenceReviewNote" class="summary-note">No loaded criterion.</div>
+        </div>
+      </div>
+      <div class="review-grid">
+        <section class="card">
+          <div class="card-head">Review Queue</div>
+          <div id="reviewQueue" class="review-queue"></div>
+        </section>
+        <section class="card">
+          <div class="card-head">Scorecard</div>
+          <div id="reviewScorecard" class="review-scorecard"></div>
+        </section>
+      </div>
+      <div id="reviewStatus" class="status-line">Review cache ready. Scores auto-save locally in the browser.</div>
+    </section>
   </div>
 
   <div id="hoverTooltip" class="evidence-tooltip" role="tooltip" aria-hidden="true"></div>
@@ -505,6 +960,145 @@
       selectedRunIndex: 0,
       selectedStepIndex: 0,
       selectedCriterionIndex: 0,
+      selectedReviewItemId: null,
+      review: {
+        reviewer: "",
+        items: {},
+      },
+      reviewFileHandle: null,
+    };
+
+    const REVIEW_STORAGE_KEY = "reasoning_evaluation_human_review_v1";
+    const REVIEW_SCHEMA_VERSION = "llm_judge_human_review_v1";
+
+    const REVIEW_SCORE_LABELS = {
+      1: "Critical flaw",
+      2: "Major issue",
+      3: "Mixed",
+      4: "Strong",
+      5: "Excellent",
+    };
+
+    const REVIEW_OUTCOMES = [
+      { value: "", label: "Select reviewer outcome" },
+      { value: "validated", label: "Validated" },
+      { value: "borderline", label: "Borderline" },
+      { value: "incorrect", label: "Incorrect" },
+    ];
+
+    const REVIEW_RUBRICS = {
+      overall: {
+        label: "Overall Assessment",
+        dimensions: [
+          {
+            key: "verdict_correctness",
+            label: "Verdict correctness",
+            weight: 0.30,
+            description: "Does the criterion-level overall_assessment match what the full trace supports?",
+          },
+          {
+            key: "coverage",
+            label: "Coverage",
+            weight: 0.20,
+            description: "Does the overall judgment account for the important supporting and contradictory steps?",
+          },
+          {
+            key: "cross_step_consistency",
+            label: "Cross-step consistency",
+            weight: 0.20,
+            description: "Is the overall assessment consistent with the step verdicts and evidence set?",
+          },
+          {
+            key: "reasoning_quality",
+            label: "Reasoning quality",
+            weight: 0.20,
+            description: "Is the synthesis specific, criterion-aware, and non-generic?",
+          },
+          {
+            key: "confidence_calibration",
+            label: "Confidence calibration",
+            weight: 0.10,
+            description: "Is the reported confidence appropriate for the strength and completeness of the evidence?",
+          },
+        ],
+      },
+      step_verdict: {
+        label: "Step Verdict",
+        dimensions: [
+          {
+            key: "verdict_correctness",
+            label: "Verdict correctness",
+            weight: 0.35,
+            description: "Does this step-level pass/partial/fail judgment match the actual step behavior?",
+          },
+          {
+            key: "evidence_sufficiency",
+            label: "Evidence sufficiency",
+            weight: 0.25,
+            description: "Is there enough grounded evidence to justify the step verdict?",
+          },
+          {
+            key: "traceability",
+            label: "Traceability",
+            weight: 0.25,
+            description: "Can a reviewer trace the verdict directly to specific grounded text or actions?",
+          },
+          {
+            key: "confidence_calibration",
+            label: "Confidence calibration",
+            weight: 0.15,
+            description: "Is the confidence level sensible for the ambiguity of this step?",
+          },
+        ],
+      },
+      evidence: {
+        label: "Evidence Item",
+        dimensions: [
+          {
+            key: "grounding_accuracy",
+            label: "Grounding accuracy",
+            weight: 0.45,
+            description: "Is the highlighted span real, correctly localized, and materially relevant to the claim?",
+          },
+          {
+            key: "verdict_support",
+            label: "Verdict support",
+            weight: 0.35,
+            description: "Does the evidence-level verdict actually follow from the highlighted text?",
+          },
+          {
+            key: "reasoning_quality",
+            label: "Reasoning quality",
+            weight: 0.20,
+            description: "Is the evidence rationale specific, non-circular, and tied to the criterion?",
+          },
+        ],
+      },
+    };
+
+    const REVIEW_TAGS = {
+      overall: [
+        "coverage_gap",
+        "step_conflict",
+        "confidence_mismatch",
+        "generic_reasoning",
+        "criterion_misaligned",
+      ],
+      step_verdict: [
+        "wrong_verdict",
+        "weak_evidence",
+        "untraceable_reasoning",
+        "confidence_mismatch",
+        "phase_mixup",
+      ],
+      evidence: [
+        "hallucinated_quote",
+        "wrong_span",
+        "wrong_field",
+        "verdict_mismatch",
+        "generic_reasoning",
+        "duplicate_evidence",
+      ],
     };
 
     const sampleEvaluated = {
@@ -926,19 +1520,19 @@
       select.value = String(Math.min(state.selectedRunIndex, state.runs.length - 1));
     }
 
-    function renderCriteria(run) {
-      const list = document.getElementById("criteriaList");
-      const header = document.getElementById("criteriaHeader");
+    function renderCriteriaSelector(run) {
+      const select = document.getElementById("criteriaSelect");
       if (!run) {
-        list.innerHTML = "<div class=\"muted\">No criteria</div>";
-        header.textContent = "Criteria";
+        select.innerHTML = "<option value=\"\">(no criteria)</option>";
+        select.value = "";
         return;
       }
 
       const filtered = getFilteredCriteria(run);
       if (!filtered.length) {
-        list.innerHTML = "<div class=\"muted\">No criteria matched current filters</div>";
-        header.textContent = "Criteria (0)";
+        state.selectedCriterionIndex = 0;
+        select.innerHTML = "<option value=\"\">(no criteria)</option>";
+        select.value = "";
         return;
       }
 
@@ -946,22 +1540,734 @@
         state.selectedCriterionIndex = 0;
       }
 
-      header.textContent = "Criteria (" + filtered.length + ")";
-      list.innerHTML = filtered
+      select.innerHTML = filtered
         .map((criterion, idx) => {
-          const active = idx === state.selectedCriterionIndex ? " active" : "";
           const status = normStatus(criterion.status);
-          const confText = Number.isFinite(criterion.confidence)
-            ? (criterion.confidence * 100).toFixed(0) + "%"
+          return "<option value=\"" + idx + "\">" +
+            escapeHtml(criterion.title + " (" + status + ")") +
+          "</option>";
+        })
+        .join("");
+      select.value = String(state.selectedCriterionIndex);
+    }
+
+    function normalizeStepToArrayIndex(rawStep, run) {
+      if (!run || !Array.isArray(run.steps)) return null;
+      const value = Number(rawStep);
+      if (!Number.isFinite(value)) return null;
+
+      for (let idx = 0; idx < run.steps.length; idx += 1) {
+        const step = run.steps[idx];
+        const matcher = createStepMatcher(step.stepIndex, idx);
+        if (matcher(value)) return idx;
+      }
+      return null;
+    }
+
+    function buildStepVerdictRows(criterion, run) {
+      if (!criterion || !Array.isArray(criterion.involvedSteps)) return [];
+
+      return criterion.involvedSteps.map((group, groupIndex) => {
+        const g = group && typeof group === "object" ? group : {};
+        const highlighted = Array.isArray(g.highlighted_evidence) ? g.highlighted_evidence : [];
+        const rawSteps = [];
+
+        if (Array.isArray(g.steps)) {
+          g.steps.forEach((s) => rawSteps.push(s));
+        }
+        highlighted.forEach((item) => {
+          if (!item || typeof item !== "object") return;
+          if (item.step_index !== undefined && item.step_index !== null) {
+            rawSteps.push(item.step_index);
+          }
+        });
+
+        const stepTargets = [];
+        rawSteps.forEach((raw) => {
+          const normalized = normalizeStepToArrayIndex(raw, run);
+          if (normalized === null || stepTargets.includes(normalized)) return;
+          stepTargets.push(normalized);
+        });
+
+        const stepLabel = stepTargets.length
+          ? stepTargets.map((idx) => String(idx + 1)).join(", ")
+          : "-";
+
+        return {
+          groupIndex,
+          status: normStatus(g.evaluateStatus || g.verdict),
+          reasoning: String(g.reasoning || ""),
+          confidence: Number(g.confidenceScore),
+          stepTargets,
+          stepLabel,
+        };
+      });
+    }
+
+    function buildReviewItemKey(run, criterion, itemType, primaryIndex, secondaryIndex) {
+      const parts = [String(run.id || "run"), String(criterion.key || "criterion"), itemType];
+      if (primaryIndex !== undefined && primaryIndex !== null) parts.push(String(primaryIndex));
+      if (secondaryIndex !== undefined && secondaryIndex !== null) parts.push(String(secondaryIndex));
+      return parts.join("::");
+    }
+
+    function formatTagLabel(tag) {
+      return String(tag || "")
+        .split("_")
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+    }
+
+    function formatReviewBand(percent) {
+      if (!Number.isFinite(percent)) return "Unreviewed";
+      if (percent >= 90) return "Excellent";
+      if (percent >= 75) return "Strong";
+      if (percent >= 60) return "Adequate";
+      if (percent >= 40) return "Weak";
+      return "Unreliable";
+    }
+
+    function buildEvidenceRows(criterion, run) {
+      if (!criterion || !Array.isArray(criterion.involvedSteps)) return [];
+
+      const rows = [];
+      criterion.involvedSteps.forEach((group, groupIndex) => {
+        const g = group && typeof group === "object" ? group : {};
+        const highlighted = Array.isArray(g.highlighted_evidence) ? g.highlighted_evidence : [];
+        const fallbackSteps = [];
+
+        if (Array.isArray(g.steps)) {
+          g.steps.forEach((rawStep) => {
+            const normalized = normalizeStepToArrayIndex(rawStep, run);
+            if (normalized !== null && !fallbackSteps.includes(normalized)) {
+              fallbackSteps.push(normalized);
+            }
+          });
+        }
+
+        highlighted.forEach((item, evidenceIndex) => {
+          const evidence = item && typeof item === "object" ? item : {};
+          const explicitStep = normalizeStepToArrayIndex(evidence.step_index, run);
+          const stepTargets = explicitStep === null
+            ? fallbackSteps.slice()
+            : [explicitStep];
+
+          rows.push({
+            id: buildReviewItemKey(run, criterion, "evidence", groupIndex, evidenceIndex),
+            type: "evidence",
+            groupIndex,
+            evidenceIndex,
+            label: "Evidence" + (stepTargets.length ? (" · Step " + stepTargets.map((idx) => idx + 1).join(", ")) : ""),
+            preview: String(evidence.highlighted_text || ""),
+            verdict: normStatus(evidence.verdict),
+            confidence: Number(g.confidenceScore),
+            reasoning: String(evidence.reasoning || ""),
+            stepTargets,
+            sourceField: String(evidence.source_field || ""),
+          });
+        });
+      });
+
+      return rows;
+    }
+
+    function buildReviewQueue(run, criterion) {
+      if (!run || !criterion) return [];
+
+      const overallItem = {
+        id: buildReviewItemKey(run, criterion, "overall"),
+        type: "overall",
+        label: "Overall Assessment",
+        preview: String(criterion.reasoning || ""),
+        verdict: normStatus(criterion.status),
+        confidence: Number(criterion.confidence),
+        reasoning: String(criterion.reasoning || ""),
+        stepTargets: [],
+        sourceField: "",
+      };
+
+      const stepItems = buildStepVerdictRows(criterion, run).map((row) => ({
+        id: buildReviewItemKey(run, criterion, "step_verdict", row.groupIndex),
+        type: "step_verdict",
+        label: "Step Verdict · Step " + row.stepLabel,
+        preview: String(row.reasoning || ""),
+        verdict: normStatus(row.status),
+        confidence: Number(row.confidence),
+        reasoning: String(row.reasoning || ""),
+        stepTargets: row.stepTargets.slice(),
+        sourceField: "",
+        groupIndex: row.groupIndex,
+      }));
+
+      return [overallItem].concat(stepItems, buildEvidenceRows(criterion, run));
+    }
+
+    function getRubricForType(itemType) {
+      return REVIEW_RUBRICS[itemType] || null;
+    }
+
+    function getReviewEntry(item) {
+      if (!item) return null;
+      return state.review.items[item.id] || null;
+    }
+
+    function createReviewEntry(run, criterion, item) {
+      return {
+        itemId: item.id,
+        type: item.type,
+        runId: run.id,
+        sourceFile: run.sourceFile || "",
+        criterionKey: criterion.key || "",
+        criterionTitle: criterion.title || "",
+        reviewer: state.review.reviewer || "",
+        outcome: "",
+        tags: [],
+        notes: "",
+        scores: {},
+        stepTargets: Array.isArray(item.stepTargets) ? item.stepTargets.slice() : [],
+        updatedAt: "",
+      };
+    }
+
+    function computeReviewAggregate(entry, rubric) {
+      if (!rubric) {
+        return {
+          complete: false,
+          filled: 0,
+          total: 0,
+          average: null,
+          percent: null,
+          band: "Unreviewed",
+        };
+      }
+
+      let weightedSum = 0;
+      let totalWeight = 0;
+      let filled = 0;
+
+      rubric.dimensions.forEach((dimension) => {
+        const raw = entry && entry.scores ? Number(entry.scores[dimension.key]) : NaN;
+        if (!Number.isFinite(raw) || raw < 1 || raw > 5) return;
+        weightedSum += raw * Number(dimension.weight || 0);
+        totalWeight += Number(dimension.weight || 0);
+        filled += 1;
+      });
+
+      const average = totalWeight > 0 ? weightedSum / totalWeight : null;
+      const percent = Number.isFinite(average) ? Math.round(((average - 1) / 4) * 100) : null;
+
+      return {
+        complete: filled === rubric.dimensions.length,
+        filled,
+        total: rubric.dimensions.length,
+        average,
+        percent,
+        band: formatReviewBand(percent),
+      };
+    }
+
+    function persistReviewToLocal() {
+      try {
+        const payload = {
+          schema_version: REVIEW_SCHEMA_VERSION,
+          reviewer: state.review.reviewer || "",
+          review_items: state.review.items || {},
+          saved_at: new Date().toISOString(),
+        };
+        window.localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(payload));
+      } catch (error) {
+        console.warn("Review local cache save failed:", error);
+      }
+    }
+
+    function restoreReviewFromLocal() {
+      try {
+        const raw = window.localStorage.getItem(REVIEW_STORAGE_KEY);
+        if (!raw) return false;
+
+        const payload = JSON.parse(raw);
+        if (!payload || typeof payload !== "object") return false;
+
+        state.review.reviewer = String(payload.reviewer || "");
+        state.review.items = payload.review_items && typeof payload.review_items === "object"
+          ? payload.review_items
+          : {};
+        return true;
+      } catch (error) {
+        console.warn("Review local cache restore failed:", error);
+        return false;
+      }
+    }
+
+    function setReviewStatus(text, isError) {
+      const status = document.getElementById("reviewStatus");
+      status.textContent = text;
+      status.style.color = isError ? "#b91c1c" : "#64748b";
+    }
+
+    function patchReviewEntry(run, criterion, item, patch, options) {
+      const settings = options && typeof options === "object" ? options : {};
+      const existing = getReviewEntry(item) || createReviewEntry(run, criterion, item);
+      const next = {
+        ...existing,
+        ...patch,
+        reviewer: state.review.reviewer || existing.reviewer || "",
+        updatedAt: new Date().toISOString(),
+      };
+
+      state.review.items[item.id] = next;
+      persistReviewToLocal();
+      setReviewStatus("Review cache updated locally at " + new Date().toLocaleTimeString(), false);
+
+      if (settings.rerender !== false) {
+        render();
+      }
+    }
+
+    function clearReviewEntry(item) {
+      if (!item) return;
+      delete state.review.items[item.id];
+      persistReviewToLocal();
+      setReviewStatus("Cleared review for current item.", false);
+      render();
+    }
+
+    function computeQueueStats(queue, itemType) {
+      const filtered = (queue || []).filter((item) => !itemType || item.type === itemType);
+      const completeEntries = [];
+
+      filtered.forEach((item) => {
+        const rubric = getRubricForType(item.type);
+        const entry = getReviewEntry(item);
+        const aggregate = computeReviewAggregate(entry, rubric);
+        if (aggregate.complete && Number.isFinite(aggregate.percent)) {
+          completeEntries.push(aggregate.percent);
+        }
+      });
+
+      return {
+        total: filtered.length,
+        reviewed: completeEntries.length,
+        average: completeEntries.length
+          ? Math.round(completeEntries.reduce((sum, value) => sum + value, 0) / completeEntries.length)
+          : null,
+      };
+    }
+
+    function formatStatSummary(stat) {
+      const avgText = stat.average === null ? "avg -" : ("avg " + stat.average + "/100");
+      return {
+        value: stat.reviewed + " / " + stat.total,
+        note: stat.total ? avgText : "No items in scope",
+      };
+    }
+
+    function truncateText(value, maxLength) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      if (text.length <= maxLength) return text;
+      return text.slice(0, maxLength - 1) + "…";
+    }
+
+    function getReviewCompletionClass(item) {
+      const rubric = getRubricForType(item.type);
+      const aggregate = computeReviewAggregate(getReviewEntry(item), rubric);
+      if (!aggregate.filled) return "pending";
+      if (!aggregate.complete) return "partial";
+      return "complete";
+    }
+
+    function getReviewCompletionText(item) {
+      const rubric = getRubricForType(item.type);
+      const aggregate = computeReviewAggregate(getReviewEntry(item), rubric);
+      if (!aggregate.filled) return "Pending";
+      if (!aggregate.complete) return "In progress";
+      return "Reviewed";
+    }
+
+    function renderReviewSummary(queue) {
+      const overallStat = formatStatSummary(computeQueueStats(queue, "overall"));
+      const stepStat = formatStatSummary(computeQueueStats(queue, "step_verdict"));
+      const evidenceStat = formatStatSummary(computeQueueStats(queue, "evidence"));
+      const globalStat = formatStatSummary(computeQueueStats(queue));
+
+      document.getElementById("reviewProgress").textContent = "Reviewed: " + globalStat.value;
+      document.getElementById("reviewAverage").textContent = "Average: " + (globalStat.note || "-");
+
+      document.getElementById("overallReviewStat").textContent = overallStat.value;
+      document.getElementById("overallReviewNote").textContent = overallStat.note;
+      document.getElementById("stepReviewStat").textContent = stepStat.value;
+      document.getElementById("stepReviewNote").textContent = stepStat.note;
+      document.getElementById("evidenceReviewStat").textContent = evidenceStat.value;
+      document.getElementById("evidenceReviewNote").textContent = evidenceStat.note;
+    }
+
+    function renderReviewQueue(run, criterion, queue) {
+      const box = document.getElementById("reviewQueue");
+      if (!run || !criterion || !queue.length) {
+        box.innerHTML = "<span class=\"muted\">No reviewable items for the selected criterion.</span>";
+        return;
+      }
+
+      const selectedExists = queue.some((item) => item.id === state.selectedReviewItemId);
+      if (!selectedExists) {
+        state.selectedReviewItemId = queue[0].id;
+      }
+
+      box.innerHTML = queue
+        .map((item) => {
+          const active = item.id === state.selectedReviewItemId ? " active" : "";
+          const completionClass = getReviewCompletionClass(item);
+          const completionText = getReviewCompletionText(item);
+          const aggregate = computeReviewAggregate(getReviewEntry(item), getRubricForType(item.type));
+          const scoreText = aggregate.complete && Number.isFinite(aggregate.percent)
+            ? (aggregate.percent + "/100")
+            : (aggregate.filled ? (aggregate.filled + "/" + aggregate.total + " dims") : "No score");
+          const verdict = normStatus(item.verdict);
+          const meta = [
+            item.type === "evidence" && item.sourceField ? item.sourceField : "",
+            item.stepTargets && item.stepTargets.length ? ("step " + item.stepTargets.map((idx) => idx + 1).join(", ")) : "all steps",
+            Number.isFinite(item.confidence) ? ("conf " + (item.confidence * 100).toFixed(0) + "%") : "",
+          ].filter(Boolean).join(" · ");
+
+          return "" +
+            "<div class=\"review-item" + active + "\" data-review-item=\"" + escapeAttr(item.id) + "\">" +
+              "<div class=\"review-item-head\">" +
+                "<div style=\"min-width:0;\">" +
+                  "<p class=\"review-item-title\">" + escapeHtml(item.label) + "</p>" +
+                  "<div class=\"review-item-meta\">" + escapeHtml(meta || "criterion-scoped item") + "</div>" +
+                "</div>" +
+                "<div style=\"display:flex;flex-direction:column;align-items:flex-end;gap:6px;\">" +
+                  "<span class=\"pill " + verdict + "\">" + escapeHtml(verdict) + "</span>" +
+                  "<span class=\"review-completion " + completionClass + "\">" + escapeHtml(completionText) + "</span>" +
+                  "<span class=\"small-muted\">" + escapeHtml(scoreText) + "</span>" +
+                "</div>" +
+              "</div>" +
+              "<div class=\"review-item-preview\">" + escapeHtml(truncateText(item.preview || item.reasoning || "", 240) || "No excerpt") + "</div>" +
+            "</div>";
+        })
+        .join("");
+
+      box.querySelectorAll("[data-review-item]").forEach((node) => {
+        node.addEventListener("click", () => {
+          const itemId = String(node.getAttribute("data-review-item") || "");
+          const item = queue.find((candidate) => candidate.id === itemId);
+          state.selectedReviewItemId = itemId;
+          if (item && Array.isArray(item.stepTargets) && item.stepTargets.length) {
+            state.selectedStepIndex = item.stepTargets[0];
+          }
+          render();
+        });
+      });
+    }
+
+    function renderReviewScorecard(run, criterion, queue) {
+      const box = document.getElementById("reviewScorecard");
+      const item = queue.find((candidate) => candidate.id === state.selectedReviewItemId) || queue[0] || null;
+      if (!run || !criterion || !item) {
+        box.innerHTML = "<span class=\"muted\">Load a run and select a criterion to start scoring.</span>";
+        return;
+      }
+
+      const rubric = getRubricForType(item.type);
+      const entry = getReviewEntry(item) || createReviewEntry(run, criterion, item);
+      const aggregate = computeReviewAggregate(entry, rubric);
+      const metaLines = [
+        ["Item type", rubric ? rubric.label : item.type],
+        ["Criterion", criterion.title || criterion.key || "-"],
+        ["LLM verdict", item.verdict || "unknown"],
+        ["LLM confidence", Number.isFinite(item.confidence) ? ((item.confidence * 100).toFixed(0) + "%") : "-"],
+        ["Step scope", item.stepTargets && item.stepTargets.length ? item.stepTargets.map((idx) => idx + 1).join(", ") : "Criterion-level"],
+        ["Source field", item.sourceField || "-"],
+      ];
+      const tags = REVIEW_TAGS[item.type] || [];
+
+      box.innerHTML = "" +
+        "<div class=\"score-banner\">" +
+          "<div class=\"score-banner-main\">" +
+            "<p class=\"score-banner-title\">" + escapeHtml(item.label) + "</p>" +
+            "<div class=\"score-banner-value\">" + (aggregate.complete && Number.isFinite(aggregate.percent) ? (escapeHtml(String(aggregate.percent)) + "/100") : "-") + "</div>" +
+            "<div class=\"score-banner-note\">" + escapeHtml(aggregate.complete ? (aggregate.band + " · " + aggregate.average.toFixed(2) + "/5") : (aggregate.filled ? (aggregate.filled + "/" + aggregate.total + " rubric dimensions scored") : "Score all rubric dimensions to complete the review")) + "</div>" +
+          "</div>" +
+          "<div style=\"display:flex;flex-direction:column;align-items:flex-end;gap:6px;\">" +
+            "<span class=\"pill " + escapeHtml(normStatus(item.verdict)) + "\">LLM: " + escapeHtml(normStatus(item.verdict)) + "</span>" +
+            "<span class=\"review-completion " + getReviewCompletionClass(item) + "\">" + escapeHtml(getReviewCompletionText(item)) + "</span>" +
+          "</div>" +
+        "</div>" +
+        "<div class=\"review-meta-grid\">" +
+          metaLines.map((row) => "<div class=\"k\">" + escapeHtml(row[0]) + "</div><div>" + escapeHtml(String(row[1] || "-")) + "</div>").join("") +
+        "</div>" +
+        "<div class=\"review-text-box\">" + escapeHtml(item.preview || item.reasoning || "No excerpt") + "</div>" +
+        (item.reasoning && item.reasoning !== item.preview
+          ? ("<div class=\"review-text-box\"><strong>LLM reasoning</strong>\n" + escapeHtml(item.reasoning) + "</div>")
+          : "") +
+        "<div class=\"score-legend\">Use a 1-5 anchored rubric: 1 = critical flaw, 2 = major issue, 3 = mixed, 4 = strong, 5 = excellent. Composite score is weight-adjusted and normalized to 0-100 for easier agreement analysis across reviewers.</div>" +
+        "<div class=\"score-dimension-list\">" +
+          rubric.dimensions.map((dimension) => {
+            const current = Number(entry.scores[dimension.key]);
+            const currentText = Number.isFinite(current) ? (current + " · " + REVIEW_SCORE_LABELS[current]) : "Not scored";
+            return "" +
+              "<div class=\"score-dimension\">" +
+                "<div class=\"score-dimension-head\">" +
+                  "<div>" +
+                    "<p class=\"score-dimension-title\">" + escapeHtml(dimension.label) + "</p>" +
+                    "<p class=\"score-dimension-desc\">weight " + escapeHtml(String(Math.round(dimension.weight * 100))) + "% · " + escapeHtml(dimension.description) + "</p>" +
+                  "</div>" +
+                  "<span class=\"small-muted\">" + escapeHtml(currentText) + "</span>" +
+                "</div>" +
+                "<div class=\"score-buttons\">" +
+                  [1, 2, 3, 4, 5].map((score) => {
+                    const active = current === score ? " active" : "";
+                    return "<button class=\"score-btn" + active + "\" data-score-dimension=\"" + escapeAttr(dimension.key) + "\" data-score-value=\"" + score + "\">" + score + "</button>";
+                  }).join("") +
+                "</div>" +
+              "</div>";
+          }).join("") +
+        "</div>" +
+        "<div class=\"review-form-row\">" +
+          "<label for=\"reviewOutcomeSelect\">Reviewer outcome</label>" +
+          "<select id=\"reviewOutcomeSelect\">" +
+            REVIEW_OUTCOMES.map((option) => {
+              const selected = entry.outcome === option.value ? " selected" : "";
+              return "<option value=\"" + escapeAttr(option.value) + "\"" + selected + ">" + escapeHtml(option.label) + "</option>";
+            }).join("") +
+          "</select>" +
+        "</div>" +
+        "<div>" +
+          "<div class=\"small-muted\" style=\"margin-bottom:8px;\">Issue tags</div>" +
+          "<div class=\"tag-row\">" +
+            tags.map((tag) => {
+              const active = Array.isArray(entry.tags) && entry.tags.includes(tag) ? " active" : "";
+              return "<button class=\"tag-btn" + active + "\" data-review-tag=\"" + escapeAttr(tag) + "\">" + escapeHtml(formatTagLabel(tag)) + "</button>";
+            }).join("") +
+          "</div>" +
+        "</div>" +
+        "<div>" +
+          "<div class=\"small-muted\" style=\"margin-bottom:8px;\">Reviewer notes</div>" +
+          "<textarea id=\"reviewNotesInput\" class=\"review-textarea\" placeholder=\"Write the exact issue, disagreement, or why the item is strong.\">" + escapeHtml(entry.notes || "") + "</textarea>" +
+        "</div>" +
+        "<div class=\"review-actions\">" +
+          "<div class=\"small-muted\">Updated: " + escapeHtml(entry.updatedAt ? new Date(entry.updatedAt).toLocaleString() : "not yet") + "</div>" +
+          "<button id=\"clearCurrentReviewBtn\">Clear Current Review</button>" +
+        "</div>";
+
+      box.querySelectorAll("[data-score-dimension]").forEach((node) => {
+        node.addEventListener("click", () => {
+          const dimensionKey = String(node.getAttribute("data-score-dimension") || "");
+          const scoreValue = Number(node.getAttribute("data-score-value"));
+          const nextScores = { ...(entry.scores || {}), [dimensionKey]: scoreValue };
+          patchReviewEntry(run, criterion, item, { scores: nextScores });
+        });
+      });
+
+      const outcomeSelect = document.getElementById("reviewOutcomeSelect");
+      outcomeSelect.addEventListener("change", (event) => {
+        patchReviewEntry(run, criterion, item, { outcome: String(event.target.value || "") });
+      });
+
+      box.querySelectorAll("[data-review-tag]").forEach((node) => {
+        node.addEventListener("click", () => {
+          const tag = String(node.getAttribute("data-review-tag") || "");
+          const currentTags = Array.isArray(entry.tags) ? entry.tags.slice() : [];
+          const nextTags = currentTags.includes(tag)
+            ? currentTags.filter((value) => value !== tag)
+            : currentTags.concat(tag);
+          patchReviewEntry(run, criterion, item, { tags: nextTags });
+        });
+      });
+
+      const notesInput = document.getElementById("reviewNotesInput");
+      notesInput.addEventListener("input", (event) => {
+        patchReviewEntry(run, criterion, item, { notes: String(event.target.value || "") }, { rerender: false });
+      });
+      notesInput.addEventListener("change", (event) => {
+        patchReviewEntry(run, criterion, item, { notes: String(event.target.value || "") });
+      });
+
+      document.getElementById("clearCurrentReviewBtn").addEventListener("click", () => {
+        clearReviewEntry(item);
+      });
+    }
+
+    function renderReview(run, criterion) {
+      const queue = buildReviewQueue(run, criterion);
+      renderReviewSummary(queue);
+      renderReviewQueue(run, criterion, queue);
+      renderReviewScorecard(run, criterion, queue);
+    }
+
+    function buildReviewExportPayload() {
+      const runs = state.runs.map((run) => {
+        const criteria = (run.criteria || []).map((criterion) => {
+          const queue = buildReviewQueue(run, criterion);
+          const exportItems = queue.map((item) => {
+            const rubric = getRubricForType(item.type);
+            const entry = getReviewEntry(item);
+            const aggregate = computeReviewAggregate(entry, rubric);
+            return {
+              item_key: item.id,
+              item_type: item.type,
+              label: item.label,
+              llm_output: {
+                verdict: item.verdict || "unknown",
+                confidence: Number.isFinite(item.confidence) ? item.confidence : null,
+                reasoning: item.reasoning || "",
+                excerpt: item.preview || "",
+                step_targets: Array.isArray(item.stepTargets) ? item.stepTargets.map((idx) => idx + 1) : [],
+                source_field: item.sourceField || "",
+              },
+              human_review: entry ? {
+                reviewer: entry.reviewer || state.review.reviewer || "",
+                outcome: entry.outcome || "",
+                tags: Array.isArray(entry.tags) ? entry.tags.slice() : [],
+                notes: entry.notes || "",
+                scores: entry.scores || {},
+                aggregate_score_5: Number.isFinite(aggregate.average) ? Number(aggregate.average.toFixed(3)) : null,
+                aggregate_score_100: aggregate.percent,
+                quality_band: aggregate.band,
+                complete: aggregate.complete,
+                updated_at: entry.updatedAt || "",
+              } : null,
+            };
+          });
+
+          return {
+            criterion_key: criterion.key,
+            criterion_title: criterion.title,
+            assertion: criterion.assertion,
+            llm_overall_assessment: criterion.status,
+            llm_overall_reasoning: criterion.reasoning,
+            items: exportItems,
+          };
+        });
+
+        return {
+          run_id: run.id,
+          source_file: run.sourceFile,
+          task: run.task,
+          persona: run.persona,
+          model: run.model,
+          judge_model: run.judgeModel,
+          condition_id: run.conditionId,
+          criteria,
+        };
+      });
+
+      return {
+        schema_version: REVIEW_SCHEMA_VERSION,
+        exported_at: new Date().toISOString(),
+        reviewer: state.review.reviewer || "",
+        rubric_definitions: REVIEW_RUBRICS,
+        review_items: state.review.items,
+        runs,
+      };
+    }
+
+    function makeReviewFileName() {
+      const reviewer = String(state.review.reviewer || "reviewer")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "") || "reviewer";
+      const stamp = new Date().toISOString().replace(/[:]/g, "-");
+      return "llm_judge_human_review__" + reviewer + "__" + stamp + ".json";
+    }
+
+    function downloadJsonFile(fileName, payload) {
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    async function writeReviewToPickedFile() {
+      const payload = buildReviewExportPayload();
+      if (!state.reviewFileHandle) {
+        downloadJsonFile(makeReviewFileName(), payload);
+        setReviewStatus("Browser file handle unavailable. Exported review JSON via download.", false);
+        return;
+      }
+
+      const writable = await state.reviewFileHandle.createWritable();
+      await writable.write(JSON.stringify(payload, null, 2));
+      await writable.close();
+      setReviewStatus("Saved review JSON to selected file at " + new Date().toLocaleTimeString(), false);
+    }
+
+    function importReviewPayload(payload) {
+      if (!payload || typeof payload !== "object" || !payload.review_items || typeof payload.review_items !== "object") {
+        throw new Error("Unsupported review JSON shape");
+      }
+
+      state.review.reviewer = String(payload.reviewer || "");
+      state.review.items = payload.review_items;
+      document.getElementById("reviewerInput").value = state.review.reviewer;
+      persistReviewToLocal();
+      setReviewStatus("Imported review JSON with " + Object.keys(state.review.items).length + " reviewed items.", false);
+      render();
+    }
+
+    function renderCriteriaDetail(criterion) {
+      const panel = document.getElementById("criteriaDetail");
+      if (!criterion) {
+        panel.innerHTML = "<span class=\"muted\">No criterion selected</span>";
+        return;
+      }
+
+      const status = normStatus(criterion.status);
+      const confText = Number.isFinite(criterion.confidence)
+        ? (criterion.confidence * 100).toFixed(0) + "%"
+        : "-";
+
+      panel.innerHTML = "" +
+        "<div class=\"criteria-detail-head\">" +
+          "<p class=\"criteria-detail-title\">" + escapeHtml(criterion.title || "criterion") + "</p>" +
+          "<span class=\"pill " + status + "\">" + escapeHtml(status) + "</span>" +
+        "</div>" +
+        "<p class=\"criteria-detail-line\"><strong>Confidence:</strong> " + escapeHtml(confText) + "</p>" +
+        "<p class=\"criteria-detail-line\"><strong>Assertion:</strong> " + escapeHtml(criterion.assertion || "-") + "</p>" +
+        "<p class=\"criteria-detail-line\"><strong>Description:</strong> " + escapeHtml(criterion.description || "-") + "</p>" +
+        "<p class=\"criteria-detail-line\"><strong>Overall reasoning:</strong> " + escapeHtml(criterion.reasoning || "-") + "</p>";
+    }
+
+    function renderCriteria(run, criterion) {
+      const list = document.getElementById("criteriaList");
+      const header = document.getElementById("criteriaHeader");
+
+      if (!run || !criterion) {
+        list.innerHTML = "<div class=\"muted\">No step verdicts</div>";
+        header.textContent = "Step Verdicts";
+        return;
+      }
+
+      const rows = buildStepVerdictRows(criterion, run);
+      if (!rows.length) {
+        list.innerHTML = "<div class=\"muted\">No involved_steps data in this criterion</div>";
+        header.textContent = "Step Verdicts (0)";
+        return;
+      }
+
+      header.textContent = "Step Verdicts (" + rows.length + ")";
+      list.innerHTML = rows
+        .map((row, idx) => {
+          const active = row.stepTargets.includes(state.selectedStepIndex) ? " active" : "";
+          const confText = Number.isFinite(row.confidence)
+            ? (row.confidence * 100).toFixed(0) + "%"
             : "-";
 
           return "<div class=\"criterion" + active + "\" data-criterion=\"" + idx + "\">" +
             "<div style=\"min-width:0;\">" +
-              "<p class=\"criterion-title\">" + escapeHtml(criterion.title) + "</p>" +
-              "<p class=\"criterion-desc\">" + escapeHtml(criterion.assertion || criterion.description || "") + "</p>" +
+              "<p class=\"criterion-title\">Step " + escapeHtml(row.stepLabel) + "</p>" +
+              "<p class=\"criterion-desc\">" + escapeHtml(row.reasoning || "(no reasoning)") + "</p>" +
             "</div>" +
             "<div style=\"display:flex;flex-direction:column;align-items:flex-end;gap:4px;\">" +
-              "<span class=\"pill " + status + "\">" + escapeHtml(status) + "</span>" +
+              "<span class=\"pill " + row.status + "\">" + escapeHtml(row.status) + "</span>" +
               "<span class=\"muted\" style=\"font-size:11px;\">" + confText + "</span>" +
             "</div>" +
           "</div>";
@@ -970,7 +2276,11 @@
 
       list.querySelectorAll("[data-criterion]").forEach((node) => {
         node.addEventListener("click", () => {
-          state.selectedCriterionIndex = Number(node.getAttribute("data-criterion")) || 0;
+          const rowIndex = Number(node.getAttribute("data-criterion"));
+          const row = rows[rowIndex];
+          if (row && row.stepTargets.length) {
+            state.selectedStepIndex = row.stepTargets[0];
+          }
           render();
         });
       });
@@ -1010,6 +2320,7 @@
 
     function renderMain(run, criterion) {
       const stepInfo = document.getElementById("stepInfo");
+      const assessmentInfo = document.getElementById("assessmentInfo");
       const thinkingBox = document.getElementById("thinkingBox");
       const evaluationBox = document.getElementById("evaluationBox");
       const memoryBox = document.getElementById("memoryBox");
@@ -1020,6 +2331,7 @@
       const metaKv = document.getElementById("metaKv");
 
       if (!run) {
+        assessmentInfo.textContent = "Assessment: -";
         stepInfo.textContent = "Step: -";
         thinkingBox.innerHTML = "<span class=\"muted\">No run selected</span>";
         evaluationBox.innerHTML = "<span class=\"muted\">No run selected</span>";
@@ -1030,6 +2342,13 @@
         evidenceBox.innerHTML = "<span class=\"muted\">No criterion selected</span>";
         metaKv.innerHTML = "";
         return;
+      }
+
+      if (criterion) {
+        const status = normStatus(criterion.status);
+        assessmentInfo.textContent = "Assessment: " + criterion.title + " (" + status + ")";
+      } else {
+        assessmentInfo.textContent = "Assessment: -";
       }
 
       const step = run.steps[state.selectedStepIndex] || null;
@@ -1089,14 +2408,16 @@
 
     function render() {
       const run = getCurrentRun();
-      const filteredCriteria = run ? getFilteredCriteria(run) : [];
-      const criterion = filteredCriteria[state.selectedCriterionIndex] || filteredCriteria[0] || null;
 
       document.getElementById("runCount").textContent = "Runs: " + state.runs.length;
       renderRunSelector();
-      renderCriteria(run);
+      renderCriteriaSelector(run);
+      const criterion = getCurrentCriterion(run);
+      renderCriteriaDetail(criterion);
+      renderCriteria(run, criterion);
       renderTimeline(run, criterion);
       renderMain(run, criterion);
+      renderReview(run, criterion);
     }
 
     async function readJsonFile(file) {
@@ -1119,6 +2440,7 @@
       state.selectedRunIndex = 0;
       state.selectedStepIndex = 0;
       state.selectedCriterionIndex = 0;
+      state.selectedReviewItemId = null;
       document.getElementById("criteriaFilter").value = "";
       document.getElementById("statusFilter").value = "all";
       render();
@@ -1154,6 +2476,7 @@
       state.selectedRunIndex = 0;
       state.selectedStepIndex = 0;
       state.selectedCriterionIndex = 0;
+      state.selectedReviewItemId = null;
       render();
 
       const message = "Loaded files=" + selected.length + " | runs=" + runs.length;
@@ -1191,6 +2514,14 @@
       state.selectedRunIndex = Number(event.target.value) || 0;
       state.selectedStepIndex = 0;
       state.selectedCriterionIndex = 0;
+      state.selectedReviewItemId = null;
+      render();
+    });
+
+    document.getElementById("criteriaSelect").addEventListener("change", (event) => {
+      state.selectedCriterionIndex = Number(event.target.value) || 0;
+      state.selectedStepIndex = 0;
+      state.selectedReviewItemId = null;
       render();
     });
 
@@ -1198,12 +2529,69 @@
       const node = document.getElementById(id);
       node.addEventListener("input", () => {
         state.selectedCriterionIndex = 0;
+        state.selectedReviewItemId = null;
         render();
       });
       node.addEventListener("change", () => {
         state.selectedCriterionIndex = 0;
+        state.selectedReviewItemId = null;
         render();
       });
+    });
+
+    document.getElementById("reviewerInput").addEventListener("input", (event) => {
+      state.review.reviewer = String(event.target.value || "").trim();
+      persistReviewToLocal();
+    });
+
+    document.getElementById("chooseReviewSaveBtn").addEventListener("click", async () => {
+      if (!window.showSaveFilePicker) {
+        setReviewStatus("File System Access API is unavailable in this browser. Use Export Review JSON instead.", true);
+        return;
+      }
+
+      try {
+        state.reviewFileHandle = await window.showSaveFilePicker({
+          suggestedName: makeReviewFileName(),
+          types: [
+            {
+              description: "JSON Files",
+              accept: { "application/json": [".json"] },
+            },
+          ],
+        });
+        await writeReviewToPickedFile();
+      } catch (error) {
+        if (error && error.name === "AbortError") return;
+        setReviewStatus(String(error && error.message ? error.message : error), true);
+      }
+    });
+
+    document.getElementById("saveReviewBtn").addEventListener("click", async () => {
+      try {
+        await writeReviewToPickedFile();
+      } catch (error) {
+        setReviewStatus(String(error && error.message ? error.message : error), true);
+      }
+    });
+
+    document.getElementById("exportReviewBtn").addEventListener("click", () => {
+      downloadJsonFile(makeReviewFileName(), buildReviewExportPayload());
+      setReviewStatus("Exported review JSON via browser download.", false);
+    });
+
+    document.getElementById("reviewImportInput").addEventListener("change", async (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        importReviewPayload(JSON.parse(text));
+      } catch (error) {
+        setReviewStatus(String(error && error.message ? error.message : error), true);
+      } finally {
+        event.target.value = "";
+      }
     });
 
     const hoverTooltip = document.getElementById("hoverTooltip");
@@ -1265,7 +2653,16 @@
     window.addEventListener("scroll", hideHoverTooltip, true);
     window.addEventListener("resize", hideHoverTooltip);
 
+    document.getElementById("reviewerInput").value = state.review.reviewer;
+    const restoredReview = restoreReviewFromLocal();
+    document.getElementById("reviewerInput").value = state.review.reviewer;
     clearState();
+    if (restoredReview) {
+      setReviewStatus("Restored review cache from local browser storage.", false);
+      render();
+    } else {
+      setReviewStatus("Review cache ready. Scores auto-save locally in the browser.", false);
+    }
   </script>
 </body>
 </html>

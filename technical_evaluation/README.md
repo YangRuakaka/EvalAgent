@@ -1,9 +1,173 @@
 # Technical Evaluation Batch Run Instructions
 
+## Windows / macOS: How to Run `run_technical_evaluation.ps1`
+
+Run from repo root.
+
+Windows (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\technical_evaluation\run_technical_evaluation.ps1
+```
+
+macOS (PowerShell 7 / `pwsh`):
+
+```bash
+# If brew is missing, install Homebrew first
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Add brew to current shell (Apple Silicon)
+eval "$(/opt/homebrew/bin/brew shellenv)"
+
+# If your Mac is Intel, use this instead:
+# eval "$(/usr/local/bin/brew shellenv)"
+
+# Install PowerShell once (current Homebrew formula)
+brew install powershell
+
+# Optional fallback only if formula install is unavailable in your environment:
+# brew install --cask powershell@preview
+
+# Run .ps1 with pwsh (not bash)
+pwsh -File ./technical_evaluation/run_technical_evaluation.ps1
+```
+
+macOS alternative (no PowerShell, run Python directly):
+
+```bash
+python ./technical_evaluation/run_batch_evaluation.py \
+  --dataset-dir ./technical_evaluation/dataset \
+  --results-dir ./technical_evaluation/results/agentic \
+  --input-mode dataset_json \
+  --json-pattern "*.json" \
+  --max-files 1 \
+  --judge-models gpt-4o-mini \
+  --run-tag agentic \
+  --fixed-batch-id latest
+```
+
+Important:
+- Do not run `.ps1` with `bash`; use `powershell` (Windows) or `pwsh` (macOS/Linux).
+- Most commands below are shown in Windows style (`.\path`). On macOS, use `./path`.
+
+### Common Parameters (`run_technical_evaluation.ps1`)
+
+- `-InputMode`: `dataset_json` (default) or `txt_requests`
+- `-JsonPattern`: file pattern for `dataset_json` mode, default `"*.json"`
+- `-Pattern`: file pattern for `txt_requests` mode, default `"*.json"` in script (set to `"*.txt"` for txt requests)
+- `-JudgeModels`: one or more judge models, e.g. `-JudgeModels deepseek-chat gpt-4o-mini`
+- `-MaxFiles`: limit number of input files for smoke runs
+- `-MaxConditionsPerRequest`: only useful in `txt_requests` mode
+- `-CriteriaFile`: custom criteria JSON file
+- `-Modes`: output grouping tags (all modes currently run the same unified backend pipeline)
+- `-FixedBatchId`: default `latest` (overwrite latest outputs); set `""` for timestamped snapshots
+- `-RequestMaxConcurrency`: batch-level request concurrency in runner (default `1`, increase to `2~4` for speed)
+- `-SkipExisting`: skip already generated output files for incremental reruns
+- `-PythonExe`: optional explicit Python path used by wrapper (recommended on macOS with conda)
+- `-FailFast`: stop immediately when one file/request fails
+
+Windows example with parameters:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\technical_evaluation\run_technical_evaluation.ps1 -InputMode dataset_json -JsonPattern "*.json" -MaxFiles 5 -JudgeModels deepseek-chat gpt-4o-mini -Modes agentic
+```
+
+macOS example with parameters:
+
+```bash
+pwsh -File ./technical_evaluation/run_technical_evaluation.ps1 -InputMode txt_requests -Pattern "*.txt" -MaxFiles 5 -JudgeModels gpt-4o-mini -FailFast
+```
+
+macOS incremental + faster rerun example:
+
+```bash
+pwsh -File ./technical_evaluation/run_technical_evaluation.ps1 \
+  -InputMode dataset_json \
+  -JsonPattern "*.json" \
+  -MaxFiles 50 \
+  -JudgeModels deepseek-chat \
+  -RequestMaxConcurrency 3 \
+  -SkipExisting
+```
+
+macOS + conda example (force specific Python environment):
+
+```bash
+pwsh -File ./technical_evaluation/run_technical_evaluation.ps1 \
+  -PythonExe /opt/miniconda3/envs/browseruse/bin/python \
+  -MaxFiles 1 \
+  -JudgeModels gpt-4o-mini
+```
+
+If you see `ModuleNotFoundError` when running through `pwsh`, it usually means wrapper is using a different Python than your active conda env. Use `-PythonExe` to pin the interpreter.
+
 ## Objective
 - Put evaluation inputs in `dataset/` (as `.txt` request files, or top-level `.json` run files)
 - Batch run the Agentic Judge evaluation logic in backend
 - Automatically write results to `results/`
+
+## Current Agentic Judge Pipeline (LaTeX)
+
+```latex
+\begin{algorithm}[t]
+\caption{Context-Aware Agentic Auditing Pipeline (Current Implementation)}
+\label{alg:audit_pipeline_current}
+\begin{algorithmic}[1]
+\Require Set of Agent Traces $\mathcal{T}=\{T_1,\dots,T_n\}$, Set of Criteria $\mathcal{C}$
+\Ensure Set of Assessments $\mathcal{A}$, Set of Rankings $\mathcal{R}$
+
+\State $\mathcal{A} \gets \emptyset$, $\mathcal{R} \gets \emptyset$
+\State $\mathcal{O} \gets \emptyset$ \Comment{Per-trace global overviews}
+
+\Statex
+\Comment{\textbf{Stage 1: Structural Abstraction}}
+\For{each trace $T_i \in \mathcal{T}$}
+  \State $O_i \gets \textsc{LLM\_BuildGlobalOverview}(T_i)$
+  \Comment{Outputs global summary + phase partition + phase summaries}
+  \If{$O_i$ invalid or timeout}
+    \State $O_i \gets \textsc{FallbackOverview}(T_i)$
+  \EndIf
+  \State $\mathcal{O} \gets \mathcal{O} \cup \{O_i\}$
+\EndFor
+
+\Statex
+\Comment{\textbf{Stage 2: Criterion-Conditioned Phase Evaluation}}
+\For{each criterion $C_j \in \mathcal{C}$}
+  \State $E_{batch} \gets \emptyset$
+  \For{each trace $T_i \in \mathcal{T}$}
+    \State $I_{ij} \gets \textsc{LLM\_InterpretCriterion}(C_j, O_i)$
+    \Comment{Intent, dimensions, pass/fail signals}
+    \State $P_{ij} \gets \textsc{LLM\_SelectRelevantPhases}(T_i, O_i, I_{ij})$
+    \State $E_{phase} \gets \emptyset$
+    \For{each phase $p \in P_{ij}$}
+      \State $e_p, v_p \gets \textsc{LLM\_JudgePhase}(p_{steps}, p_{summary}, C_j, I_{ij})$
+      \State $E_{phase} \gets E_{phase} \cup \{(e_p, v_p)\}$
+    \EndFor
+    \State $Assessment_i \gets \textsc{LLM\_SynthesizeAcrossPhases}(E_{phase}, C_j)$
+    \If{$Assessment_i$ invalid}
+      \State $Assessment_i \gets \textsc{FallbackMerge}(E_{phase})$
+    \EndIf
+    \State $Assessment_i \gets \textsc{ConfidenceConflictRefine}(Assessment_i)$
+    \Comment{Optional second-pass overall assessment}
+    \State $E_{batch} \gets E_{batch} \cup \{Assessment_i\}$
+    \State $\mathcal{A} \gets \mathcal{A} \cup \{Assessment_i\}$
+  \EndFor
+
+  \Statex
+  \Comment{\textbf{Stage 3: Comparative Ranking}}
+  \If{$|E_{batch}| > 1$}
+    \State $Rank_j \gets \textsc{LLM\_Rank}(E_{batch}, C_j)$
+    \If{$Rank_j$ invalid}
+      \State $Rank_j \gets \textsc{FallbackRank}(E_{batch})$
+    \EndIf
+    \State $\mathcal{R} \gets \mathcal{R} \cup \{Rank_j\}$
+  \EndIf
+\EndFor
+
+\State \Return $\mathcal{A}, \mathcal{R}$
+\end{algorithmic}
+\end{algorithm}
+```
 
 ## Recommended Quick Start (dataset_json)
 If your data is already in `technical_evaluation/dataset/*.json`, run this first:
@@ -39,7 +203,7 @@ powershell -ExecutionPolicy Bypass -File .\technical_evaluation\run_technical_ev
 Control run scale and model set (`txt_requests` mode):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\technical_evaluation\run_technical_evaluation.ps1 -Pattern "*.txt" -MaxFiles 5 -MaxConditionsPerRequest 20 -JudgeModels deepseek-chat gpt-4o-mini
+powershell -ExecutionPolicy Bypass -File .\technical_evaluation\run_technical_evaluation.ps1 -Pattern "*.txt" -MaxFiles 5  -JudgeModels deepseek-chat gpt-4o-mini
 ```
 
 `-MaxConditionsPerRequest` applies only to parsed txt requests (when one request contains many `conditions`).
@@ -52,20 +216,19 @@ powershell -ExecutionPolicy Bypass -File .\technical_evaluation\run_technical_ev
 
 If you want historical snapshots instead of overwriting latest files, set `-FixedBatchId ""`.
 
-Run with explicit evaluation modes (for baseline comparison):
+Run with explicit output mode tags:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\technical_evaluation\run_technical_evaluation.ps1 -Modes agentic,step_level,global_summary
 ```
 
-- `agentic`: original adaptive granularity (criterion-by-criterion auto analysis)
-- `step_level`: force all criteria to step-level evaluation baseline
-- `global_summary`: force all criteria to global-summary evaluation baseline
+- `agentic`: default output namespace tag
+- `step_level`: output namespace tag for comparative bookkeeping
+- `global_summary`: output namespace tag for comparative bookkeeping
 
 Current behavior note:
 - The backend currently uses unified phase-level evaluation.
-- `--forced-granularity` is passed by scripts, but not consumed by backend request schema yet.
-- So these modes are mainly for run grouping/tagging at this stage.
+- `-Modes` controls output grouping only (directory/tag naming), not backend granularity behavior.
 
 Results are written to separate subfolders:
 - `results/agentic/`
@@ -103,6 +266,18 @@ Evaluate top-level dataset JSON files directly (no txt request needed):
 python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results --input-mode dataset_json --json-pattern "*.json" --judge-models deepseek-chat gpt-4o-mini
 ```
 
+Speed up batch while keeping evaluation logic unchanged (batch-level parallelism):
+
+```powershell
+python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results --input-mode dataset_json --json-pattern "*.json" --judge-model deepseek-chat --request-max-concurrency 3
+```
+
+Incremental rerun (skip files that already have outputs):
+
+```powershell
+python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results --input-mode dataset_json --json-pattern "*.json" --judge-model deepseek-chat --skip-existing
+```
+
 Use your own criteria file (JSON list or JSON object with `criteria` field):
 
 ```powershell
@@ -118,9 +293,9 @@ python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_
 Baseline mode examples:
 
 ```powershell
-python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results\step_level --forced-granularity step_level --run-tag step_level
+python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results\step_level --run-tag step_level
 
-python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results\global_summary --forced-granularity global_summary --run-tag global_summary
+python .\technical_evaluation\run_batch_evaluation.py --dataset-dir .\technical_evaluation\dataset --results-dir .\technical_evaluation\results\global_summary --run-tag global_summary
 ```
 
 ## Supported Content in `dataset/*.txt`
@@ -163,6 +338,7 @@ Example (can be saved directly as `dataset/sample.txt`):
     - Includes original run data (`metadata/summary/details`) + backend LLM output (`conditions/criteria/involved_steps/highlighted_evidence`)
     - Includes `human_review` placeholders for manual scoring of verdict/evidence
 - Each batch run will generate a summary: `<mode_subdir>/batch_summary_<timestamp>.json`
+  - Includes `duration_seconds`, per-request `duration_seconds`, `executed_requests`, and `skipped_requests`
 
 Where `mode_subdir` is typically:
 - `technical_evaluation/results/agentic/`

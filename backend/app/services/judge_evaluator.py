@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class JudgeEvaluatorService:
-    """Unified evaluator service (dimension interpretation -> phase segmentation -> phase evaluation)."""
+    """Unified evaluator service for criterion-specific phase evaluation."""
 
     def __init__(
         self,
@@ -40,14 +40,23 @@ class JudgeEvaluatorService:
         self._setup_templates()
 
     def _setup_templates(self) -> None:
-        self.global_behavior_overview_template = EvaluationPrompts.get_global_behavior_overview_prompt()
-        self.criterion_interpretation_template = EvaluationPrompts.get_criterion_interpretation_prompt()
         self.phase_segmentation_template = EvaluationPrompts.get_phase_segmentation_prompt()
         self.unified_phase_evaluation_template = EvaluationPrompts.get_unified_phase_evaluation_prompt()
         self.phase_evidence_expansion_template = EvaluationPrompts.get_phase_evidence_expansion_prompt()
         self.phase_overall_synthesis_template = EvaluationPrompts.get_phase_overall_synthesis_prompt()
-        self.evidence_reextract_template = EvaluationPrompts.get_evidence_reextract_prompt()
-        self.merge_template = EvaluationPrompts.get_merge_results_prompt()
+        self.step_assessment_synthesis_template = EvaluationPrompts.get_step_assessment_synthesis_prompt()
+
+    async def _invoke_chain_async(
+        self,
+        chain: Any,
+        invoke_dict: Dict[str, Any],
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
+    ) -> Any:
+        if llm_semaphore is None:
+            return await asyncio.to_thread(chain.invoke, invoke_dict)
+
+        async with llm_semaphore:
+            return await asyncio.to_thread(chain.invoke, invoke_dict)
 
     def _extract_json_object(self, response_text: str) -> Optional[Dict[str, Any]]:
         if not response_text:
@@ -116,6 +125,114 @@ class JudgeEvaluatorService:
             return max(0.0, min(1.0, float(value)))
         except Exception:
             return 0.0
+
+    def _normalize_step_verdict(self, verdict: Any) -> str:
+        lowered = str(verdict or "").strip().lower()
+        mapping = {
+            "pass": "pass",
+            "fail": "fail",
+            "partial": "partial",
+            "unknown": "unknown",
+            "unable_to_evaluate": "unknown",
+        }
+        return mapping.get(lowered, "unknown")
+
+    async def synthesize_step_assessments(
+        self,
+        task_name: str,
+        criterion_name: str,
+        criterion_assertion: str,
+        criterion_description: str,
+        personas: List[str],
+        models: List[str],
+        criterion_verdict: str,
+        criterion_reasoning: str,
+        phase_criterion_summary: str,
+        evidence_by_step: Dict[int, List[EvidenceCitation]],
+        model_name: Optional[str] = None,
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
+    ) -> Dict[int, Dict[str, Any]]:
+        if not evidence_by_step:
+            return {}
+
+        valid_steps = sorted({int(step_idx) for step_idx in evidence_by_step.keys()})
+        step_payload: List[Dict[str, Any]] = []
+        for step_idx in valid_steps:
+            ev_list = evidence_by_step.get(step_idx, [])
+            serialized_evidence = []
+            for ev in ev_list:
+                source_field = ev.source_field.value if hasattr(ev.source_field, "value") else str(ev.source_field)
+                verdict = ev.verdict.value if hasattr(ev.verdict, "value") else ev.verdict
+                serialized_evidence.append(
+                    {
+                        "source_field": source_field,
+                        "highlighted_text": ev.highlighted_text,
+                        "reasoning": ev.reasoning or "",
+                        "verdict": str(verdict or ""),
+                    }
+                )
+            step_payload.append(
+                {
+                    "step_index": step_idx,
+                    "evidence": serialized_evidence,
+                }
+            )
+
+        try:
+            llm = self.llm_factory.get_langchain_llm(model_name)
+            chain = self.step_assessment_synthesis_template | llm
+            invoke_dict = {
+                "task_name": task_name,
+                "criterion_name": criterion_name,
+                "criterion_assertion": criterion_assertion,
+                "criterion_description": criterion_description or "",
+                "personas": ", ".join(personas) if personas else "None",
+                "models": ", ".join(models) if models else "None",
+                "criterion_verdict": str(criterion_verdict or "unknown"),
+                "criterion_reasoning": str(criterion_reasoning or ""),
+                "phase_criterion_summary": str(phase_criterion_summary or ""),
+                "evidence_by_step_json": json.dumps(step_payload, ensure_ascii=False, indent=2),
+            }
+
+            response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
+            response_text = response.content if hasattr(response, "content") else str(response)
+            response_data = self._extract_json_object(response_text) or {}
+            raw_items = response_data.get("step_assessments", [])
+            if not isinstance(raw_items, list):
+                return {}
+
+            output: Dict[int, Dict[str, Any]] = {}
+            valid_step_set = set(valid_steps)
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+
+                raw_step = item.get("step_index")
+                if isinstance(raw_step, int):
+                    step_index = raw_step
+                elif isinstance(raw_step, str) and raw_step.isdigit():
+                    step_index = int(raw_step)
+                else:
+                    continue
+
+                if step_index not in valid_step_set:
+                    continue
+
+                output[step_index] = {
+                    "verdict": self._normalize_step_verdict(item.get("verdict")),
+                    "reasoning": str(item.get("reasoning", "") or "").strip(),
+                    "confidence_score": self._clip_confidence(item.get("confidence_score", 0.0)),
+                }
+
+            return output
+        except Exception as exc:
+            logger.warning(
+                "Step assessment synthesis failed for criterion=%s model=%s error=%s",
+                criterion_name,
+                model_name,
+                exc,
+            )
+            return {}
 
     def _collect_logprob_values(self, node: Any, sink: List[float]) -> None:
         if isinstance(node, dict):
@@ -332,27 +449,37 @@ class JudgeEvaluatorService:
         self,
         evidence_list: List[EvidenceCitation],
         step_indices: List[int],
-        max_items: int = 9,
+        max_items: int = 12,
     ) -> List[EvidenceCitation]:
         if not evidence_list:
             return []
 
         ranked = sorted(evidence_list, key=self._score_evidence_item, reverse=True)
+        scope = {idx for idx in step_indices if isinstance(idx, int)}
+        if scope:
+            ranked = [item for item in ranked if int(item.step_index) in scope] or ranked
+
+        target_max_items = max_items
+        if scope:
+            # Reserve room for multiple high-signal snippets per step while capping total payload size.
+            target_max_items = min(24, max(max_items, len(scope) * 2))
+
         selected: List[EvidenceCitation] = []
         per_step_count: Dict[int, int] = {}
 
+        # Pass 1: guarantee at least one anchor snippet per covered step.
         for item in ranked:
             step_idx = int(item.step_index)
-            if per_step_count.get(step_idx, 0) >= 2:
+            if per_step_count.get(step_idx, 0) >= 1:
                 continue
 
-            if step_idx not in per_step_count:
-                selected.append(item)
-                per_step_count[step_idx] = 1
-            if len(selected) >= max_items:
+            selected.append(item)
+            per_step_count[step_idx] = 1
+            if len(selected) >= target_max_items:
                 break
 
-        if len(selected) < max_items:
+        # Pass 2: add complementary snippets, allowing multiple pieces of evidence per step.
+        if len(selected) < target_max_items:
             for item in ranked:
                 if item in selected:
                     continue
@@ -361,12 +488,8 @@ class JudgeEvaluatorService:
                     continue
                 selected.append(item)
                 per_step_count[step_idx] = per_step_count.get(step_idx, 0) + 1
-                if len(selected) >= max_items:
+                if len(selected) >= target_max_items:
                     break
-
-        scope = {idx for idx in step_indices if isinstance(idx, int)}
-        if scope:
-            selected = [item for item in selected if int(item.step_index) in scope] or selected
         return selected
 
     def _calibrate_phase_confidence(
@@ -500,113 +623,6 @@ class JudgeEvaluatorService:
             ]
         return phases
 
-    async def _build_global_behavior_overview_async(
-        self,
-        task_name: str,
-        personas: List[str],
-        models: List[str],
-        all_steps: List[Dict[str, Any]],
-        model_name: Optional[str],
-    ) -> Dict[str, Any]:
-        llm = self.llm_factory.get_langchain_llm(model_name)
-        chain = self.global_behavior_overview_template | llm
-        invoke_dict = {
-            "task_name": task_name,
-            "personas": ", ".join(personas) if personas else "None",
-            "models": ", ".join(models) if models else "None",
-            "steps_text": self._format_steps_for_unified_segmentation(all_steps),
-        }
-
-        response = await asyncio.to_thread(chain.invoke, invoke_dict)
-        response_text = response.content if hasattr(response, "content") else str(response)
-        token_prediction_confidence = self._extract_token_prediction_confidence(response)
-        response_data = self._extract_json_object(response_text) or {}
-
-        phases = self._sanitize_phase_output(
-            raw_phases=response_data.get("phases", []),
-            all_steps=all_steps,
-            fallback_summary=f"Complete execution with {len(all_steps)} steps",
-        )
-        key_phase_ids = response_data.get("key_phase_ids", [])
-        if not isinstance(key_phase_ids, list):
-            key_phase_ids = []
-        key_phase_ids = [str(pid) for pid in key_phase_ids if isinstance(pid, (str, int))]
-        if not key_phase_ids:
-            key_phase_ids = [
-                str(phase.get("phase_id"))
-                for phase in phases
-                if str(phase.get("criticality", "")).lower() == "high"
-            ]
-        if not key_phase_ids:
-            key_phase_ids = [str(phase.get("phase_id")) for phase in phases]
-
-        return {
-            "overall_behavior_summary": str(response_data.get("overall_behavior_summary", "")),
-            "phases": phases,
-            "key_phase_ids": key_phase_ids,
-            "global_reasoning": str(response_data.get("global_reasoning", "")),
-        }
-
-    async def build_global_behavior_overview(
-        self,
-        task_name: str,
-        personas: List[str],
-        models: List[str],
-        all_steps: List[Dict[str, Any]],
-        model_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        if not all_steps:
-            return {
-                "overall_behavior_summary": "",
-                "phases": [
-                    {
-                        "phase_id": "phase_0",
-                        "semantic_label": "Complete Execution",
-                        "step_indices": [],
-                        "phase_summary": "No execution steps available",
-                        "relevant_to_evaluation": True,
-                        "criticality": "high",
-                        "why_key": "Fallback due to empty execution steps.",
-                    }
-                ],
-                "key_phase_ids": ["phase_0"],
-                "global_reasoning": "Fallback global overview due to empty execution steps.",
-            }
-
-        try:
-            return await self._build_global_behavior_overview_async(
-                task_name=task_name,
-                personas=personas,
-                models=models,
-                all_steps=all_steps,
-                model_name=model_name,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Global behavior overview failed, using fallback summary: task=%s model=%s steps=%d error_type=%s error=%s",
-                task_name,
-                model_name,
-                len(all_steps),
-                type(exc).__name__,
-                exc,
-            )
-            return {
-                "overall_behavior_summary": "",
-                "phases": [
-                    {
-                        "phase_id": "phase_0",
-                        "semantic_label": "Complete Execution",
-                        "step_indices": list(range(len(all_steps))),
-                        "phase_summary": f"Complete execution with {len(all_steps)} steps",
-                        "relevant_to_evaluation": True,
-                        "criticality": "high",
-                        "why_key": "Fallback due to global overview failure.",
-                    }
-                ],
-                "key_phase_ids": ["phase_0"],
-                "global_reasoning": "Fallback global overview due to upstream error.",
-            }
-
     def _build_phase_steps_context(self, all_steps: List[Dict[str, Any]], step_indices: List[int]) -> str:
         context_parts: List[str] = []
         valid_indices = sorted({i for i in step_indices if isinstance(i, int) and 0 <= i < len(all_steps)})
@@ -632,70 +648,6 @@ class JudgeEvaluatorService:
 
         return "\n".join(context_parts)
 
-    async def _interpret_criterion_dimensions_async(
-        self,
-        criterion_name: str,
-        criterion_assertion: str,
-        criterion_description: str,
-        task_name: str,
-        personas: List[str],
-        models: List[str],
-        global_overview: Dict[str, Any],
-        model_name: Optional[str],
-    ) -> Dict[str, Any]:
-        llm = self.llm_factory.get_langchain_llm(model_name)
-        chain = self.criterion_interpretation_template | llm
-        invoke_dict = {
-            "task_name": task_name,
-            "criterion_name": criterion_name,
-            "criterion_assertion": criterion_assertion,
-            "criterion_description": criterion_description or "",
-            "personas": ", ".join(personas) if personas else "None",
-            "models": ", ".join(models) if models else "None",
-            "global_behavior_summary": str(global_overview.get("overall_behavior_summary", "")),
-            "global_key_phases": json.dumps(global_overview.get("phases", []), ensure_ascii=False, indent=2),
-        }
-
-        response = await asyncio.to_thread(chain.invoke, invoke_dict)
-        response_text = response.content if hasattr(response, "content") else str(response)
-        response_data = self._extract_json_object(response_text) or {}
-
-        dimensions = response_data.get("evaluation_dimensions", [])
-        if not isinstance(dimensions, list) or not dimensions:
-            dimensions = [
-                {
-                    "dimension_name": "Criterion Alignment",
-                    "description": criterion_assertion,
-                    "why_relevant": "Directly derived from criterion assertion",
-                }
-            ]
-
-        focus_points = response_data.get("focus_points", [])
-        if not isinstance(focus_points, list):
-            focus_points = []
-
-        phase_selection_heuristics = response_data.get("phase_selection_heuristics", [])
-        if not isinstance(phase_selection_heuristics, list):
-            phase_selection_heuristics = []
-
-        pass_signals = response_data.get("pass_signals", [])
-        if not isinstance(pass_signals, list):
-            pass_signals = []
-
-        fail_signals = response_data.get("fail_signals", [])
-        if not isinstance(fail_signals, list):
-            fail_signals = []
-
-        return {
-            "criterion_intent": str(response_data.get("criterion_intent", criterion_assertion)),
-            "persona_task_alignment": str(response_data.get("persona_task_alignment", "")),
-            "evaluation_dimensions": dimensions,
-            "focus_points": focus_points,
-            "phase_selection_heuristics": phase_selection_heuristics,
-            "pass_signals": pass_signals,
-            "fail_signals": fail_signals,
-        }
-
     async def _segment_phases_by_dimensions_async(
         self,
         criterion_name: str,
@@ -704,6 +656,7 @@ class JudgeEvaluatorService:
         criterion_intent: str,
         all_steps: List[Dict[str, Any]],
         model_name: Optional[str],
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> Dict[str, Any]:
         llm = self.llm_factory.get_langchain_llm(model_name)
         chain = self.phase_segmentation_template | llm
@@ -715,7 +668,7 @@ class JudgeEvaluatorService:
             "steps_text": self._format_steps_for_unified_segmentation(all_steps),
         }
 
-        response = await asyncio.to_thread(chain.invoke, invoke_dict)
+        response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
         response_text = response.content if hasattr(response, "content") else str(response)
         response_data = self._extract_json_object(response_text) or {}
 
@@ -760,6 +713,7 @@ class JudgeEvaluatorService:
         all_steps: List[Dict[str, Any]],
         model_name: Optional[str],
         enable_evidence_expansion: bool = False,
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> EvaluationResult:
         phase_id = str(phase.get("phase_id", "phase_unknown"))
         phase_summary = str(phase.get("phase_summary", ""))
@@ -790,7 +744,7 @@ class JudgeEvaluatorService:
             "models": ", ".join(models) if models else "None",
         }
 
-        response = await asyncio.to_thread(chain.invoke, invoke_dict)
+        response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
         response_text = response.content if hasattr(response, "content") else str(response)
         token_prediction_confidence = self._extract_token_prediction_confidence(response)
 
@@ -805,7 +759,6 @@ class JudgeEvaluatorService:
             criterion_name=criterion_name,
             aggregated_steps=phase_agg,
             all_steps=all_steps,
-            model_name=model_name,
         )
         if enable_evidence_expansion:
             result.highlighted_evidence = await self._expand_phase_evidence_if_needed_async(
@@ -818,6 +771,7 @@ class JudgeEvaluatorService:
                 step_indices=step_indices,
                 all_steps=all_steps,
                 model_name=model_name,
+                llm_semaphore=llm_semaphore,
             )
         dimension_assessments: List[Dict[str, Any]] = []
         if isinstance(result.model_extra, dict):
@@ -857,8 +811,8 @@ class JudgeEvaluatorService:
         all_steps: List[Dict[str, Any]],
         model_name: Optional[str] = None,
         criterion_description: Optional[str] = None,
-        global_overview: Optional[Dict[str, Any]] = None,
         step_max_concurrency: Optional[int] = None,
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> EvaluationResult:
         if not all_steps:
             return EvaluationResult(
@@ -881,13 +835,6 @@ class JudgeEvaluatorService:
             criterion_intent = criterion_assertion
             persona_task_alignment = ""
             global_behavior_summary = ""
-            if isinstance(global_overview, dict):
-                global_behavior_summary = str(global_overview.get("overall_behavior_summary", ""))
-
-            logger.info(
-                "[judge][segmentation-mode] criterion=%s mode=criterion-based uses_global_overview_phases=false",
-                criterion_name,
-            )
 
             segmentation = await self._segment_phases_by_dimensions_async(
                 criterion_name=criterion_name,
@@ -896,6 +843,7 @@ class JudgeEvaluatorService:
                 criterion_intent=criterion_intent,
                 all_steps=all_steps,
                 model_name=model_name,
+                llm_semaphore=llm_semaphore,
             )
             phases = segmentation.get("phases", [])
             relevant_ids = set(segmentation.get("relevant_phase_ids", []))
@@ -953,6 +901,7 @@ class JudgeEvaluatorService:
                         all_steps=all_steps,
                         model_name=model_name,
                         enable_evidence_expansion=enable_evidence_expansion,
+                        llm_semaphore=llm_semaphore,
                     )
                     logger.info(
                         "[judge][phase-end] criterion=%s phase_id=%s verdict=%s confidence=%.2f evidence=%d",
@@ -990,22 +939,16 @@ class JudgeEvaluatorService:
                 target_phases=target_phases,
                 model_name=model_name or "gpt-4o-mini",
                 all_steps=all_steps,
+                llm_semaphore=llm_semaphore,
             )
 
             if final.verdict == "UNABLE_TO_EVALUATE" and len(phase_results) > 1:
-                final = self._merge_evaluation_results(
-                    results=phase_results,
-                    criterion_name=criterion_name,
-                    granularity=Granularity.PHASE_LEVEL,
-                    criterion_assertion=criterion_assertion,
-                    model_name=model_name or "gpt-4o-mini",
-                )
+                final = self._simple_merge_results(phase_results, criterion_name, Granularity.PHASE_LEVEL)
             elif final.verdict == "UNABLE_TO_EVALUATE" and len(phase_results) == 1:
                 final = phase_results[0]
 
             final.aggregated_step_summary = (
-                f"Global-first phase evaluation. Relevant phases: {list(relevant_ids)}. "
-                "Global reasoning: disabled in criterion-based segmentation mode. "
+                f"Criterion-specific phase evaluation. Relevant phases: {list(relevant_ids)}. "
                 f"Segmentation reasoning: {segmentation.get('segmentation_reasoning', '')}"
             )[:500]
             final.used_granularity = Granularity.PHASE_LEVEL
@@ -1040,8 +983,8 @@ class JudgeEvaluatorService:
         all_steps: Optional[List[Dict[str, Any]]] = None,
         model_name: Optional[str] = None,
         criterion_description: Optional[str] = None,
-        global_overview: Optional[Dict[str, Any]] = None,
         step_max_concurrency: Optional[int] = None,
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> EvaluationResult:
         del aggregated_steps
         return await self.evaluate_criterion_unified(
@@ -1053,8 +996,8 @@ class JudgeEvaluatorService:
             all_steps=all_steps or [],
             model_name=model_name,
             criterion_description=criterion_description,
-            global_overview=global_overview,
             step_max_concurrency=step_max_concurrency,
+            llm_semaphore=llm_semaphore,
         )
 
     def _normalize_text_for_match(self, value: Any) -> str:
@@ -1129,72 +1072,11 @@ class JudgeEvaluatorService:
             return matches[0]
         return None
 
-    def _repair_evidence_with_llm(
-        self,
-        evidence: EvidenceCitation,
-        step_obj: Dict[str, Any],
-        criterion_name: str,
-        model_name: Optional[str] = None,
-    ) -> Optional[EvidenceCitation]:
-        try:
-            source_field = evidence.source_field.value if hasattr(evidence.source_field, "value") else str(evidence.source_field)
-            llm = self.llm_factory.get_langchain_llm(model_name or "gpt-4o-mini")
-            chain = self.evidence_reextract_template | llm
-            invoke_dict = {
-                "criterion_name": criterion_name,
-                "source_field": source_field,
-                "requested_text": evidence.highlighted_text or "",
-                "step_index": int(evidence.step_index),
-                "step_json": json.dumps(step_obj, ensure_ascii=False, indent=2),
-            }
-            response = chain.invoke(invoke_dict)
-            response_text = response.content if hasattr(response, "content") else str(response)
-            response_data = self._extract_json_object(response_text)
-            if not response_data:
-                return None
-
-            candidate_text = str(response_data.get("highlighted_text", "") or "").strip()
-            if not candidate_text:
-                return None
-
-            repaired_source_field = self._normalize_source_field(str(response_data.get("source_field", source_field)))
-            candidates = self._extract_field_candidates(step_obj, repaired_source_field)
-
-            matched_original = None
-            for candidate in candidates:
-                found = self._find_exact_original_snippet(candidate, candidate_text)
-                if found:
-                    matched_original = found
-                    break
-
-            if not matched_original:
-                return None
-
-            update_data: Dict[str, Any] = {
-                "step_index": int(evidence.step_index),
-                "highlighted_text": matched_original,
-                "source_field": repaired_source_field,
-            }
-
-            reasoning = response_data.get("reasoning")
-            if isinstance(reasoning, str) and reasoning:
-                update_data["reasoning"] = reasoning
-
-            verdict = response_data.get("verdict")
-            if isinstance(verdict, str) and verdict.lower() in {"pass", "fail", "partial", "unknown"}:
-                update_data["verdict"] = verdict.lower()
-
-            return evidence.model_copy(update=update_data)
-        except Exception as exc:
-            logger.debug("Evidence re-extraction failed: %s", exc)
-            return None
-
     def _ground_evidence_to_original_text(
         self,
         evidence: EvidenceCitation,
         all_steps: List[Dict[str, Any]],
         criterion_name: str,
-        model_name: Optional[str] = None,
     ) -> Optional[EvidenceCitation]:
         requested = (evidence.highlighted_text or "").strip()
         if not requested:
@@ -1219,15 +1101,6 @@ class JudgeEvaluatorService:
                 if matched:
                     return evidence.model_copy(update={"step_index": candidate_step_index, "highlighted_text": matched})
 
-            repaired = self._repair_evidence_with_llm(
-                evidence=evidence.model_copy(update={"step_index": candidate_step_index}),
-                step_obj=all_steps[candidate_step_index],
-                criterion_name=criterion_name,
-                model_name=model_name,
-            )
-            if repaired is not None:
-                return repaired
-
         unique_match = self._locate_unique_evidence_match(requested, source_field, all_steps)
         if unique_match is None:
             unique_match = self._locate_unique_evidence_match(requested, "", all_steps)
@@ -1242,7 +1115,6 @@ class JudgeEvaluatorService:
         evidence_list: List[EvidenceCitation],
         all_steps: List[Dict[str, Any]],
         criterion_name: str,
-        model_name: Optional[str] = None,
     ) -> List[EvidenceCitation]:
         grounded: List[EvidenceCitation] = []
         seen_keys = set()
@@ -1253,7 +1125,6 @@ class JudgeEvaluatorService:
                     evidence,
                     all_steps,
                     criterion_name=criterion_name,
-                    model_name=model_name,
                 )
                 if grounded_item is None:
                     continue
@@ -1362,6 +1233,7 @@ class JudgeEvaluatorService:
         step_indices: List[int],
         all_steps: List[Dict[str, Any]],
         model_name: Optional[str],
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> List[EvidenceCitation]:
         current_evidence = list(base_evidence or [])
         curated_current = self._curate_story_evidence(
@@ -1406,7 +1278,7 @@ class JudgeEvaluatorService:
                 ),
             }
 
-            response = await asyncio.to_thread(chain.invoke, invoke_dict)
+            response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
             response_text = response.content if hasattr(response, "content") else str(response)
             response_data = self._extract_json_object(response_text) or {}
             additional_items = self._parse_highlighted_evidence_items(
@@ -1420,7 +1292,6 @@ class JudgeEvaluatorService:
                 evidence_list=merged,
                 all_steps=all_steps,
                 criterion_name=criterion_name,
-                model_name=model_name,
             )
             return self._curate_story_evidence(
                 self._keep_high_signal_evidence(grounded),
@@ -1436,7 +1307,6 @@ class JudgeEvaluatorService:
         criterion_name: str,
         aggregated_steps: AggregatedSteps,
         all_steps: Optional[List[Dict[str, Any]]] = None,
-        model_name: Optional[str] = None,
     ) -> EvaluationResult:
         response_data = self._extract_json_object(response_text)
         if not response_data:
@@ -1452,7 +1322,6 @@ class JudgeEvaluatorService:
                 evidence_list=highlighted_evidence,
                 all_steps=all_steps,
                 criterion_name=criterion_name,
-                model_name=model_name,
             )
             highlighted_evidence = self._keep_high_signal_evidence(highlighted_evidence)
 
@@ -1468,12 +1337,39 @@ class JudgeEvaluatorService:
         if not isinstance(dimension_assessments, list):
             dimension_assessments = []
 
+        raw_relevant_steps = response_data.get("relevant_steps", [])
+        normalized_relevant_steps: List[int] = []
+        if isinstance(raw_relevant_steps, list):
+            for item in raw_relevant_steps:
+                if isinstance(item, int):
+                    normalized_relevant_steps.append(item)
+                elif isinstance(item, str) and item.isdigit():
+                    normalized_relevant_steps.append(int(item))
+
+        evidence_step_indices = sorted(
+            {
+                int(item.step_index)
+                for item in highlighted_evidence
+                if isinstance(item.step_index, int)
+            }
+        )
+        if evidence_step_indices:
+            relevant_steps = [
+                step_idx
+                for step_idx in normalized_relevant_steps
+                if step_idx in evidence_step_indices
+            ]
+            if not relevant_steps:
+                relevant_steps = evidence_step_indices
+        else:
+            relevant_steps = []
+
         return EvaluationResult(
             criterion_name=criterion_name,
             verdict=self._normalize_verdict(response_data.get("verdict", "UNABLE_TO_EVALUATE")),
             reasoning=response_data.get("reasoning", ""),
             confidence_score=float(response_data.get("confidence_score", 0.5)),
-            relevant_steps=response_data.get("relevant_steps", []),
+            relevant_steps=relevant_steps,
             aggregated_step_summary=aggregated_steps.aggregated_content[:500],
             used_granularity=aggregated_steps.granularity,
             supporting_evidence=response_data.get("supporting_evidence", ""),
@@ -1496,6 +1392,7 @@ class JudgeEvaluatorService:
         target_phases: List[Dict[str, Any]],
         model_name: str,
         all_steps: List[Dict[str, Any]],
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> EvaluationResult:
         if not phase_results:
             return EvaluationResult(
@@ -1535,7 +1432,6 @@ class JudgeEvaluatorService:
                 evidence_list=aggregated_evidence,
                 all_steps=all_steps,
                 criterion_name=criterion_name,
-                model_name=model_name,
             )
 
         try:
@@ -1553,7 +1449,7 @@ class JudgeEvaluatorService:
                 "global_behavior_summary": global_behavior_summary,
                 "phase_evaluations_summary": phase_evaluations_summary,
             }
-            response = await asyncio.to_thread(chain.invoke, invoke_dict)
+            response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
             response_text = response.content if hasattr(response, "content") else str(response)
             token_prediction_confidence = self._extract_token_prediction_confidence(response)
             response_data = self._extract_json_object(response_text)
@@ -1607,76 +1503,6 @@ class JudgeEvaluatorService:
         except Exception as exc:
             logger.warning("Phase overall synthesis failed: %s", exc)
             return self._simple_merge_results(phase_results, criterion_name, Granularity.PHASE_LEVEL)
-
-    def _merge_evaluation_results(
-        self,
-        results: List[EvaluationResult],
-        criterion_name: str,
-        granularity: Granularity,
-        criterion_assertion: str = "",
-        model_name: str = "gpt-4o-mini",
-    ) -> EvaluationResult:
-        if not results:
-            return EvaluationResult(
-                criterion_name=criterion_name,
-                verdict="UNABLE_TO_EVALUATE",
-                reasoning="No results to merge",
-                confidence_score=0.0,
-                aggregated_step_summary="No intermediate results to merge",
-                used_granularity=granularity,
-            )
-
-        verdicts_str = ""
-        for idx, result in enumerate(results):
-            verdicts_str += (
-                f"\nEvaluation {idx + 1}:\n"
-                f"  Verdict: {result.verdict}\n"
-                f"  Confidence: {result.confidence_score}\n"
-                f"  Reasoning: {result.reasoning}\n"
-            )
-
-        try:
-            llm = self.llm_factory.get_langchain_llm(model_name)
-            chain = self.merge_template | llm
-            response = chain.invoke(
-                {
-                    "criterion_name": criterion_name,
-                    "criterion_assertion": criterion_assertion,
-                    "granularity_type": "PHASE_LEVEL",
-                    "individual_verdicts": verdicts_str,
-                }
-            )
-            response_text = response.content if hasattr(response, "content") else str(response)
-            return self._parse_merge_response(response_text, criterion_name, results, granularity)
-        except Exception as exc:
-            logger.warning("LLM merge failed: %s", exc)
-            return self._simple_merge_results(results, criterion_name, granularity)
-
-    def _parse_merge_response(
-        self,
-        response_text: str,
-        criterion_name: str,
-        results: List[EvaluationResult],
-        granularity: Granularity,
-    ) -> EvaluationResult:
-        response_data = self._extract_json_object(response_text)
-        if not response_data:
-            return self._simple_merge_results(results, criterion_name, granularity)
-
-        aggregated_evidence: List[EvidenceCitation] = []
-        for result in results:
-            if result.highlighted_evidence:
-                aggregated_evidence.extend(result.highlighted_evidence)
-
-        return EvaluationResult(
-            criterion_name=criterion_name,
-            verdict=self._normalize_verdict(response_data.get("verdict", "UNABLE_TO_EVALUATE")),
-            reasoning=response_data.get("reasoning", ""),
-            confidence_score=float(response_data.get("confidence_score", 0.5)),
-            aggregated_step_summary=response_data.get("aggregation_summary", ""),
-            used_granularity=granularity,
-            highlighted_evidence=aggregated_evidence,
-        )
 
     def _simple_merge_results(
         self,
@@ -1769,7 +1595,6 @@ class JudgeEvaluatorService:
                 all_steps=all_steps,
                 model_name=evaluator_model,
                 criterion_description=criterion.get("description", ""),
-                global_overview=None,
             )
             for criterion in criteria
         ]

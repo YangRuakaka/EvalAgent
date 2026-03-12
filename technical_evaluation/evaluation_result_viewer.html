@@ -22,6 +22,7 @@
       --unknown-text: #475569;
       --highlight: rgba(37, 99, 235, 0.15);
       --card-body-height: 130px;
+      --scroll-panel-height: 780px;
     }
 
     * {
@@ -256,14 +257,19 @@
       border-radius: 8px;
       background: #f8fafc;
       padding: 8px;
+      height: var(--scroll-panel-height);
       min-height: 0;
+      max-height: var(--scroll-panel-height);
+      overflow: hidden;
       display: flex;
       flex-direction: column;
     }
 
     .criteria-list {
       margin-top: 6px;
-      overflow: auto;
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
       display: flex;
       flex-direction: column;
       gap: 7px;
@@ -478,16 +484,27 @@
       grid-template-columns: minmax(300px, 1.05fr) minmax(420px, 1.4fr);
       gap: 10px;
       padding: 10px;
+      align-items: start;
+    }
+
+    .review-grid .card {
+      height: var(--scroll-panel-height);
+      min-height: var(--scroll-panel-height);
+      max-height: var(--scroll-panel-height);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
     .review-queue {
       padding: 8px;
-      overflow: auto;
+      overflow-y: auto;
+      overflow-x: hidden;
       display: flex;
       flex-direction: column;
       gap: 8px;
-      min-height: 420px;
-      max-height: 780px;
+      flex: 1;
+      min-height: 0;
     }
 
     .review-item {
@@ -543,7 +560,10 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
-      min-height: 420px;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
 
     .score-banner {
@@ -1374,40 +1394,106 @@
       });
     }
 
-    function createStepMatcher(stepIndex, stepArrayIndex) {
-      const candidateStepNumbers = new Set();
-      const addCandidate = (value) => {
-        const n = Number(value);
-        if (Number.isFinite(n)) candidateStepNumbers.add(n);
-      };
+    function getStepDisplayNumber(run, stepArrayIndex) {
+      if (!run || !Array.isArray(run.steps)) return Number(stepArrayIndex);
 
-      addCandidate(stepIndex);
-      addCandidate(stepArrayIndex);
-      addCandidate(Number(stepIndex) - 1);
-      addCandidate(Number(stepArrayIndex) + 1);
+      const idx = Number(stepArrayIndex);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= run.steps.length) return idx;
 
-      return (value) => {
-        const n = Number(value);
-        return Number.isFinite(n) && candidateStepNumbers.has(n);
-      };
+      const step = run.steps[idx] || {};
+      const rawStepNumber = Number(step.stepIndex);
+      return Number.isFinite(rawStepNumber) ? rawStepNumber : idx;
     }
 
-    function getStepEvidence(criterion, stepIndex, stepArrayIndex) {
+    function formatStepTargets(run, stepTargets) {
+      const targets = Array.isArray(stepTargets) ? stepTargets : [];
+      if (!targets.length) return "-";
+      return targets.map((idx) => String(getStepDisplayNumber(run, idx))).join(", ");
+    }
+
+    function shouldPreferZeroBasedMapping(criterion) {
+      if (!criterion || !Array.isArray(criterion.involvedSteps)) return false;
+
+      for (const group of criterion.involvedSteps) {
+        if (!group || typeof group !== "object") continue;
+
+        const steps = Array.isArray(group.steps) ? group.steps : [];
+        for (const raw of steps) {
+          if (Number(raw) === 0) return true;
+        }
+
+        const highlighted = Array.isArray(group.highlighted_evidence) ? group.highlighted_evidence : [];
+        for (const item of highlighted) {
+          if (!item || typeof item !== "object") continue;
+          if (Number(item.step_index) === 0) return true;
+        }
+      }
+
+      return false;
+    }
+
+    function resolveStepToArrayIndex(rawStep, run, preferZeroBased) {
+      if (!run || !Array.isArray(run.steps)) return null;
+
+      const value = Number(rawStep);
+      if (!Number.isFinite(value)) return null;
+
+      const preferZeroBasedFirst = Boolean(preferZeroBased);
+
+      if (preferZeroBasedFirst) {
+        if (Number.isInteger(value) && value >= 0 && value < run.steps.length) {
+          return value;
+        }
+      }
+
+      for (let idx = 0; idx < run.steps.length; idx += 1) {
+        const step = run.steps[idx] || {};
+        const stepNumber = Number(step.stepIndex);
+        if (Number.isFinite(stepNumber) && stepNumber === value) {
+          return idx;
+        }
+      }
+
+      if (!preferZeroBasedFirst) {
+        if (Number.isInteger(value) && value >= 0 && value < run.steps.length) {
+          return value;
+        }
+      }
+
+      const legacyOneBasedIndex = value - 1;
+      if (Number.isInteger(legacyOneBasedIndex) && legacyOneBasedIndex >= 0 && legacyOneBasedIndex < run.steps.length) {
+        return legacyOneBasedIndex;
+      }
+
+      return null;
+    }
+
+    function createStepMatcher(run, stepArrayIndex) {
+      const targetIndex = Number(stepArrayIndex);
+      if (!Number.isInteger(targetIndex) || targetIndex < 0) {
+        return () => false;
+      }
+
+      return (value, preferZeroBased) => resolveStepToArrayIndex(value, run, preferZeroBased) === targetIndex;
+    }
+
+    function getStepEvidence(criterion, run, stepArrayIndex) {
       if (!criterion || !Array.isArray(criterion.involvedSteps)) return [];
-      const matchesStep = createStepMatcher(stepIndex, stepArrayIndex);
+      const matchesStep = createStepMatcher(run, stepArrayIndex);
+      const preferZeroBased = shouldPreferZeroBasedMapping(criterion);
 
       const evidence = [];
       criterion.involvedSteps.forEach((group) => {
         if (!group || typeof group !== "object") return;
         const steps = Array.isArray(group.steps) ? group.steps : [];
-        if (steps.length && !steps.some((value) => matchesStep(value))) return;
+        if (steps.length && !steps.some((value) => matchesStep(value, preferZeroBased))) return;
 
         const highlighted = Array.isArray(group.highlighted_evidence) ? group.highlighted_evidence : [];
         highlighted.forEach((item) => {
           if (!item || typeof item !== "object") return;
 
           const hasStepIndex = item.step_index !== undefined && item.step_index !== null && String(item.step_index).trim() !== "";
-          if (hasStepIndex && !matchesStep(item.step_index)) return;
+          if (hasStepIndex && !matchesStep(item.step_index, preferZeroBased)) return;
 
           evidence.push({
             sourceField: String(item.source_field || ""),
@@ -1420,9 +1506,10 @@
       return evidence;
     }
 
-    function getStepVerdicts(criterion, stepIndex, stepArrayIndex) {
+    function getStepVerdicts(criterion, run, stepArrayIndex) {
       if (!criterion || !Array.isArray(criterion.involvedSteps)) return [];
-      const matchesStep = createStepMatcher(stepIndex, stepArrayIndex);
+      const matchesStep = createStepMatcher(run, stepArrayIndex);
+      const preferZeroBased = shouldPreferZeroBasedMapping(criterion);
 
       const verdicts = [];
       criterion.involvedSteps.forEach((group) => {
@@ -1430,8 +1517,8 @@
 
         const steps = Array.isArray(group.steps) ? group.steps : [];
         const highlighted = Array.isArray(group.highlighted_evidence) ? group.highlighted_evidence : [];
-        const matchesBySteps = steps.length ? steps.some((value) => matchesStep(value)) : false;
-        const matchesByEvidence = highlighted.some((item) => item && matchesStep(item.step_index));
+        const matchesBySteps = steps.length ? steps.some((value) => matchesStep(value, preferZeroBased)) : false;
+        const matchesByEvidence = highlighted.some((item) => item && matchesStep(item.step_index, preferZeroBased));
 
         if (!matchesBySteps && !matchesByEvidence) return;
 
@@ -1551,21 +1638,13 @@
       select.value = String(state.selectedCriterionIndex);
     }
 
-    function normalizeStepToArrayIndex(rawStep, run) {
-      if (!run || !Array.isArray(run.steps)) return null;
-      const value = Number(rawStep);
-      if (!Number.isFinite(value)) return null;
-
-      for (let idx = 0; idx < run.steps.length; idx += 1) {
-        const step = run.steps[idx];
-        const matcher = createStepMatcher(step.stepIndex, idx);
-        if (matcher(value)) return idx;
-      }
-      return null;
+    function normalizeStepToArrayIndex(rawStep, run, preferZeroBased) {
+      return resolveStepToArrayIndex(rawStep, run, preferZeroBased);
     }
 
     function buildStepVerdictRows(criterion, run) {
       if (!criterion || !Array.isArray(criterion.involvedSteps)) return [];
+      const preferZeroBased = shouldPreferZeroBasedMapping(criterion);
 
       return criterion.involvedSteps.map((group, groupIndex) => {
         const g = group && typeof group === "object" ? group : {};
@@ -1584,14 +1663,12 @@
 
         const stepTargets = [];
         rawSteps.forEach((raw) => {
-          const normalized = normalizeStepToArrayIndex(raw, run);
+          const normalized = normalizeStepToArrayIndex(raw, run, preferZeroBased);
           if (normalized === null || stepTargets.includes(normalized)) return;
           stepTargets.push(normalized);
         });
 
-        const stepLabel = stepTargets.length
-          ? stepTargets.map((idx) => String(idx + 1)).join(", ")
-          : "-";
+        const stepLabel = formatStepTargets(run, stepTargets);
 
         return {
           groupIndex,
@@ -1630,6 +1707,7 @@
 
     function buildEvidenceRows(criterion, run) {
       if (!criterion || !Array.isArray(criterion.involvedSteps)) return [];
+      const preferZeroBased = shouldPreferZeroBasedMapping(criterion);
 
       const rows = [];
       criterion.involvedSteps.forEach((group, groupIndex) => {
@@ -1639,7 +1717,7 @@
 
         if (Array.isArray(g.steps)) {
           g.steps.forEach((rawStep) => {
-            const normalized = normalizeStepToArrayIndex(rawStep, run);
+            const normalized = normalizeStepToArrayIndex(rawStep, run, preferZeroBased);
             if (normalized !== null && !fallbackSteps.includes(normalized)) {
               fallbackSteps.push(normalized);
             }
@@ -1648,7 +1726,7 @@
 
         highlighted.forEach((item, evidenceIndex) => {
           const evidence = item && typeof item === "object" ? item : {};
-          const explicitStep = normalizeStepToArrayIndex(evidence.step_index, run);
+          const explicitStep = normalizeStepToArrayIndex(evidence.step_index, run, preferZeroBased);
           const stepTargets = explicitStep === null
             ? fallbackSteps.slice()
             : [explicitStep];
@@ -1658,7 +1736,7 @@
             type: "evidence",
             groupIndex,
             evidenceIndex,
-            label: "Evidence" + (stepTargets.length ? (" · Step " + stepTargets.map((idx) => idx + 1).join(", ")) : ""),
+            label: "Evidence" + (stepTargets.length ? (" · Step " + formatStepTargets(run, stepTargets)) : ""),
             preview: String(evidence.highlighted_text || ""),
             verdict: normStatus(evidence.verdict),
             confidence: Number(g.confidenceScore),
@@ -1927,7 +2005,7 @@
           const verdict = normStatus(item.verdict);
           const meta = [
             item.type === "evidence" && item.sourceField ? item.sourceField : "",
-            item.stepTargets && item.stepTargets.length ? ("step " + item.stepTargets.map((idx) => idx + 1).join(", ")) : "all steps",
+            item.stepTargets && item.stepTargets.length ? ("step " + formatStepTargets(run, item.stepTargets)) : "all steps",
             Number.isFinite(item.confidence) ? ("conf " + (item.confidence * 100).toFixed(0) + "%") : "",
           ].filter(Boolean).join(" · ");
 
@@ -1978,7 +2056,7 @@
         ["Criterion", criterion.title || criterion.key || "-"],
         ["LLM verdict", item.verdict || "unknown"],
         ["LLM confidence", Number.isFinite(item.confidence) ? ((item.confidence * 100).toFixed(0) + "%") : "-"],
-        ["Step scope", item.stepTargets && item.stepTargets.length ? item.stepTargets.map((idx) => idx + 1).join(", ") : "Criterion-level"],
+        ["Step scope", item.stepTargets && item.stepTargets.length ? formatStepTargets(run, item.stepTargets) : "Criterion-level"],
         ["Source field", item.sourceField || "-"],
       ];
       const tags = REVIEW_TAGS[item.type] || [];
@@ -2114,7 +2192,7 @@
                 confidence: Number.isFinite(item.confidence) ? item.confidence : null,
                 reasoning: item.reasoning || "",
                 excerpt: item.preview || "",
-                step_targets: Array.isArray(item.stepTargets) ? item.stepTargets.map((idx) => idx + 1) : [],
+                step_targets: Array.isArray(item.stepTargets) ? item.stepTargets.map((idx) => getStepDisplayNumber(run, idx)) : [],
                 source_field: item.sourceField || "",
               },
               human_review: entry ? {
@@ -2301,11 +2379,12 @@
       timeline.innerHTML = run.steps
         .map((step, idx) => {
           const active = idx === state.selectedStepIndex ? " active" : "";
-          const evidence = getStepEvidence(criterion, step.stepIndex, idx);
-          const verdicts = getStepVerdicts(criterion, step.stepIndex, idx);
+          const evidence = getStepEvidence(criterion, run, idx);
+          const verdicts = getStepVerdicts(criterion, run, idx);
           const mark = (evidence.length || verdicts.length) ? " *" : "";
+          const displayStepNumber = getStepDisplayNumber(run, idx);
           return "<button class=\"step-chip" + active + "\" data-step=\"" + idx + "\">" +
-            "Step " + escapeHtml(String(idx + 1)) + mark +
+            "Step " + escapeHtml(String(displayStepNumber)) + mark +
           "</button>";
         })
         .join("");
@@ -2353,13 +2432,13 @@
 
       const step = run.steps[state.selectedStepIndex] || null;
       const evidence = step && criterion
-        ? getStepEvidence(criterion, step.stepIndex, state.selectedStepIndex)
+        ? getStepEvidence(criterion, run, state.selectedStepIndex)
         : [];
       const stepVerdicts = step && criterion
-        ? getStepVerdicts(criterion, step.stepIndex, state.selectedStepIndex)
+        ? getStepVerdicts(criterion, run, state.selectedStepIndex)
         : [];
 
-      stepInfo.textContent = step ? "Step: " + (state.selectedStepIndex + 1) : "Step: -";
+      stepInfo.textContent = step ? "Step: " + getStepDisplayNumber(run, state.selectedStepIndex) : "Step: -";
 
       thinkingBox.innerHTML = renderHighlightedText(step ? step.thinking : "", evidence, "Thinking Process");
       evaluationBox.innerHTML = renderHighlightedText(step ? step.evaluation : "", evidence, "Evaluation");

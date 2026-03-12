@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Any
 
 from fastapi import APIRouter, HTTPException, Depends
-from langchain_core.messages import HumanMessage
 from pydantic import ValidationError
 
 from ..schemas.judge import (
@@ -35,141 +34,10 @@ from ..api.deps import get_judge_services, JudgeServices
 from ..core.config import settings
 from ..core.normalizers import normalize_run_index, normalize_to_string
 from ..core.storage_paths import get_condition_lookup_dirs
-from ..services.llm_factory import get_chat_llm
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/judge", tags=["judge"])
-
-
-async def _generate_overall_assessment(
-    criterion_title: str,
-    criterion_assertion: str,
-    criterion_description: str,
-    task_name: str,
-    granularity: Granularity,
-    personas: List[str],
-    models: List[str],
-    eval_result,
-    involved_steps: List[StepEvaluationDetail],
-    services: JudgeServices,
-    judge_model: Optional[str] = None,
-) -> tuple:
-    """Generate overall assessment for a criterion using LLM.
-    
-    Args:
-        criterion_title: Title of the criterion
-        criterion_assertion: Assertion to verify
-        criterion_description: Description of the criterion
-        task_name: Name of the task
-        granularity: Granularity level used
-        personas: List of personas
-        models: List of models
-        eval_result: The evaluation result from judge evaluator
-        involved_steps: List of step evaluation details
-        services: Judge services instance
-        
-    Returns:
-        Tuple of (overall_assessment, overall_reasoning, confidence)
-    """
-    try:
-        from ..services.evaluation_prompts import EvaluationPrompts
-        from langchain_core.prompts import PromptTemplate
-        
-        # Build evaluation details summary
-        evaluation_details = "DETAILED EVALUATION RESULTS:\n"
-        for i, step_detail in enumerate(involved_steps):
-            evaluation_details += f"\nEvaluation {i+1}:\n"
-            evaluation_details += f"  Status: {step_detail.evaluateStatus.value}\n"
-            evaluation_details += f"  Reasoning: {step_detail.reasoning}\n"
-            evaluation_details += f"  Confidence Score: {step_detail.confidenceScore}\n"
-            evaluation_details += f"  Steps Involved: {step_detail.steps}\n"
-            if step_detail.highlighted_evidence:
-                evaluation_details += f"  Evidence Count: {len(step_detail.highlighted_evidence)}\n"
-        
-        # Build involved steps summary
-        involved_steps_summary = "INVOLVED STEPS SUMMARY:\n"
-        for step_detail in involved_steps:
-            involved_steps_summary += f"- Steps {step_detail.steps}: {step_detail.evaluateStatus.value} ({step_detail.reasoning[:100]}...)\n"
-        
-        # Get the prompt template
-        prompt_template = EvaluationPrompts.get_overall_criterion_assessment_prompt()
-        
-        # Format personas and models
-        personas_str = ", ".join(personas) if personas else "None"
-        models_str = ", ".join(models) if models else "None"
-        
-        # Prepare input for LLM
-        input_dict = {
-            "criterion_title": criterion_title,
-            "criterion_assertion": criterion_assertion,
-            "criterion_description": criterion_description,
-            "task_name": task_name,
-            "granularity": granularity.value,
-            "personas": personas_str,
-            "models": models_str,
-            "evaluation_details": evaluation_details,
-            "involved_steps_summary": involved_steps_summary
-        }
-        
-        selected_model = judge_model or "gpt-4o-mini"
-        llm = services.llm_factory.get_langchain_llm(selected_model)
-        chain = prompt_template | llm
-        
-        # Log the prompt
-        formatted_prompt = prompt_template.format(**input_dict)
-        logger.info(f"Overall assessment prompt for '{criterion_title}':\n{formatted_prompt}")
-        print("\n" + "="*80)
-        print(f"[OVERALL ASSESSMENT PROMPT] for criterion '{criterion_title}'")
-        print("="*80)
-        print(formatted_prompt)
-        print("="*80)
-        
-        # Invoke LLM
-        response = await asyncio.to_thread(chain.invoke, input_dict)
-        response_text = response.content if hasattr(response, 'content') else str(response)
-        
-        logger.info(f"Overall assessment response:\n{response_text}")
-        print("[OVERALL ASSESSMENT RESPONSE]:")
-        print(response_text)
-        print("="*80 + "\n")
-        
-        # Parse response
-        try:
-            # Extract JSON from response
-            json_start = response_text.find("{")
-            json_end = response_text.rfind("}") + 1
-            
-            if json_start == -1 or json_end == 0:
-                logger.warning("Could not find JSON in overall assessment response")
-                return EvaluateStatus.UNKNOWN, "Failed to parse LLM response", 0.0
-            
-            json_str = response_text[json_start:json_end]
-            response_data = json.loads(json_str)
-            
-            overall_assessment = response_data.get("overall_assessment", "fail").lower()
-            if overall_assessment in ["pass", "fail"]:
-                overall_assessment = EvaluateStatus(overall_assessment)
-            else:
-                logger.warning(
-                    "Unsupported overall_assessment value '%s'; coercing to fail",
-                    overall_assessment,
-                )
-                overall_assessment = EvaluateStatus.FAIL
-            
-            overall_reasoning = response_data.get("overall_reasoning", "")
-            confidence = float(response_data.get("confidence_score", 0.5))
-            
-            logger.info(f"Parsed overall assessment: {overall_assessment}, reasoning: {overall_reasoning[:100]}..., confidence: {confidence}")
-            return overall_assessment, overall_reasoning, confidence
-            
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse overall assessment JSON: {e}")
-            return EvaluateStatus.UNKNOWN, f"Response parsing error: {str(e)}", 0.0
-        
-    except Exception as e:
-        logger.error(f"Overall assessment generation failed: {e}")
-        return EvaluateStatus.UNKNOWN, f"Assessment generation failed: {str(e)}", 0.0
 
 
 def _map_verdict_to_status(verdict: str) -> EvaluateStatus:
@@ -183,28 +51,6 @@ def _coerce_overall_assessment_to_binary(status: EvaluateStatus) -> EvaluateStat
     if status == EvaluateStatus.PASS:
         return EvaluateStatus.PASS
     return EvaluateStatus.FAIL
-
-
-def _has_verdict_conflict(
-    overall_assessment: EvaluateStatus,
-    involved_steps: List[StepEvaluationDetail],
-) -> bool:
-    step_statuses = {
-        step.evaluateStatus
-        for step in involved_steps
-        if step.evaluateStatus in {EvaluateStatus.PASS, EvaluateStatus.FAIL, EvaluateStatus.PARTIAL}
-    }
-
-    if EvaluateStatus.PASS in step_statuses and EvaluateStatus.FAIL in step_statuses:
-        return True
-
-    if overall_assessment == EvaluateStatus.PASS and EvaluateStatus.FAIL in step_statuses:
-        return True
-
-    if overall_assessment == EvaluateStatus.FAIL and EvaluateStatus.PASS in step_statuses:
-        return True
-
-    return False
 
 
 def _clip_confidence(value: Any) -> float:
@@ -267,6 +113,84 @@ def _compute_step_confidence(
     return _clip_confidence(technical_score)
 
 
+def _synthesize_step_status(
+    ev_list: List[EvidenceCitation],
+    criterion_status: EvaluateStatus,
+) -> EvaluateStatus:
+    counts = {
+        EvaluateStatus.PASS: 0,
+        EvaluateStatus.FAIL: 0,
+        EvaluateStatus.PARTIAL: 0,
+    }
+
+    for ev in ev_list:
+        if ev.verdict in counts:
+            counts[ev.verdict] += 1
+
+    total_votes = sum(counts.values())
+    if total_votes == 0:
+        return criterion_status
+
+    if counts[EvaluateStatus.PASS] > 0 and counts[EvaluateStatus.FAIL] > 0:
+        evidence_status = EvaluateStatus.PARTIAL
+    else:
+        evidence_status = max(
+            (EvaluateStatus.PASS, EvaluateStatus.FAIL, EvaluateStatus.PARTIAL),
+            key=lambda status: counts[status],
+        )
+
+    if criterion_status == EvaluateStatus.UNKNOWN:
+        return evidence_status
+    if evidence_status == criterion_status:
+        return evidence_status
+    if evidence_status == EvaluateStatus.PARTIAL or criterion_status == EvaluateStatus.PARTIAL:
+        return EvaluateStatus.PARTIAL
+    if {evidence_status, criterion_status} == {EvaluateStatus.PASS, EvaluateStatus.FAIL}:
+        return EvaluateStatus.PARTIAL
+    return evidence_status
+
+
+def _build_step_reasoning(
+    ev_list: List[EvidenceCitation],
+    criterion_status: EvaluateStatus,
+    synthesized_status: EvaluateStatus,
+    criterion_reasoning: str,
+) -> str:
+    reasoning_snippets = [
+        (ev.reasoning or "").strip()
+        for ev in ev_list
+        if (ev.reasoning or "").strip()
+    ]
+    unique_snippets: List[str] = []
+    for snippet in reasoning_snippets:
+        if snippet not in unique_snippets:
+            unique_snippets.append(snippet)
+
+    source_count = len(
+        {
+            ev.source_field.value if hasattr(ev.source_field, "value") else str(ev.source_field)
+            for ev in ev_list
+        }
+    )
+
+    evidence_note = " ".join(unique_snippets[:2])
+    if not evidence_note:
+        evidence_note = "Evidence excerpts are used as primary support for this step."
+
+    context_reasoning = (criterion_reasoning or "").strip()
+    context_note = (
+        f" Phase/criterion context: {context_reasoning[:180]}"
+        if context_reasoning
+        else ""
+    )
+
+    return (
+        f"Step verdict synthesized from {len(ev_list)} evidence item(s) across {source_count} source field(s). "
+        f"Evidence-backed status + phase/criterion context ({criterion_status.value}) -> {synthesized_status.value}. "
+        f"{evidence_note}{context_note}"
+    )
+
+
 async def _process_single_criterion(
     crit: ExperimentCriterion,
     task: BrowserAgentTask,
@@ -275,9 +199,8 @@ async def _process_single_criterion(
     models: List[str],
     services: JudgeServices,
     judge_model: Optional[str] = None,
-    global_overview: Optional[Dict[str, Any]] = None,
     step_max_concurrency: Optional[int] = None,
-    overall_assessment_confidence_threshold: float = 0.7,
+    llm_semaphore: Optional[asyncio.Semaphore] = None,
 ) -> Optional[ExperimentCriterionResult]:
     """Process a single criterion evaluation asynchronously."""
     logger.info(f"Evaluating criterion: {crit.title}")
@@ -296,8 +219,8 @@ async def _process_single_criterion(
             all_steps=all_steps or [],
             model_name=judge_model,
             criterion_description=crit.description,
-            global_overview=global_overview,
             step_max_concurrency=step_max_concurrency,
+            llm_semaphore=llm_semaphore,
         )
         logger.info(f"Evaluation result: verdict={eval_result.verdict}, reasoning length={len(eval_result.reasoning) if eval_result.reasoning else 0}")
         
@@ -330,24 +253,50 @@ async def _process_single_criterion(
                 if step_idx not in steps_evidence:
                     steps_evidence[step_idx] = []
                 steps_evidence[step_idx].append(ev_obj)
+
+            llm_step_assessments = await services.judge_evaluator.synthesize_step_assessments(
+                task_name=task.name,
+                criterion_name=crit.title,
+                criterion_assertion=crit.assertion,
+                criterion_description=crit.description or "",
+                personas=personas,
+                models=models,
+                criterion_verdict=normalized_overall_verdict.value,
+                criterion_reasoning=eval_result.reasoning or "",
+                phase_criterion_summary=eval_result.aggregated_step_summary or "",
+                evidence_by_step=steps_evidence,
+                model_name=judge_model,
+                llm_semaphore=llm_semaphore,
+            )
             
             # Create a StepEvaluationDetail for each step with evidence
-            for step_idx, ev_list in steps_evidence.items():
-                # Determine status for this step
-                step_verdict = None
-                for ev in ev_list:
-                    if ev.verdict:
-                        step_verdict = ev.verdict
-                        break
-                
-                # Fallback to overall verdict if step verdict is missing
-                if not step_verdict:
-                    step_verdict = normalized_overall_verdict
-                
-                # Determine reasoning
-                step_reasoning = "; ".join([ev.reasoning for ev in ev_list if ev.reasoning])
-                if not step_reasoning:
-                    step_reasoning = eval_result.reasoning
+            for step_idx, ev_list in sorted(steps_evidence.items(), key=lambda item: item[0]):
+                llm_assessment = llm_step_assessments.get(step_idx, {}) if isinstance(llm_step_assessments, dict) else {}
+                llm_verdict = str(llm_assessment.get("verdict", "")).strip().lower()
+                if llm_verdict in {"pass", "fail", "partial", "unknown"}:
+                    step_verdict = EvaluateStatus(llm_verdict)
+                else:
+                    step_verdict = _synthesize_step_status(
+                        ev_list=ev_list,
+                        criterion_status=normalized_overall_verdict,
+                    )
+
+                llm_reasoning = str(llm_assessment.get("reasoning", "") or "").strip()
+                if llm_reasoning:
+                    step_reasoning = llm_reasoning
+                else:
+                    step_reasoning = _build_step_reasoning(
+                        ev_list=ev_list,
+                        criterion_status=normalized_overall_verdict,
+                        synthesized_status=step_verdict,
+                        criterion_reasoning=eval_result.reasoning,
+                    )
+
+                llm_confidence = llm_assessment.get("confidence_score")
+                try:
+                    fallback_confidence = float(llm_confidence)
+                except Exception:
+                    fallback_confidence = float(eval_result.confidence_score or 0.0)
                     
                 # Convert evidence back to dicts
                 ev_dicts = [ev.model_dump() for ev in ev_list]
@@ -359,7 +308,7 @@ async def _process_single_criterion(
                     highlighted_evidence=ev_dicts,
                     confidenceScore=_compute_step_confidence(
                         ev_list,
-                        float(eval_result.confidence_score or 0.0),
+                        fallback_confidence,
                     ),
                     steps=[step_idx]
                 )
@@ -371,98 +320,19 @@ async def _process_single_criterion(
                 for step_idx in (eval_result.relevant_steps or [])
                 if isinstance(step_idx, int)
             ]
-            valid_relevant_steps = sorted(
-                {
-                    step_idx
-                    for step_idx in raw_relevant_steps
-                    if 0 <= step_idx < len(all_steps)
-                }
+            logger.warning(
+                "No grounded highlighted evidence for criterion '%s'; skipping step-level verdict emission (raw_relevant_steps=%s)",
+                crit.title,
+                raw_relevant_steps,
             )
-
-            if not valid_relevant_steps and raw_relevant_steps:
-                one_based_candidates = {
-                    step_idx - 1
-                    for step_idx in raw_relevant_steps
-                    if 1 <= step_idx <= len(all_steps)
-                }
-                valid_relevant_steps = sorted(
-                    {
-                        step_idx
-                        for step_idx in one_based_candidates
-                        if 0 <= step_idx < len(all_steps)
-                    }
-                )
-
-            if valid_relevant_steps:
-                logger.warning(
-                    "No grounded highlighted evidence for criterion '%s'; fallback to relevant_steps=%s",
-                    crit.title,
-                    valid_relevant_steps,
-                )
-                involved_steps_list.append(
-                    StepEvaluationDetail(
-                        granularity=target_granularity,
-                        evaluateStatus=normalized_overall_verdict,
-                        reasoning=eval_result.reasoning or "No grounded highlighted evidence returned by evaluator.",
-                        highlighted_evidence=[],
-                        confidenceScore=_compute_step_confidence(
-                            [],
-                            float(eval_result.confidence_score or 0.0),
-                        ),
-                        steps=valid_relevant_steps,
-                    )
-                )
-            else:
-                logger.warning(
-                    "No grounded highlighted evidence and no valid relevant_steps for criterion '%s' (raw_relevant_steps=%s)",
-                    crit.title,
-                    raw_relevant_steps,
-                )
         
         logger.info(f"Created {len(involved_steps_list)} StepEvaluationDetail objects")
         
-        # 6. Generate overall assessment only when confidence is low or verdicts conflict.
         overall_assessment = _coerce_overall_assessment_to_binary(
             _map_verdict_to_status(eval_result.verdict)
         )
         overall_reasoning = eval_result.reasoning or ""
         confidence = float(eval_result.confidence_score or 0.0)
-
-        has_verdict_conflict = _has_verdict_conflict(overall_assessment, involved_steps_list)
-        should_run_secondary_assessment = (
-            confidence < overall_assessment_confidence_threshold or has_verdict_conflict
-        )
-
-        if should_run_secondary_assessment:
-            logger.info(
-                "Running secondary overall assessment for criterion '%s' (confidence=%.3f, threshold=%.3f, verdict_conflict=%s)",
-                crit.title,
-                confidence,
-                overall_assessment_confidence_threshold,
-                has_verdict_conflict,
-            )
-            overall_assessment, overall_reasoning, confidence = await _generate_overall_assessment(
-                criterion_title=crit.title,
-                criterion_assertion=crit.assertion,
-                criterion_description=crit.description,
-                task_name=task.name,
-                granularity=target_granularity,
-                personas=personas,
-                models=models,
-                eval_result=eval_result,
-                involved_steps=involved_steps_list,
-                services=services,
-                judge_model=judge_model,
-            )
-            overall_assessment = _coerce_overall_assessment_to_binary(overall_assessment)
-        else:
-            logger.info(
-                "Skipping secondary overall assessment for criterion '%s' (confidence=%.3f, threshold=%.3f, verdict_conflict=%s)",
-                crit.title,
-                confidence,
-                overall_assessment_confidence_threshold,
-                has_verdict_conflict,
-            )
         
         return ExperimentCriterionResult(
             title=crit.title,
@@ -604,9 +474,8 @@ async def _evaluate_condition_criterion_pair(
     criterion: ExperimentCriterion,
     services: JudgeServices,
     judge_model: Optional[str] = None,
-    global_overview: Optional[Dict[str, Any]] = None,
     step_max_concurrency: Optional[int] = None,
-    overall_assessment_confidence_threshold: float = 0.7,
+    llm_semaphore: Optional[asyncio.Semaphore] = None,
 ) -> Tuple[str, Optional[ExperimentCriterionResult]]:
     """Evaluate a single criterion for a loaded condition context."""
     result = await _process_single_criterion(
@@ -617,9 +486,8 @@ async def _evaluate_condition_criterion_pair(
         models=context["models"],
         services=services,
         judge_model=judge_model,
-        global_overview=global_overview,
         step_max_concurrency=step_max_concurrency,
-        overall_assessment_confidence_threshold=overall_assessment_confidence_threshold,
+        llm_semaphore=llm_semaphore,
     )
     return context["conditionID"], result
 
@@ -663,134 +531,27 @@ async def _gather_with_limit(
 
     return await asyncio.gather(*[_run(coroutine) for coroutine in coroutines])
 
-async def _rank_conditions_with_llm(
+def _build_ranking_reasoning(
     criterion: ExperimentCriterion,
-    condition_evaluations: dict,
-    results: List[ConditionResult],
-    judge_model: Optional[str] = None,
-) -> tuple[List[RankingItem], str]:
-    """
-    Use LLM to rank conditions for a specific criterion.
-    
-    Args:
-        criterion: The criterion being evaluated
-        condition_evaluations: Dict mapping condition_id -> ExperimentCriterionResult
-        results: List of all ConditionResult objects to extract metadata
-        
-    Returns:
-        Tuple of (ranking_items, reasoning)
-    """
-    # Build context for LLM
-    condition_details = []
-    for result in results:
-        if result.conditionID not in condition_evaluations:
-            continue
-        
-        crit_result = condition_evaluations[result.conditionID]
-        condition_info = {
-            "condition_id": result.conditionID,
-            "persona": result.persona,
-            "value": result.value,
-            "model": result.model,
-            "run_index": result.run_index,
-            "overall_assessment": crit_result.overall_assessment.value,
-            "confidence": crit_result.confidence or 0,
-            "overall_reasoning": crit_result.overall_reasoning or "",
-            "involved_steps_count": len(crit_result.involved_steps),
-            "involved_steps_summary": [
-                {
-                    "granularity": step.granularity.value,
-                    "status": step.evaluateStatus.value,
-                    "confidence": step.confidenceScore,
-                    "reasoning": step.reasoning
-                }
-                for step in crit_result.involved_steps[:3]  # Top 3 steps for brevity
-            ]
-        }
-        condition_details.append(condition_info)
-    
-    # Create prompt for LLM
-    prompt = f"""You are a professional evaluation expert. Please analyze and rank multiple conditions based on the following information.
+    ranking_items: List[RankingItem],
+) -> str:
+    if not ranking_items:
+        return f"No valid condition results were available for criterion '{criterion.title}'."
 
-Evaluation Criterion:
-- Title: {criterion.title}
-- Assertion: {criterion.assertion}
-- Description: {criterion.description}
+    lines = [
+        f"Ranking for '{criterion.title}' is determined by overall assessment first and confidence second.",
+    ]
+    best_item = ranking_items[0]
+    lines.append(
+        f"Top condition: persona '{best_item.persona}' using model '{best_item.model}' run {best_item.run_index}, assessed as {best_item.overall_assessment.value} with confidence {best_item.confidence:.2f}."
+    )
 
-Condition Evaluation Details:
-{json.dumps(condition_details, indent=2, ensure_ascii=False)}
-
-Tasks:
-1. Carefully analyze the performance of each condition
-2. Rank conditions based on overall_assessment status (pass > partial > fail) and confidence scores
-3. Consider the details and reasoning of involved_steps
-4. Generate ranking results and detailed justification
-5. Do not include any conditionID in your reasoning instead, refer to their persona/model/run_indexs for clarity.
-
-Please return results in JSON format:
-{{
-    "ranking": [
-        {{
-            "rank": 1,
-            "condition_id": "...",
-            "summary": "Brief performance summary for this condition"
-        }},
-        ...
-    ],
-    "reasoning": "Detailed explanation of the ranking order, including strengths and weaknesses of each condition"
-}}
-"""
-    
-    try:
-        llm = get_chat_llm(model=judge_model) if judge_model else get_chat_llm()
-        response = await asyncio.to_thread(
-            lambda: llm.invoke([HumanMessage(content=prompt)])
+    for item in ranking_items[1:]:
+        lines.append(
+            f"Compared condition: persona '{item.persona}' using model '{item.model}' run {item.run_index}, assessed as {item.overall_assessment.value} with confidence {item.confidence:.2f}."
         )
-        
-        # Parse response
-        response_text = response.content
-        # Extract JSON from response
-        json_start = response_text.find('{')
-        json_end = response_text.rfind('}') + 1
-        if json_start >= 0 and json_end > json_start:
-            json_str = response_text[json_start:json_end]
-            ranking_data = json.loads(json_str)
-        else:
-            raise ValueError("No JSON found in LLM response")
-        
-        # Build ranking items
-        ranking_items = []
-        condition_map = {result.conditionID: result for result in results}
-        
-        for rank_data in ranking_data.get("ranking", []):
-            cond_id = rank_data["condition_id"]
-            if cond_id not in condition_map:
-                continue
-            
-            result = condition_map[cond_id]
-            crit_result = condition_evaluations[cond_id]
-            
-            ranking_item = RankingItem(
-                rank=rank_data["rank"],
-                condition_id=cond_id,
-                overall_assessment=crit_result.overall_assessment,
-                confidence=crit_result.confidence or 0,
-                summary=rank_data.get("summary", ""),
-                persona=result.persona,
-                value=result.value,
-                model=result.model,
-                run_index=result.run_index
-            )
-            ranking_items.append(ranking_item)
-        
-        reasoning = ranking_data.get("reasoning", "")
-        
-        return ranking_items, reasoning
-        
-    except Exception as e:
-        logger.error(f"LLM ranking failed: {e}, falling back to default ranking")
-        # Fallback to simple ranking if LLM fails
-        return _fallback_ranking(condition_evaluations, results), f"Default ranking (LLM failed: {str(e)})"
+
+    return " ".join(lines)
 
 
 def _fallback_ranking(
@@ -842,7 +603,6 @@ def _fallback_ranking(
 async def _generate_multi_condition_assessment(
     results: List[ConditionResult],
     criteria: List[ExperimentCriterion],
-    judge_model: Optional[str] = None,
 ) -> Optional[MultiConditionAssessment]:
     """
     Generate multi-condition assessment comparing all conditions against each criterion.
@@ -878,18 +638,8 @@ async def _generate_multi_condition_assessment(
         # Get the granularity from the first result (should be same across conditions)
         first_granularity = next(iter(criterion_results.values())).granularity
         
-        # Use LLM to rank conditions (or fallback to default ranking)
-        try:
-            ranking_items, ranking_reasoning = await _rank_conditions_with_llm(
-                criterion,
-                criterion_results,
-                results,
-                judge_model=judge_model,
-            )
-        except Exception as e:
-            logger.warning(f"Failed to run LLM ranking for criterion '{criterion.title}': {e}")
-            ranking_items = _fallback_ranking(criterion_results, results)
-            ranking_reasoning = f"Default ranking (LLM failed: {str(e)})"
+        ranking_items = _fallback_ranking(criterion_results, results)
+        ranking_reasoning = _build_ranking_reasoning(criterion, ranking_items)
         
         best_condition_id = ranking_items[0].condition_id if ranking_items else None
         if not best_condition_id:
@@ -961,20 +711,16 @@ async def evaluate_experiment(
         1,
         min(configured_step_max_concurrency, total_llm_concurrency_budget // max(1, max_concurrency)),
     )
-    overall_assessment_confidence_threshold = float(
-        getattr(settings, "JUDGE_EVALUATION_OVERALL_ASSESSMENT_CONFIDENCE_THRESHOLD", 0.7) or 0.7
-    )
-    overall_assessment_confidence_threshold = max(0.0, min(1.0, overall_assessment_confidence_threshold))
     task_timeout_seconds = max(0, int(getattr(settings, "JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS", 0) or 0))
+    llm_semaphore = asyncio.Semaphore(total_llm_concurrency_budget)
     logger.info(
-        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, max_concurrency=%d, step_max_concurrency=%d, llm_budget=%d, confidence_threshold=%.2f, task_timeout_seconds=%d)",
+        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, max_concurrency=%d, step_max_concurrency=%d, llm_budget=%d, task_timeout_seconds=%d)",
         len(request.conditions),
         len(request.criteria),
         request.judge_model,
         max_concurrency,
         step_max_concurrency,
         total_llm_concurrency_budget,
-        overall_assessment_confidence_threshold,
         task_timeout_seconds,
     )
     logger.info(
@@ -1032,50 +778,7 @@ async def evaluate_experiment(
             },
         )
 
-    # 2. Build global overview once per condition and reuse for all criteria.
-    overview_tasks = []
-    for ctx in loaded_contexts:
-        overview_tasks.append(
-            services.judge_evaluator.build_global_behavior_overview(
-                task_name=ctx["task"].name,
-                personas=ctx["personas"],
-                models=ctx["models"],
-                all_steps=ctx["all_steps"],
-                model_name=request.judge_model,
-            )
-        )
-
-    global_overviews = await _gather_with_limit(
-        overview_tasks,
-        max_concurrency=max_concurrency,
-        timeout_seconds=task_timeout_seconds,
-    )
-
-    for idx, ctx in enumerate(loaded_contexts):
-        overview = global_overviews[idx] if idx < len(global_overviews) else None
-        if isinstance(overview, dict):
-            ctx["global_overview"] = overview
-            continue
-
-        all_steps = ctx.get("all_steps") or []
-        ctx["global_overview"] = {
-            "overall_behavior_summary": "",
-            "phases": [
-                {
-                    "phase_id": "phase_0",
-                    "semantic_label": "Complete Execution",
-                    "step_indices": list(range(len(all_steps))),
-                    "phase_summary": f"Complete execution with {len(all_steps)} steps",
-                    "relevant_to_evaluation": True,
-                    "criticality": "high",
-                    "why_key": "Fallback due to missing global overview.",
-                }
-            ],
-            "key_phase_ids": ["phase_0"],
-            "global_reasoning": "Fallback global overview due to upstream timeout/failure.",
-        }
-
-    # 3. Flattened Evaluation: Create tasks for all (Condition, Criterion) pairs
+    # 2. Flattened Evaluation: Create tasks for all (Condition, Criterion) pairs
     evaluation_tasks = []
     for ctx in loaded_contexts:
         for crit in request.criteria:
@@ -1085,22 +788,21 @@ async def evaluate_experiment(
                     crit,
                     services,
                     judge_model=request.judge_model,
-                    global_overview=ctx.get("global_overview"),
                     step_max_concurrency=step_max_concurrency,
-                    overall_assessment_confidence_threshold=overall_assessment_confidence_threshold,
+                    llm_semaphore=llm_semaphore,
                 )
             )
             
     logger.info("Starting %d evaluation tasks with bounded concurrency=%d", len(evaluation_tasks), max_concurrency)
     
-    # 4. Execute all evaluations concurrently
+    # 3. Execute all evaluations concurrently
     flat_results = await _gather_with_limit(
         evaluation_tasks,
         max_concurrency=max_concurrency,
         timeout_seconds=task_timeout_seconds,
     )
     
-    # 5. Group results by condition
+    # 4. Group results by condition
     # Map: conditionID -> List[ExperimentCriterionResult]
     results_by_condition = {ctx["conditionID"]: [] for ctx in loaded_contexts}
     
@@ -1111,7 +813,7 @@ async def evaluate_experiment(
         if result is not None:
             results_by_condition[cond_id].append(result)
             
-    # 6. Build final ConditionResult objects
+    # 5. Build final ConditionResult objects
     condition_results = []
 
     def _criterion_identity(criterion: ExperimentCriterion) -> Tuple[str, str]:
@@ -1161,22 +863,15 @@ async def evaluate_experiment(
         else:
             logger.warning("Skipping invalid condition result: %s", cond_id)
     
-    # 7. Generate multi-condition assessment if there are 2+ conditions
+    # 6. Generate multi-condition assessment if there are 2+ conditions
     multi_condition_assessment = await _generate_multi_condition_assessment(
         condition_results,
         request.criteria,
-        judge_model=request.judge_model,
     )
     
     # Create response
     response = ExperimentEvaluationResponse(conditions=condition_results, multi_condition_assessment=multi_condition_assessment)
     
-    # Print the response
-    print("\n" + "="*80)
-    print("[EVALUATE-EXPERIMENT RESPONSE]")
-    print("="*80)
-    print(json.dumps(response.model_dump(mode='json'), indent=2, ensure_ascii=False))
-    print("="*80 + "\n")
     logger.info(f"Experiment evaluation response sent with {len(condition_results)} conditions")
         
     return response

@@ -55,7 +55,7 @@ Important:
 - `-InputMode`: `dataset_json` (default) or `txt_requests`
 - `-JsonPattern`: file pattern for `dataset_json` mode, default `"*.json"`
 - `-Pattern`: file pattern for `txt_requests` mode, default `"*.json"` in script (set to `"*.txt"` for txt requests)
-- `-JudgeModels`: one or more judge models, e.g. `-JudgeModels deepseek-chat gpt-4o-mini`
+- `-JudgeModels`: one or more judge models, e.g. `-JudgeModels deepseek-chat gpt-4o-mini`; wrapper will run them separately and write to model folders such as `results/Deepseek/` and `results/GPT/`
 - `-MaxFiles`: limit number of input files for smoke runs
 - `-MaxConditionsPerRequest`: only useful in `txt_requests` mode
 - `-CriteriaFile`: custom criteria JSON file
@@ -231,9 +231,9 @@ Current behavior note:
 - `-Modes` controls output grouping only (directory/tag naming), not backend granularity behavior.
 
 Results are written to separate subfolders:
-- `results/agentic/`
-- `results/step_level/`
-- `results/global_summary/`
+- Without `-JudgeModels`: `results/agentic/`, `results/step_level/`, `results/global_summary/`
+- With `-JudgeModels` and a single mode: `results/Deepseek/`, `results/GPT/`, ...
+- With `-JudgeModels` and multiple modes: `results/<Model>/<Mode>/`
 
 ## Run Directly with Python
 ```powershell
@@ -345,11 +345,19 @@ Where `mode_subdir` is typically:
 - `technical_evaluation/results/step_level/`
 - `technical_evaluation/results/global_summary/`
 
+When `run_technical_evaluation.ps1` is invoked with `-JudgeModels`, the wrapper now splits runs by model before calling Python:
+- Single mode example: `technical_evaluation/results/Deepseek/`, `technical_evaluation/results/GPT/`
+- Multiple modes example: `technical_evaluation/results/Deepseek/agentic/`, `technical_evaluation/results/GPT/step_level/`
+
 Typical layout example:
 
 ```txt
 technical_evaluation/results/agentic/
   batch_summary_20260310_135437.json
+  buy_milk_conformity_20250922_172458__req01__agentic__judge-gpt-4o-mini__evaluated.json
+
+technical_evaluation/results/GPT/
+  batch_summary_latest.json
   buy_milk_conformity_20250922_172458__req01__agentic__judge-gpt-4o-mini__evaluated.json
 ```
 
@@ -365,7 +373,7 @@ Supported input files:
 How to open:
 
 1. Open `technical_evaluation/evaluation_result_viewer.html` directly in browser.
-2. Click **Select JSON Files** and choose one or multiple output files from `technical_evaluation/results/<mode>/` (for example `results/agentic/`).
+2. Click **Select JSON Files** and choose one or multiple output files from `technical_evaluation/results/<mode>/`, `technical_evaluation/results/<model>/`, or `technical_evaluation/results/<model>/<mode>/` (for example `results/agentic/` or `results/GPT/`).
 3. Click **Load Files**.
 4. Use filters (condition/criterion/status/source file) and click rows to inspect reasoning and involved steps.
 
@@ -381,7 +389,7 @@ Then open: `http://localhost:8765/evaluation_result_viewer.html`
 ## Notes
 - In `txt_requests` mode, `conditionID` is mapped to `backend/history_logs/<conditionID>.json`.
 - If there is no recognizable request in the txt file, the summary will record the error reason to help you structure the data later.
-- `run_technical_evaluation.ps1` writes outputs into mode subfolders under `technical_evaluation/results/<mode>/`.
+- `run_technical_evaluation.ps1` writes outputs into `technical_evaluation/results/<mode>/` when `-JudgeModels` is omitted, and into model folders such as `technical_evaluation/results/Deepseek/` or `technical_evaluation/results/GPT/` when `-JudgeModels` is provided.
 - The runner auto-loads env vars from these files (if present):
   - `technical_evaluation/.env`
   - `backend/.env`
@@ -390,3 +398,61 @@ Then open: `http://localhost:8765/evaluation_result_viewer.html`
 - In `dataset_json` mode, `-MaxConditionsPerRequest` / `--max-conditions-per-request` is effectively a no-op in normal usage.
 - In `dataset_json` mode, if `--criteria-file` is not provided, criteria are extracted per source JSON (`criteria1/criteria2/...` or `criteria` list); fallback is built-in `Task Completion`.
 - In `dataset_json` mode, source files are auto-converted to backend-compatible run format and written under `results/_normalized_dataset_json_<batch_id>/` for traceability.
+
+## Task-Group Ranking (LLM-as-a-Judge + Human Inter-Agreement)
+
+Use `technical_evaluation/task_group_ranking_eval.py` when you want to:
+- Group all dataset JSON files by the same task
+- Let LLM judge rank all conditions inside each task group using one `criteria2`
+- Let human annotators rank the same group
+- Compute inter-agreement between LLM ranking and human ranking
+
+### 1) Build task groups
+
+```powershell
+python .\technical_evaluation\task_group_ranking_eval.py group --dataset-dir .\technical_evaluation\dataset --output-file .\technical_evaluation\results\task_groups_latest.json
+```
+
+Optional: also materialize grouped copies into per-task subfolders.
+
+```powershell
+python .\technical_evaluation\task_group_ranking_eval.py group --dataset-dir .\technical_evaluation\dataset --materialize-dir .\technical_evaluation\results\dataset_grouped_by_task
+```
+
+### 2) Run LLM ranking within each task group (by criteria2)
+
+`criteria2` is empty in many source files, so pass a unified assertion via `--criteria2-text`.
+
+```powershell
+python .\technical_evaluation\task_group_ranking_eval.py llm-rank --dataset-dir .\technical_evaluation\dataset --criteria2-text "Whether the agent's actions and decisions consistently align with the persona's core value." --judge-model deepseek-chat --output-dir .\technical_evaluation\results
+```
+
+This generates a timestamped folder:
+- `llm_group_ranking.json`: per-group ranking output from judge
+- `human_ranking_template.json`: template for human annotation with same item set
+- `raw/*.json`: raw judge responses per task group
+
+### 3) Human ranking
+
+Fill `human_ranking_template.json` with either:
+- `ranking`: ordered list of file names (best to worst)
+- or `items[].human_rank`
+- or `items[].human_score`
+
+### 4) Compute inter-agreement
+
+```powershell
+python .\technical_evaluation\task_group_ranking_eval.py inter-agreement --llm-ranking-file .\technical_evaluation\results\task_group_ranking_<timestamp>\llm_group_ranking.json --human-ranking-file .\technical_evaluation\results\task_group_ranking_<timestamp>\human_ranking_template_filled.json --output-file .\technical_evaluation\results\task_group_ranking_<timestamp>\inter_agreement.json
+```
+
+Reported metrics:
+- Group-level Spearman rho
+- Group-level Kendall tau-b
+- Top-1 agreement rate
+- Overall means across comparable groups
+
+### One-command workflow
+
+```powershell
+python .\technical_evaluation\task_group_ranking_eval.py full --dataset-dir .\technical_evaluation\dataset --criteria2-text "Whether the agent's actions and decisions consistently align with the persona's core value." --judge-model deepseek-chat --human-ranking-file .\technical_evaluation\results\task_group_ranking_<timestamp>\human_ranking_template_filled.json
+```

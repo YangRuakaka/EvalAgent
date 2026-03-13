@@ -29,6 +29,9 @@ from .llm_factory import ChatLLMFactory
 logger = logging.getLogger(__name__)
 
 
+SHORT_TRACE_FAST_PATH_MAX_STEPS = 5
+
+
 class JudgeEvaluatorService:
     """Unified evaluator service for criterion-specific phase evaluation."""
 
@@ -40,11 +43,11 @@ class JudgeEvaluatorService:
         self._setup_templates()
 
     def _setup_templates(self) -> None:
+        self.criteria_interpretation_template = EvaluationPrompts.get_criteria_interpretation_prompt()
         self.phase_segmentation_template = EvaluationPrompts.get_phase_segmentation_prompt()
-        self.unified_phase_evaluation_template = EvaluationPrompts.get_unified_phase_evaluation_prompt()
-        self.phase_evidence_expansion_template = EvaluationPrompts.get_phase_evidence_expansion_prompt()
+        self.phase_evidence_extraction_template = EvaluationPrompts.get_phase_evidence_extraction_prompt()
         self.phase_overall_synthesis_template = EvaluationPrompts.get_phase_overall_synthesis_prompt()
-        self.step_assessment_synthesis_template = EvaluationPrompts.get_step_assessment_synthesis_prompt()
+        self.phase_step_verdict_synthesis_template = EvaluationPrompts.get_phase_step_verdict_synthesis_prompt()
 
     async def _invoke_chain_async(
         self,
@@ -152,46 +155,39 @@ class JudgeEvaluatorService:
         model_name: Optional[str] = None,
         llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> Dict[int, Dict[str, Any]]:
+        del task_name, criterion_description, personas, models
+
         if not evidence_by_step:
             return {}
 
         valid_steps = sorted({int(step_idx) for step_idx in evidence_by_step.keys()})
-        step_payload: List[Dict[str, Any]] = []
+        verified_evidence_payload: List[Dict[str, Any]] = []
         for step_idx in valid_steps:
             ev_list = evidence_by_step.get(step_idx, [])
-            serialized_evidence = []
             for ev in ev_list:
                 source_field = ev.source_field.value if hasattr(ev.source_field, "value") else str(ev.source_field)
                 verdict = ev.verdict.value if hasattr(ev.verdict, "value") else ev.verdict
-                serialized_evidence.append(
+                verified_evidence_payload.append(
                     {
+                        "step_index": step_idx,
                         "source_field": source_field,
                         "highlighted_text": ev.highlighted_text,
                         "reasoning": ev.reasoning or "",
                         "verdict": str(verdict or ""),
                     }
                 )
-            step_payload.append(
-                {
-                    "step_index": step_idx,
-                    "evidence": serialized_evidence,
-                }
-            )
 
         try:
             llm = self.llm_factory.get_langchain_llm(model_name)
-            chain = self.step_assessment_synthesis_template | llm
+            chain = self.phase_step_verdict_synthesis_template | llm
             invoke_dict = {
-                "task_name": task_name,
                 "criterion_name": criterion_name,
                 "criterion_assertion": criterion_assertion,
-                "criterion_description": criterion_description or "",
-                "personas": ", ".join(personas) if personas else "None",
-                "models": ", ".join(models) if models else "None",
-                "criterion_verdict": str(criterion_verdict or "unknown"),
-                "criterion_reasoning": str(criterion_reasoning or ""),
-                "phase_criterion_summary": str(phase_criterion_summary or ""),
-                "evidence_by_step_json": json.dumps(step_payload, ensure_ascii=False, indent=2),
+                "criterion_intent": str(criterion_reasoning or criterion_assertion or ""),
+                "phase_id": "criterion_step_synthesis",
+                "phase_summary": str(phase_criterion_summary or criterion_verdict or ""),
+                "verified_evidence_json": json.dumps(verified_evidence_payload, ensure_ascii=False, indent=2),
+                "phase_steps_context": "Grounded evidence snippets grouped by step for post-hoc step-level synthesis.",
             }
 
             response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
@@ -233,6 +229,39 @@ class JudgeEvaluatorService:
                 exc,
             )
             return {}
+
+    async def _interpret_criterion_intent_async(
+        self,
+        task_name: str,
+        criterion_name: str,
+        criterion_assertion: str,
+        personas: List[str],
+        model_name: Optional[str],
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
+    ) -> str:
+        try:
+            llm = self.llm_factory.get_langchain_llm(model_name)
+            chain = self.criteria_interpretation_template | llm
+            invoke_dict = {
+                "task_name": task_name,
+                "criterion_name": criterion_name,
+                "criterion_assertion": criterion_assertion,
+                "personas": ", ".join(personas) if personas else "None",
+            }
+
+            response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
+            response_text = response.content if hasattr(response, "content") else str(response)
+            response_data = self._extract_json_object(response_text) or {}
+            criterion_intent = str(response_data.get("criterion_intent", "") or "").strip()
+            return criterion_intent or criterion_assertion
+        except Exception as exc:
+            logger.warning(
+                "Criteria interpretation failed for criterion=%s model=%s error=%s",
+                criterion_name,
+                model_name,
+                exc,
+            )
+            return criterion_assertion
 
     def _collect_logprob_values(self, node: Any, sink: List[float]) -> None:
         if isinstance(node, dict):
@@ -648,6 +677,56 @@ class JudgeEvaluatorService:
 
         return "\n".join(context_parts)
 
+    async def _evaluate_short_trace_fast_path_async(
+        self,
+        criterion_name: str,
+        criterion_assertion: str,
+        criterion_intent: str,
+        task_name: str,
+        personas: List[str],
+        models: List[str],
+        all_steps: List[Dict[str, Any]],
+        model_name: Optional[str],
+        enable_evidence_expansion: bool = False,
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
+    ) -> EvaluationResult:
+        step_indices = list(range(len(all_steps)))
+        phase = {
+            "phase_id": "short_trace_full_run",
+            "semantic_label": "Short trace full-run evaluation",
+            "step_indices": step_indices,
+            "phase_summary": (
+                f"Short-trace fast path evaluating all {len(step_indices)} steps as one behavior chain."
+            ),
+            "relevant_to_evaluation": True,
+        }
+
+        result = await self._evaluate_phase_with_dimensions_async(
+            criterion_name=criterion_name,
+            criterion_assertion=criterion_assertion,
+            criterion_intent=criterion_intent,
+            persona_task_alignment="",
+            global_behavior_summary="",
+            task_name=task_name,
+            personas=personas,
+            models=models,
+            phase=phase,
+            all_steps=all_steps,
+            model_name=model_name,
+            enable_evidence_expansion=enable_evidence_expansion,
+            llm_semaphore=llm_semaphore,
+        )
+
+        return result.model_copy(
+            update={
+                "verdict": self._normalize_verdict(result.verdict),
+                "aggregated_step_summary": (
+                    f"Short-trace fast path evaluated {len(step_indices)} steps as a single behavior chain."
+                )[:500],
+                "used_granularity": Granularity.PHASE_LEVEL,
+            }
+        )
+
     async def _segment_phases_by_dimensions_async(
         self,
         criterion_name: str,
@@ -658,12 +737,13 @@ class JudgeEvaluatorService:
         model_name: Optional[str],
         llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> Dict[str, Any]:
+        del criterion_assertion
+
         llm = self.llm_factory.get_langchain_llm(model_name)
         chain = self.phase_segmentation_template | llm
         invoke_dict = {
             "task_name": task_name,
             "criterion_name": criterion_name,
-            "criterion_assertion": criterion_assertion,
             "criterion_intent": criterion_intent,
             "steps_text": self._format_steps_for_unified_segmentation(all_steps),
         }
@@ -715,6 +795,8 @@ class JudgeEvaluatorService:
         enable_evidence_expansion: bool = False,
         llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> EvaluationResult:
+        del persona_task_alignment, global_behavior_summary, enable_evidence_expansion
+
         phase_id = str(phase.get("phase_id", "phase_unknown"))
         phase_summary = str(phase.get("phase_summary", ""))
         step_indices = [i for i in phase.get("step_indices", []) if isinstance(i, int)]
@@ -728,78 +810,216 @@ class JudgeEvaluatorService:
                 used_granularity=Granularity.PHASE_LEVEL,
             )
 
+        phase_steps_context = self._build_phase_steps_context(all_steps, step_indices)
+
         llm = self.llm_factory.get_langchain_llm(model_name)
-        chain = self.unified_phase_evaluation_template | llm
-        invoke_dict = {
-            "task_name": task_name,
+        evidence_chain = self.phase_evidence_extraction_template | llm
+        evidence_invoke_dict = {
             "criterion_name": criterion_name,
             "criterion_assertion": criterion_assertion,
             "criterion_intent": criterion_intent,
-            "persona_task_alignment": persona_task_alignment,
-            "global_behavior_summary": global_behavior_summary,
             "phase_id": phase_id,
             "phase_summary": phase_summary,
-            "phase_steps_context": self._build_phase_steps_context(all_steps, step_indices),
-            "personas": ", ".join(personas) if personas else "None",
-            "models": ", ".join(models) if models else "None",
+            "phase_steps_context": phase_steps_context,
         }
 
-        response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
-        response_text = response.content if hasattr(response, "content") else str(response)
-        token_prediction_confidence = self._extract_token_prediction_confidence(response)
-
-        phase_agg = AggregatedSteps(
-            granularity=Granularity.PHASE_LEVEL,
-            aggregated_content=f"{phase_id}: {phase_summary}",
-            step_mapping={phase_id: step_indices},
-            summary_metadata={"phase_id": phase_id, "step_count": len(step_indices)},
+        evidence_response = await self._invoke_chain_async(evidence_chain, evidence_invoke_dict, llm_semaphore)
+        evidence_response_text = (
+            evidence_response.content if hasattr(evidence_response, "content") else str(evidence_response)
         )
-        result = self._parse_evaluation_response(
-            response_text=response_text,
-            criterion_name=criterion_name,
-            aggregated_steps=phase_agg,
+        evidence_token_prediction_confidence = self._extract_token_prediction_confidence(evidence_response)
+        evidence_data = self._extract_json_object(evidence_response_text) or {}
+        parsed_evidence = self._parse_highlighted_evidence_items(evidence_data.get("highlighted_evidence", []))
+        grounded_evidence = self._filter_grounded_evidence(
+            evidence_list=parsed_evidence,
             all_steps=all_steps,
+            criterion_name=criterion_name,
         )
-        if enable_evidence_expansion:
-            result.highlighted_evidence = await self._expand_phase_evidence_if_needed_async(
-                base_evidence=result.highlighted_evidence or [],
-                criterion_name=criterion_name,
-                criterion_assertion=criterion_assertion,
-                task_name=task_name,
-                phase_id=phase_id,
-                phase_summary=phase_summary,
-                step_indices=step_indices,
-                all_steps=all_steps,
-                model_name=model_name,
-                llm_semaphore=llm_semaphore,
+        grounded_evidence = self._curate_story_evidence(
+            self._keep_high_signal_evidence(grounded_evidence),
+            step_indices,
+        )
+
+        evidence_by_step: Dict[int, List[EvidenceCitation]] = {}
+        for evidence in grounded_evidence:
+            step_idx = int(evidence.step_index)
+            evidence_by_step.setdefault(step_idx, []).append(evidence)
+
+        verified_evidence_payload: List[Dict[str, Any]] = []
+        for step_idx, ev_list in sorted(evidence_by_step.items(), key=lambda item: item[0]):
+            for evidence in ev_list:
+                source_field = (
+                    evidence.source_field.value
+                    if hasattr(evidence.source_field, "value")
+                    else str(evidence.source_field)
+                )
+                verified_evidence_payload.append(
+                    {
+                        "step_index": step_idx,
+                        "source_field": source_field,
+                        "highlighted_text": evidence.highlighted_text,
+                        "reasoning": evidence.reasoning or "",
+                    }
+                )
+
+        step_assessments: List[Dict[str, Any]] = []
+        step_token_prediction_confidence: Optional[float] = None
+        if verified_evidence_payload:
+            step_verdict_chain = self.phase_step_verdict_synthesis_template | llm
+            step_verdict_invoke_dict = {
+                "criterion_name": criterion_name,
+                "criterion_assertion": criterion_assertion,
+                "criterion_intent": criterion_intent,
+                "phase_id": phase_id,
+                "phase_summary": phase_summary,
+                "verified_evidence_json": json.dumps(verified_evidence_payload, ensure_ascii=False, indent=2),
+                "phase_steps_context": phase_steps_context,
+            }
+
+            step_response = await self._invoke_chain_async(
+                step_verdict_chain,
+                step_verdict_invoke_dict,
+                llm_semaphore,
             )
-        dimension_assessments: List[Dict[str, Any]] = []
-        if isinstance(result.model_extra, dict):
-            raw_dimensions = result.model_extra.get("dimension_assessments", [])
-            if isinstance(raw_dimensions, list):
-                dimension_assessments = [item for item in raw_dimensions if isinstance(item, dict)]
+            step_response_text = step_response.content if hasattr(step_response, "content") else str(step_response)
+            step_token_prediction_confidence = self._extract_token_prediction_confidence(step_response)
+            step_response_data = self._extract_json_object(step_response_text) or {}
+            raw_step_assessments = step_response_data.get("step_assessments", [])
+            valid_step_set = set(step_indices)
+            if isinstance(raw_step_assessments, list):
+                for item in raw_step_assessments:
+                    if not isinstance(item, dict):
+                        continue
+
+                    raw_step = item.get("step_index")
+                    if isinstance(raw_step, int):
+                        step_index = raw_step
+                    elif isinstance(raw_step, str) and raw_step.isdigit():
+                        step_index = int(raw_step)
+                    else:
+                        continue
+
+                    if step_index not in valid_step_set:
+                        continue
+
+                    step_assessments.append(
+                        {
+                            "step_index": step_index,
+                            "verdict": self._normalize_step_verdict(item.get("verdict")),
+                            "reasoning": str(item.get("reasoning", "") or "").strip(),
+                            "confidence_score": self._clip_confidence(item.get("confidence_score", 0.0)),
+                        }
+                    )
+
+        if not step_assessments and evidence_by_step:
+            for step_idx in sorted(evidence_by_step.keys()):
+                step_assessments.append(
+                    {
+                        "step_index": step_idx,
+                        "verdict": "unknown",
+                        "reasoning": "Evidence extracted but no valid step-level verdict was returned.",
+                        "confidence_score": 0.0,
+                    }
+                )
+
+        pass_count = sum(1 for item in step_assessments if item.get("verdict") == "pass")
+        fail_count = sum(1 for item in step_assessments if item.get("verdict") == "fail")
+        partial_count = sum(1 for item in step_assessments if item.get("verdict") == "partial")
+        unknown_count = sum(1 for item in step_assessments if item.get("verdict") == "unknown")
+
+        if fail_count > 0:
+            phase_verdict = "FAIL"
+        elif pass_count > 0 and partial_count == 0 and unknown_count == 0:
+            phase_verdict = "PASS"
+        elif pass_count == 0 and fail_count == 0 and partial_count == 0 and unknown_count > 0:
+            phase_verdict = "UNABLE_TO_EVALUATE"
+        else:
+            phase_verdict = "PARTIAL"
+
+        if step_assessments:
+            sorted_assessments = sorted(step_assessments, key=lambda item: item["step_index"])
+            reasoning_lines = [
+                (
+                    f"Step {item['step_index']}: {item['verdict']}"
+                    + (f" ({item['reasoning']})" if item.get("reasoning") else "")
+                )
+                for item in sorted_assessments[:6]
+            ]
+            phase_reasoning = " ".join(reasoning_lines)
+        elif grounded_evidence:
+            phase_reasoning = "Evidence was extracted but did not yield stable step verdicts."
+        else:
+            phase_reasoning = "No grounded high-signal evidence was extracted for this phase."
+
+        if step_assessments:
+            raw_phase_confidence = sum(
+                float(item.get("confidence_score", 0.0)) for item in step_assessments
+            ) / len(step_assessments)
+        elif grounded_evidence:
+            raw_phase_confidence = 0.35
+        else:
+            raw_phase_confidence = 0.0
+
+        relevant_steps = sorted(
+            {
+                int(item.get("step_index"))
+                for item in step_assessments
+                if isinstance(item.get("step_index"), int)
+            }
+        )
+        if not relevant_steps:
+            relevant_steps = sorted(evidence_by_step.keys())
+
+        dimension_assessments = [
+            {
+                "status": item.get("verdict", "unknown"),
+                "reasoning": item.get("reasoning", ""),
+            }
+            for item in step_assessments
+        ]
 
         calibrated_confidence = self._calibrate_phase_confidence(
-            raw_confidence=float(result.confidence_score or 0.0),
-            verdict=result.verdict,
-            evidence_list=result.highlighted_evidence or [],
-            relevant_steps=[s for s in (result.relevant_steps or []) if isinstance(s, int)],
+            raw_confidence=raw_phase_confidence,
+            verdict=phase_verdict,
+            evidence_list=grounded_evidence,
+            relevant_steps=relevant_steps,
             phase_step_indices=step_indices,
             dimension_assessments=dimension_assessments,
-            reasoning=result.reasoning,
-            token_prediction_confidence=token_prediction_confidence,
+            reasoning=phase_reasoning,
+            token_prediction_confidence=(
+                step_token_prediction_confidence
+                if step_token_prediction_confidence is not None
+                else evidence_token_prediction_confidence
+            ),
         )
 
-        update_payload: Dict[str, Any] = {
-            "confidence_score": calibrated_confidence,
-            "highlighted_evidence": self._curate_story_evidence(result.highlighted_evidence or [], step_indices),
-        }
-        if token_prediction_confidence is not None:
-            update_payload["llm_token_prediction_confidence"] = token_prediction_confidence
+        supporting_evidence = "\n".join(
+            [
+                f"Step {int(ev.step_index)} [{ev.source_field.value if hasattr(ev.source_field, 'value') else ev.source_field}]: {ev.highlighted_text}"
+                for ev in grounded_evidence[:8]
+            ]
+        )
+        aggregated_summary = (
+            f"{phase_id}: pass={pass_count}, fail={fail_count}, partial={partial_count}, unknown={unknown_count}"
+        )
 
-        result = result.model_copy(update=update_payload)
-        result.used_granularity = Granularity.PHASE_LEVEL
-        return result
+        return EvaluationResult(
+            criterion_name=criterion_name,
+            verdict=self._normalize_verdict(phase_verdict),
+            reasoning=phase_reasoning,
+            confidence_score=calibrated_confidence,
+            relevant_steps=relevant_steps,
+            aggregated_step_summary=aggregated_summary[:500],
+            used_granularity=Granularity.PHASE_LEVEL,
+            supporting_evidence=supporting_evidence,
+            highlighted_evidence=grounded_evidence,
+            dimension_assessments=dimension_assessments,
+            llm_token_prediction_confidence=(
+                step_token_prediction_confidence
+                if step_token_prediction_confidence is not None
+                else evidence_token_prediction_confidence
+            ),
+        )
 
     async def evaluate_criterion_unified(
         self,
@@ -832,9 +1052,48 @@ class JudgeEvaluatorService:
                 model_name,
                 len(all_steps),
             )
-            criterion_intent = criterion_assertion
+            criterion_intent = await self._interpret_criterion_intent_async(
+                task_name=task_name,
+                criterion_name=criterion_name,
+                criterion_assertion=criterion_assertion,
+                personas=personas,
+                model_name=model_name,
+                llm_semaphore=llm_semaphore,
+            )
             persona_task_alignment = ""
             global_behavior_summary = ""
+            enable_evidence_expansion = bool(
+                getattr(settings, "JUDGE_ENABLE_PHASE_EVIDENCE_EXPANSION", False)
+            )
+
+            if len(all_steps) <= SHORT_TRACE_FAST_PATH_MAX_STEPS:
+                logger.info(
+                    "[judge][fast-path] task=%s criterion=%s total_steps=%d threshold=%d",
+                    task_name,
+                    criterion_name,
+                    len(all_steps),
+                    SHORT_TRACE_FAST_PATH_MAX_STEPS,
+                )
+                final = await self._evaluate_short_trace_fast_path_async(
+                    criterion_name=criterion_name,
+                    criterion_assertion=criterion_assertion,
+                    criterion_intent=criterion_intent,
+                    task_name=task_name,
+                    personas=personas,
+                    models=models,
+                    all_steps=all_steps,
+                    model_name=model_name,
+                    enable_evidence_expansion=enable_evidence_expansion,
+                    llm_semaphore=llm_semaphore,
+                )
+                logger.info(
+                    "[judge][criterion-end] task=%s criterion=%s final_verdict=%s final_confidence=%.2f",
+                    task_name,
+                    criterion_name,
+                    final.verdict,
+                    float(final.confidence_score or 0.0),
+                )
+                return final
 
             segmentation = await self._segment_phases_by_dimensions_async(
                 criterion_name=criterion_name,
@@ -868,10 +1127,6 @@ class JudgeEvaluatorService:
                 "[judge][phase-eval] criterion=%s step_max_concurrency=%d",
                 criterion_name,
                 max(1, configured_step_limit),
-            )
-
-            enable_evidence_expansion = bool(
-                getattr(settings, "JUDGE_ENABLE_PHASE_EVIDENCE_EXPANSION", False)
             )
 
             async def _run(phase: Dict[str, Any]) -> EvaluationResult:
@@ -937,7 +1192,7 @@ class JudgeEvaluatorService:
                 global_behavior_summary=global_behavior_summary,
                 phase_results=phase_results,
                 target_phases=target_phases,
-                model_name=model_name or "gpt-4o-mini",
+                model_name=model_name,
                 all_steps=all_steps,
                 llm_semaphore=llm_semaphore,
             )
@@ -1235,71 +1490,23 @@ class JudgeEvaluatorService:
         model_name: Optional[str],
         llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> List[EvidenceCitation]:
+        del (
+            criterion_name,
+            criterion_assertion,
+            task_name,
+            phase_id,
+            phase_summary,
+            all_steps,
+            model_name,
+            llm_semaphore,
+        )
+
         current_evidence = list(base_evidence or [])
         curated_current = self._curate_story_evidence(
             self._keep_high_signal_evidence(current_evidence),
             step_indices,
         )
-
-        if curated_current and self._is_evidence_coverage_sufficient(curated_current, step_indices):
-            return curated_current
-        if not all_steps or not step_indices:
-            return curated_current
-
-        try:
-            llm = self.llm_factory.get_langchain_llm(model_name)
-            chain = self.phase_evidence_expansion_template | llm
-
-            existing_evidence_payload: List[Dict[str, Any]] = []
-            for evidence in current_evidence:
-                payload = evidence.model_dump()
-                source_field = payload.get("source_field")
-                if hasattr(source_field, "value"):
-                    payload["source_field"] = source_field.value
-                existing_evidence_payload.append(payload)
-
-            invoke_dict = {
-                "task_name": task_name,
-                "criterion_name": criterion_name,
-                "criterion_assertion": criterion_assertion,
-                "phase_id": phase_id,
-                "phase_summary": phase_summary,
-                "phase_steps_context": self._build_phase_steps_context(all_steps, step_indices),
-                "existing_evidence_json": json.dumps(existing_evidence_payload, ensure_ascii=False, indent=2),
-                "coverage_lenses": json.dumps(
-                    self._build_evidence_coverage_lenses(
-                        criterion_name=criterion_name,
-                        criterion_assertion=criterion_assertion,
-                        phase_summary=phase_summary,
-                        existing_evidence=curated_current,
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-            }
-
-            response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
-            response_text = response.content if hasattr(response, "content") else str(response)
-            response_data = self._extract_json_object(response_text) or {}
-            additional_items = self._parse_highlighted_evidence_items(
-                response_data.get("additional_highlighted_evidence", [])
-            )
-            if not additional_items:
-                return curated_current
-
-            merged = current_evidence + additional_items
-            grounded = self._filter_grounded_evidence(
-                evidence_list=merged,
-                all_steps=all_steps,
-                criterion_name=criterion_name,
-            )
-            return self._curate_story_evidence(
-                self._keep_high_signal_evidence(grounded),
-                step_indices,
-            )
-        except Exception as exc:
-            logger.debug("Phase evidence expansion failed for %s: %s", phase_id, exc)
-            return curated_current
+        return curated_current
 
     def _parse_evaluation_response(
         self,
@@ -1390,10 +1597,12 @@ class JudgeEvaluatorService:
         global_behavior_summary: str,
         phase_results: List[EvaluationResult],
         target_phases: List[Dict[str, Any]],
-        model_name: str,
+        model_name: Optional[str],
         all_steps: List[Dict[str, Any]],
         llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> EvaluationResult:
+        del criterion_description, models, persona_task_alignment, global_behavior_summary
+
         if not phase_results:
             return EvaluationResult(
                 criterion_name=criterion_name,
@@ -1434,6 +1643,20 @@ class JudgeEvaluatorService:
                 criterion_name=criterion_name,
             )
 
+        aggregated_evidence_payload: List[Dict[str, Any]] = []
+        for evidence in aggregated_evidence:
+            source_field = evidence.source_field.value if hasattr(evidence.source_field, "value") else str(evidence.source_field)
+            verdict = evidence.verdict.value if hasattr(evidence.verdict, "value") else evidence.verdict
+            aggregated_evidence_payload.append(
+                {
+                    "step_index": int(evidence.step_index),
+                    "source_field": source_field,
+                    "highlighted_text": evidence.highlighted_text,
+                    "reasoning": evidence.reasoning or "",
+                    "verdict": str(verdict or ""),
+                }
+            )
+
         try:
             llm = self.llm_factory.get_langchain_llm(model_name)
             chain = self.phase_overall_synthesis_template | llm
@@ -1441,13 +1664,10 @@ class JudgeEvaluatorService:
                 "task_name": task_name,
                 "criterion_name": criterion_name,
                 "criterion_assertion": criterion_assertion,
-                "criterion_description": criterion_description or "",
                 "personas": ", ".join(personas) if personas else "None",
-                "models": ", ".join(models) if models else "None",
                 "criterion_intent": criterion_intent,
-                "persona_task_alignment": persona_task_alignment,
-                "global_behavior_summary": global_behavior_summary,
                 "phase_evaluations_summary": phase_evaluations_summary,
+                "aggregated_evidence_json": json.dumps(aggregated_evidence_payload, ensure_ascii=False, indent=2),
             }
             response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
             response_text = response.content if hasattr(response, "content") else str(response)

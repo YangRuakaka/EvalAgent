@@ -1,20 +1,66 @@
 """
-Prompt templates for unified judge evaluation service.
+Prompt templates for the 5-step LLM-as-judge evaluation pipeline.
+
+Pipeline (5 LLM calls, in order):
+  LLM 1 — get_criteria_interpretation_prompt   : interpret criterion semantics
+  LLM 2 — get_phase_segmentation_prompt        : segment trace into behavior phases
+  LLM 3 — get_phase_evidence_extraction_prompt : extract evidence per phase (no verdict)
+  [Program] substring verification             : filter evidence to exact matches
+  LLM 4 — get_phase_step_verdict_synthesis_prompt : generate step verdicts per phase
+  LLM 5 — get_phase_overall_synthesis_prompt   : produce final criterion-level PASS/FAIL
 """
 
 from langchain_core.prompts import PromptTemplate
 
 
 class EvaluationPrompts:
-    """Container for unified-evaluation prompt templates."""
+    """Container for judge-pipeline prompt templates."""
 
+    # ------------------------------------------------------------------
+    # LLM 1 — Criteria Interpretation
+    # Input:  task_name, criterion_name, criterion_assertion, personas
+    # Output: criterion_intent
+    # ------------------------------------------------------------------
+    @staticmethod
+    def get_criteria_interpretation_prompt() -> PromptTemplate:
+        return PromptTemplate(
+            input_variables=[
+                "task_name",
+                "criterion_name",
+                "criterion_assertion",
+                "personas",
+            ],
+            template="""You are an expert AI evaluation designer.
+
+Task: {task_name}
+Criterion Name: {criterion_name}
+Criterion Assertion: {criterion_assertion}
+Personas/Values: {personas}
+
+Your job:
+1) Produce one detailed criterion_intent that integrates: the criterion assertion itself, the current task context, and the persona/value priorities.
+2) Clarify what concrete agent behaviors and decision patterns are in-scope for this criterion under this task/persona setting.
+3) Clarify what is out-of-scope to avoid drifting into unrelated quality dimensions.
+4) Make criterion_intent actionable for downstream segmentation/evidence/verdict synthesis.
+
+Output ONLY one JSON object:
+{{
+  "criterion_intent": "..."
+}}
+""",
+        )
+
+    # ------------------------------------------------------------------
+    # LLM 2 — Phase Segmentation
+    # Input:  task_name, criterion_name, criterion_intent, steps_text
+    # Output: phases, relevant_phase_ids, segmentation_reasoning
+    # ------------------------------------------------------------------
     @staticmethod
     def get_phase_segmentation_prompt() -> PromptTemplate:
         return PromptTemplate(
             input_variables=[
                 "task_name",
                 "criterion_name",
-                "criterion_assertion",
                 "criterion_intent",
                 "steps_text",
             ],
@@ -22,7 +68,6 @@ class EvaluationPrompts:
 
 Task: {task_name}
 Criterion Name: {criterion_name}
-Criterion Assertion: {criterion_assertion}
 Criterion Intent: {criterion_intent}
 
 All Agent Steps:
@@ -33,8 +78,7 @@ Your job:
 2) Ensure step indices are accurate and non-overlapping across phases.
 3) Mark which phases are evaluation-relevant under this criterion.
 4) Keep steps that form one coherent behavior chain in the same phase when possible.
-5) Prioritize phases where the agent makes decisions/tradeoffs/recovery actions; pure external waiting is only relevant when judging the agent's response strategy.
-6) If criterion-relevant signals are sparse, still output a reasonable phase partition and explain relevance conservatively.
+5) Prioritize phases where the agent makes decisions/tradeoffs/recovery actions;
 
 Output ONLY one JSON object in this exact schema:
 {{
@@ -53,283 +97,116 @@ Output ONLY one JSON object in this exact schema:
 """,
         )
 
+    # ------------------------------------------------------------------
+    # LLM 3 — Phase Evidence Extraction  (evidence only, no verdict)
+    # Input:  criterion_name, criterion_assertion, criterion_intent,
+    #         phase_id, phase_summary, phase_steps_context
+    # Output: highlighted_evidence
+    # ------------------------------------------------------------------
     @staticmethod
-    def get_unified_phase_evaluation_prompt() -> PromptTemplate:
+    def get_phase_evidence_extraction_prompt() -> PromptTemplate:
         return PromptTemplate(
             input_variables=[
-                "task_name",
                 "criterion_name",
                 "criterion_assertion",
                 "criterion_intent",
-                "persona_task_alignment",
-                "global_behavior_summary",
                 "phase_id",
                 "phase_summary",
                 "phase_steps_context",
-                "personas",
-                "models",
             ],
-            template="""You are an impartial expert judge for AI agent behavior.
+            template="""You are an expert evidence miner for AI-agent execution traces.
 
-Task: {task_name}
 Criterion Name: {criterion_name}
 Criterion Assertion: {criterion_assertion}
 Criterion Intent: {criterion_intent}
-Persona-Task Alignment Notes: {persona_task_alignment}
-
-Global Behavior Summary:
-{global_behavior_summary}
-
-Personas/Values: {personas}
-Models Used: {models}
-
-Current Phase: {phase_id}
+Phase: {phase_id}
 Phase Summary: {phase_summary}
+
 Phase Steps (raw context):
 {phase_steps_context}
 
-Evaluate this phase against the criterion.
+Your job (evidence extraction ONLY — no verdict):
+1) Extract short, exact-substring snippets from the step fields that are directly relevant to this criterion.
+2) Cover the behavior storyline: intent setup → action decisions → outcome signals.
+3) Prefer decisive moments: tradeoff choices, constraint handling, corrections, outcome verification.
+4) Include both positive and negative/uncertain signals when present.
+5) Avoid generic or procedural lines that do not distinguish this criterion from others.
+6) Keep snippets short and atomic (roughly 8–220 chars each); no ellipses.
+7) If no high-signal evidence exists for a step or field, skip it rather than forcing low-value quotes.
 
-Epistemic context (must follow):
-- You are judging another agent's internal trace. Every field is self-reported text and may be incomplete, biased, or wrong.
-- Never equate confident wording with factual completion.
-- Use high-level strategy consistency across the whole phase, not isolated statements.
+Epistemic rules:
+- All fields are self-reported by the agent; treat as claims/signals, not verified facts.
+- next_goal/thinking_process/memory/evaluation can support interpretation but do not prove completion alone.
+- Prefer snippets that connect behavior chain transitions over self-congratulatory statements.
 
-Step field semantics (must use exactly this interpretation):
-- evaluation: reflection on the PREVIOUS action's result; this is post-action self-evaluation, not independent verification.
-- memory: short-term memory summary written after the previous action; may omit or distort details.
-- thinking_process: self-analysis after the previous action; represents reasoning, not confirmed facts.
-- next_goal: intended next objective under current state; intention only, not completion.
-- action: concrete next operation/command sequence the agent decides to perform; indicates what it tries to do.
+Step field semantics:
+- evaluation: reflection on the PREVIOUS action's result (post-action, not independent verification)
+- memory: short-term memory after the previous action (may omit or distort details)
+- thinking_process: self-analysis after the previous action (reasoning, not confirmed facts)
+- next_goal: intended next objective under current state (intention only, not completion)
+- action: concrete operation/command the agent decides to execute
 
-Behavior attribution policy (must follow):
-- Attribute verdicts to agent-controllable behavior first (strategy, prioritization, recovery choices, constraint handling).
-- Treat external blockers (website downtime, slow page loads, API/network failures, transient tool errors) as context, not automatic agent failure.
-- Penalize the agent for external issues only when its response strategy is poor (e.g., no diagnosis, no fallback, wasteful repetition, ignoring constraints).
-- For efficiency/time criteria, evaluate whether the agent actively pursued faster execution (streamlining, batching, early stopping, pragmatic fallback), even when external latency exists.
-- Explicitly distinguish: external-delay-induced stall with good strategy vs self-caused inefficiency.
-
-Critical judging policy:
-- Judge the phase as a behavior chain across multiple steps, not as isolated quotes.
-- Synthesize intent, action, and outcome signals across the phase before deciding verdict.
-- Explicitly separate: (a) claimed success, (b) attempted action, (c) observed result/state update.
-- Do not treat next_goal/thinking/memory/evaluation alone as proof that a task was completed.
-- Reserve strong positive evidence for chains with observable follow-through (plan -> action -> result check -> consistent memory/update).
-- Do NOT give PASS from a single positive snippet if surrounding steps weaken, contradict, or fail to realize it.
-- If evidence is incomplete/ambiguous, prefer PARTIAL or UNABLE_TO_EVALUATE over optimistic PASS.
-- When positive and negative signals coexist, weigh explicit failures, ignored constraints, and harmful tradeoffs heavily.
-- Reserve PASS for cases with coherent, sustained support across key steps.
-
-Rules for evidence:
-- highlighted_text MUST be exact substring from raw step field text
+Hard constraints:
+- highlighted_text MUST be an exact substring of the raw step field text
 - Do not use ellipses
 - source_field must be one of: evaluation|memory|thinking_process|next_goal|action
-- Only include high-signal evidence that is materially relevant to this criterion.
-- Prefer evidence that changes or strongly supports the verdict (decisive actions, key tradeoffs, explicit constraints, failures).
-- Avoid generic or procedural lines that do not help judge this specific criterion.
-- Evidence may come from one or multiple steps; prioritize quality over quantity.
-- When criterion signal is distributed, combine snippets across related steps to support one integrated judgment.
-- Avoid overly long quotes: prefer short, atomic snippets (roughly 8-220 chars each).
-- Include both positive and negative/uncertain evidence when relevant to final verdict.
-- If the phase has limited criterion-relevant material, return a small concise set and explain why.
-- relevant_steps must be a subset of step_index values that appear in highlighted_evidence.
-- Never include a step in relevant_steps unless that same step has at least one highlighted_evidence item.
-- If no valid highlighted_evidence exists, return relevant_steps as an empty list.
-- In reasoning, explicitly explain cross-step synthesis and any contradictions.
-- If the phase contains only self-asserted completion without reliable behavioral support, default to PARTIAL or FAIL (depending on criterion strictness).
 
 Output ONLY one JSON object:
 {{
-  "verdict": "PASS|FAIL|PARTIAL|UNABLE_TO_EVALUATE",
-  "reasoning": "...",
-  "confidence_score": 0.0,
-  "supporting_evidence": "...",
-  "relevant_steps": [0, 1],
   "highlighted_evidence": [
     {{
       "step_index": 0,
       "source_field": "thinking_process",
       "highlighted_text": "exact text",
-      "reasoning": "...",
-      "verdict": "pass"
-    }},
-    {{
-      "step_index": 1,
-      "source_field": "evaluation",
-      "highlighted_text": "exact text",
-      "reasoning": "...",
-      "verdict": "partial"
+      "reasoning": "..."
     }}
   ]
 }}
 """,
         )
 
+    # ------------------------------------------------------------------
+    # LLM 4 — Phase Step Verdict Synthesis
+    # Input:  criterion_name, criterion_assertion, criterion_intent,
+    #         phase_id, phase_summary,
+    #         verified_evidence_json, phase_steps_context
+    # Output: step_assessments [{step_index, verdict, reasoning, confidence_score}]
+    # ------------------------------------------------------------------
     @staticmethod
-    def get_phase_evidence_expansion_prompt() -> PromptTemplate:
+    def get_phase_step_verdict_synthesis_prompt() -> PromptTemplate:
         return PromptTemplate(
             input_variables=[
-                "task_name",
                 "criterion_name",
                 "criterion_assertion",
+                "criterion_intent",
                 "phase_id",
                 "phase_summary",
+                "verified_evidence_json",
                 "phase_steps_context",
-                "existing_evidence_json",
-          "coverage_lenses",
             ],
-            template="""You are an expert evidence miner for AI-agent execution traces.
+            template="""You are an expert evaluator synthesizing step-level judgments for an AI agent.
 
-Task: {task_name}
 Criterion Name: {criterion_name}
 Criterion Assertion: {criterion_assertion}
+Criterion Intent: {criterion_intent}
 Phase: {phase_id}
 Phase Summary: {phase_summary}
 
-Current extracted evidence (may be insufficient):
-{existing_evidence_json}
+Verified evidence for this phase (exact substrings confirmed present in raw step fields):
+{verified_evidence_json}
 
-Coverage lenses to complete a human-readable evidence storyline:
-{coverage_lenses}
-
-Phase Steps (raw context):
+Phase Steps (raw context for cross-reference):
 {phase_steps_context}
 
 Your job:
-1) Complete the missing links of the behavior storyline instead of repeating existing evidence.
-2) Prefer decisive moments: intent shift, tradeoff choice, risk handling, correction, and outcome confirmation.
-3) Use coverage_lenses to improve complementarity across steps/fields (not just same type snippets).
-4) Skip weak, generic, repetitive, or low-information snippets.
-5) Keep quotes short and atomic; each quote must be exact substring from raw text.
-6) If no meaningful complementary evidence exists, return an empty list and explain the gap in coverage_note.
+1) For EACH step_index that appears in verified_evidence_json, generate one step-level verdict and concise reasoning.
+2) Base the verdict on BOTH the local evidence and the phase-level behavior context (phase_summary and criterion_intent).
+3) Do not copy a single evidence item's reasoning verbatim as the full step reasoning; synthesize across items when multiple exist.
+4) Reconcile conflicts: if evidence for a step is mixed or contradictory, prefer partial.
+5) Do not invent new step indices; only output steps present in verified_evidence_json.
+6) Weigh explicit failures, ignored constraints, and harmful tradeoffs heavily against positive self-reported snippets.
 
-Epistemic policy:
-- All fields are self-reported by another agent; treat them as claims/signals, not guaranteed facts.
-- Prioritize snippets that connect behavior chain transitions (intent -> action -> observed consequence) over self-congratulatory statements.
-- next_goal/thinking_process/memory/evaluation can support interpretation, but should not by themselves prove completion.
-- Prefer evidence that tests or verifies outcomes after actions (state checks, contradiction handling, correction attempts).
-
-Hard constraints:
-- highlighted_text MUST be exact substring from raw step field text
-- Do not use ellipses
-- source_field must be one of: evaluation|memory|thinking_process|next_goal|action
-
-Output ONLY one JSON object:
-{{
-  "additional_highlighted_evidence": [
-    {{
-      "step_index": 0,
-      "source_field": "thinking_process",
-      "highlighted_text": "exact text",
-      "reasoning": "...",
-      "verdict": "pass"
-    }}
-  ],
-  "coverage_note": "..."
-}}
-""",
-        )
-
-    @staticmethod
-    def get_phase_overall_synthesis_prompt() -> PromptTemplate:
-        return PromptTemplate(
-            input_variables=[
-                "task_name",
-                "criterion_name",
-                "criterion_assertion",
-                "criterion_description",
-                "personas",
-                "models",
-                "criterion_intent",
-                "persona_task_alignment",
-                "global_behavior_summary",
-                "phase_evaluations_summary",
-            ],
-            template="""You are an expert evaluator producing a final criterion-level judgment.
-
-Task: {task_name}
-Criterion Name: {criterion_name}
-Criterion Assertion: {criterion_assertion}
-Criterion Description: {criterion_description}
-Personas/Values: {personas}
-Models Used: {models}
-
-Criterion Intent: {criterion_intent}
-Persona-Task Alignment Notes: {persona_task_alignment}
-
-Global Behavior Summary:
-{global_behavior_summary}
-
-Phase-by-phase Evaluation Results:
-{phase_evaluations_summary}
-
-Your job:
-1) Integrate all phase-level findings into one criterion-level verdict.
-2) Preserve nuance across phases (e.g., strong positives with critical failures).
-3) Output final confidence and concise aggregation summary.
-4) Prefer strict evidence-weighted synthesis over averaging by count.
-5) Decide based on the criteria rather than overall behavior quality.
-6) Final verdict MUST be binary at criterion level: PASS or FAIL.
-7) If mixed/partial/insufficient signals exist, resolve conservatively to FAIL and explain why.
-8) Do not promote unverified self-reports to facts; require cross-step behavioral support for positive conclusions.
-9) Separate external-environment constraints from agent strategy quality; external delays/failures alone should not be treated as criterion failure unless agent response behavior is inadequate.
-
-Output ONLY one JSON object:
-{{
-  "verdict": "PASS|FAIL",
-  "reasoning": "...",
-  "confidence_score": 0.0,
-  "supporting_evidence": "...",
-  "aggregation_summary": "..."
-}}
-""",
-        )
-
-    @staticmethod
-    def get_step_assessment_synthesis_prompt() -> PromptTemplate:
-        return PromptTemplate(
-            input_variables=[
-                "task_name",
-                "criterion_name",
-                "criterion_assertion",
-                "criterion_description",
-                "personas",
-                "models",
-                "criterion_verdict",
-                "criterion_reasoning",
-                "phase_criterion_summary",
-                "evidence_by_step_json",
-            ],
-            template="""You are an expert evaluator synthesizing step-level judgments for an AI agent run.
-
-Task: {task_name}
-Criterion Name: {criterion_name}
-Criterion Assertion: {criterion_assertion}
-Criterion Description: {criterion_description}
-Personas/Values: {personas}
-Models Used: {models}
-
-Criterion-level context:
-- criterion_verdict: {criterion_verdict}
-- criterion_reasoning: {criterion_reasoning}
-- phase_criterion_summary: {phase_criterion_summary}
-
-Evidence grouped by step:
-{evidence_by_step_json}
-
-Your job:
-1) For EACH provided step_index, generate one step-level verdict and concise reasoning.
-2) Verdict must be based on BOTH local evidence and criterion/phase context above.
-3) Do not copy a single evidence item's reasoning verbatim as the full step reasoning.
-4) Reconcile conflicts: if evidence is mixed/contradictory, prefer partial.
-5) Do not invent new step indices.
-6) Do not output any step that is not present in evidence_by_step_json.
-
-Verdict space:
-- pass
-- fail
-- partial
-- unknown
+Verdict space: pass | fail | partial | unknown
 
 Output ONLY one JSON object:
 {{
@@ -341,6 +218,62 @@ Output ONLY one JSON object:
       "confidence_score": 0.0
     }}
   ]
+}}
+""",
+        )
+
+    # ------------------------------------------------------------------
+    # LLM 5 — Overall Assessment (criterion-level PASS/FAIL)
+    # Input:  task_name, criterion_name, criterion_assertion,
+    #         personas, criterion_intent,
+    #         phase_evaluations_summary, aggregated_evidence_json
+    # Output: verdict, reasoning, confidence_score,
+    #         supporting_evidence, aggregation_summary
+    # ------------------------------------------------------------------
+    @staticmethod
+    def get_phase_overall_synthesis_prompt() -> PromptTemplate:
+        return PromptTemplate(
+            input_variables=[
+                "task_name",
+                "criterion_name",
+                "criterion_assertion",
+                "personas",
+                "criterion_intent",
+                "phase_evaluations_summary",
+                "aggregated_evidence_json",
+            ],
+            template="""You are an expert evaluator producing a final criterion-level judgment.
+
+Task: {task_name}
+Criterion Name: {criterion_name}
+Criterion Assertion: {criterion_assertion}
+Personas/Values: {personas}
+
+Criterion Intent: {criterion_intent}
+
+Phase-by-phase evaluation results (each entry contains phase_summary and step_assessments):
+{phase_evaluations_summary}
+
+Aggregated verified evidence (selected high-signal snippets across all phases):
+{aggregated_evidence_json}
+
+Your job:
+1) Integrate all phase-level step verdicts and evidence into one criterion-level verdict.
+2) Preserve nuance across phases (e.g., strong positives with critical failures elsewhere).
+3) Prefer strict evidence-weighted synthesis over averaging by count.
+4) Decide based on this specific criterion, not overall agent performance quality.
+5) Final verdict MUST be binary: PASS or FAIL.
+6) If mixed/partial/insufficient signals exist, resolve conservatively to FAIL and explain why.
+7) Do not promote unverified self-reports to facts; require cross-step behavioral support for positive conclusions.
+8) Separate external-environment constraints from agent strategy quality; external delays/failures alone should not cause FAIL unless the agent's response strategy is inadequate.
+
+Output ONLY one JSON object:
+{{
+  "verdict": "PASS|FAIL",
+  "reasoning": "...",
+  "confidence_score": 0.0,
+  "supporting_evidence": "...",
+  "aggregation_summary": "..."
 }}
 """,
         )

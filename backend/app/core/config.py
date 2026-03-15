@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
     DEFAULT_LLM_MODEL: str = "deepseek-chat"
-    DEFAULT_MAX_TOKENS: int = 1000
+    DEFAULT_MAX_TOKENS: int = 4000
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     LLM_BASE_URL: Optional[str] = None
     OPENAI_BASE_URL: Optional[str] = None
@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     FALLBACK_LLM_MODEL: str = "llama3.2"  # Default free model for Ollama
     DEFAULT_LLM_TEMPERATURE: float = 0
+    OPENAI_REASONING_EFFORT: str = "low"
     LLM_ENABLE_CONSOLE_TRACE: bool = False
     PERSONA_LLM_TEMPERATURE: float = 0
     PERSONA_VARIATION_LLM_TEMPERATURE: float = 0
@@ -78,10 +79,13 @@ class Settings(BaseSettings):
     ]
     CORS_ALLOW_ORIGIN_REGEX: str = r"https://evalagent-67802(--[a-zA-Z0-9-]+)?\.web\.app"
     CORS_ALLOW_LOCALHOST_REGEX: str = r"http://(localhost|127\.0\.0\.1):\d+"
-    JUDGE_EVALUATION_MAX_CONCURRENCY: int = 8
-    JUDGE_EVALUATION_STEP_MAX_CONCURRENCY: int = 12
-    JUDGE_EVALUATION_TOTAL_LLM_CONCURRENCY_BUDGET: int = 32
-    JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS: int = 1800
+    JUDGE_EVALUATION_MAX_CONCURRENCY: int = 12
+    JUDGE_EVALUATION_STEP_MAX_CONCURRENCY: int = 16
+    JUDGE_EVALUATION_TOTAL_LLM_CONCURRENCY_BUDGET: int = 192
+    JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS: int = 3600
+    JUDGE_EVIDENCE_EXTRACTION_MAX_TOKENS: int = 12000
+    JUDGE_EVIDENCE_EXTRACTION_RETRY_MAX_TOKENS: int = 16000
+    JUDGE_EVIDENCE_EXTRACTION_RETRY_FIELD_CHAR_LIMIT: int = 180
     JUDGE_EVALUATION_OVERALL_ASSESSMENT_CONFIDENCE_THRESHOLD: float = 0.7
     JUDGE_ENABLE_PHASE_EVIDENCE_EXPANSION: bool = False
     JUDGE_EVALUATION_VERBOSE_STEP_LOGS: bool = False

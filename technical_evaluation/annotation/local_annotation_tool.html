@@ -477,8 +477,8 @@
       const meta = payload.meta || {};
       state.annotatorId = meta.annotator_id || state.annotatorId;
       state.criteriaId = meta.criteria_id || state.criteriaId;
-      state.sampleSize = FIXED_SAMPLE_SIZE;
       state.assignment = Array.isArray(payload.assignment) ? payload.assignment : state.assignment;
+      state.sampleSize = state.assignment.length;
       state.annotations = payload.annotations && typeof payload.annotations === 'object' ? payload.annotations : state.annotations;
       state.currentDataIndex = Number(payload.current?.data_index || 0);
       state.currentStepIndex = Number(payload.current?.step_index || 0);
@@ -489,7 +489,7 @@
 
       els.annotatorId.value = state.annotatorId;
       els.criteriaId.value = state.criteriaId;
-      els.sampleSize.value = FIXED_SAMPLE_SIZE;
+      els.sampleSize.value = state.sampleSize;
 
       if (!options.keepRaw) state.rawItems = [];
     }
@@ -827,17 +827,9 @@
       }
 
       const shuffled = deterministicPick(ids, ids.length, `ring::${state.criteriaId}`);
-      const evaluatorIndex = Math.max(0, EVALUATORS.indexOf(state.annotatorId));
-      const stride = Math.max(1, Math.floor(shuffled.length / EVALUATORS.length));
-      const start = (evaluatorIndex * stride) % shuffled.length;
 
-      const assignment = [];
-      for (let i = 0; i < FIXED_SAMPLE_SIZE; i++) {
-        assignment.push(shuffled[(start + i) % shuffled.length]);
-      }
-
-      state.assignment = assignment;
-      state.sampleSize = FIXED_SAMPLE_SIZE;
+      state.assignment = shuffled;
+      state.sampleSize = shuffled.length;
       state.currentDataIndex = 0;
       state.currentStepIndex = 0;
     }
@@ -936,7 +928,6 @@
     els.initBtn.onclick = async () => {
       state.annotatorId = els.annotatorId.value;
       state.criteriaId = els.criteriaId.value.trim() || 'criteria1';
-      state.sampleSize = FIXED_SAMPLE_SIZE;
       if (!els.folderInput.files || els.folderInput.files.length === 0) {
         alert('Please select the raw_data folder first.');
         return;

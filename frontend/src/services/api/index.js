@@ -318,19 +318,4 @@ export const evaluateExperiment = (conditionIds, criteria, judgeModel = null, cl
 	});
 };
 
-export const analyzeGranularity = (criterion, taskName, taskUrl, client = defaultClient) => {
-	const payload = {
-		criterion,
-		task_name: taskName,
-		task_url: taskUrl,
-	};
-	console.log('[API] analyzeGranularity - Request:', { criterion, taskName, taskUrl });
-	return client.post(API_ENDPOINTS.judge.analyzeGranularity, payload).then(response => {
-		console.log('[API] analyzeGranularity - Response:', response);
-		return response;
-	});
-};
-
-
-
 export { createApiClient, API_ENDPOINTS };

@@ -19,6 +19,14 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 ROOT_DIR = Path(__file__).resolve().parents[1]
 BACKEND_DIR = ROOT_DIR / "backend"
 TECH_EVAL_DIR = Path(__file__).resolve().parent
+DEFAULT_TASK_GROUP_DATASET_DIR = TECH_EVAL_DIR / "results" / "dataset_grouped_by_task_v2"
+DEFAULT_TASK_GROUP_JSON_PATTERN = "**/*.json"
+DEFAULT_OPENAI_JUDGE_MODEL = "gpt-5"
+DEFAULT_DEEPSEEK_JUDGE_MODEL = "deepseek-chat"
+DEFAULT_JUDGE_MODELS: Tuple[str, ...] = (
+    DEFAULT_OPENAI_JUDGE_MODEL,
+    DEFAULT_DEEPSEEK_JUDGE_MODEL,
+)
 
 
 def _strip_wrapping_quotes(value: str) -> str:
@@ -101,6 +109,44 @@ def _safe_token(raw: str, fallback: str = "group") -> str:
     token = re.sub(r"[^A-Za-z0-9._-]+", "_", str(raw or "").strip().lower())
     token = token.strip("._-")
     return token or fallback
+
+
+def _normalize_model_name(raw_model: Optional[str]) -> Optional[str]:
+    if raw_model is None:
+        return None
+    model_name = str(raw_model).strip()
+    return model_name or None
+
+
+def _split_judge_models(raw_values: Optional[Sequence[str]]) -> List[str]:
+    models: List[str] = []
+    seen: set[str] = set()
+
+    for raw in raw_values or []:
+        for token in re.split(r"[\s,]+", str(raw or "").strip()):
+            model_name = _normalize_model_name(token)
+            if not model_name or model_name in seen:
+                continue
+            seen.add(model_name)
+            models.append(model_name)
+
+    return models
+
+
+def _resolve_judge_models(single_model: Optional[str], multi_models: Optional[Sequence[str]]) -> List[Optional[str]]:
+    parsed_multi_models = _split_judge_models(multi_models)
+    if parsed_multi_models:
+        return parsed_multi_models
+
+    normalized_single_model = _normalize_model_name(single_model)
+    if normalized_single_model:
+        return [normalized_single_model]
+
+    return list(DEFAULT_JUDGE_MODELS)
+
+
+def _judge_output_subdir_name(judge_model: Optional[str]) -> str:
+    return _safe_token(judge_model or "default_judge", fallback="default_judge")
 
 
 def _extract_task_name_and_url(task_raw: str, fallback_name: str) -> Tuple[str, str]:
@@ -374,13 +420,14 @@ def _extract_primary_ranking(result_payload: Dict[str, Any]) -> List[Dict[str, A
 def _prepare_group_run_payload(
     group: Dict[str, Any],
     normalized_dir: Path,
-    criteria2_text: str,
+    criteria2_text: Optional[str],
     judge_model: Optional[str],
-) -> Tuple[Dict[str, Any], Dict[str, str]]:
+) -> Tuple[Dict[str, Any], Dict[str, str], str]:
     normalized_dir.mkdir(parents=True, exist_ok=True)
 
     conditions: List[Dict[str, str]] = []
     condition_to_source: Dict[str, str] = {}
+    criteria2_candidates: set[str] = set()
 
     for file_info in group.get("files", []):
         file_path_raw = str(file_info.get("file_path") or "")
@@ -396,6 +443,12 @@ def _prepare_group_run_payload(
         if not isinstance(source_json, dict):
             continue
 
+        source_criteria2 = _normalize_text(
+            str(source_json.get("criteria2") or source_json.get("criteria_2") or "")
+        )
+        if source_criteria2:
+            criteria2_candidates.add(source_criteria2)
+
         run_payload = _normalize_dataset_json_to_run_payload(source_path, source_json)
         normalized_path = normalized_dir / f"{source_path.stem}__normalized.json"
         normalized_path.write_text(json.dumps(run_payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -404,12 +457,22 @@ def _prepare_group_run_payload(
         conditions.append({"conditionID": condition_id})
         condition_to_source[condition_id] = file_name
 
+    effective_criteria2 = _normalize_text(criteria2_text or "")
+    if not effective_criteria2:
+        if len(criteria2_candidates) > 1:
+            raise ValueError("multiple_criteria2_in_group")
+        if criteria2_candidates:
+            effective_criteria2 = next(iter(criteria2_candidates))
+
+    if not effective_criteria2:
+        raise ValueError("missing_criteria2")
+
     payload: Dict[str, Any] = {
         "conditions": conditions,
         "criteria": [
             {
                 "title": "criteria2",
-                "assertion": criteria2_text,
+                "assertion": effective_criteria2,
                 "description": "User-provided criteria2 for same-task condition ranking.",
             }
         ],
@@ -417,7 +480,7 @@ def _prepare_group_run_payload(
     if judge_model:
         payload["judge_model"] = judge_model
 
-    return payload, condition_to_source
+    return payload, condition_to_source, effective_criteria2
 
 
 def _load_manifest_or_build(dataset_dir: Path, json_pattern: str, groups_file: Optional[Path]) -> Dict[str, Any]:
@@ -707,13 +770,10 @@ async def run_llm_group_ranking(
     json_pattern: str,
     groups_file: Optional[Path],
     output_dir: Path,
-    criteria2_text: str,
+    criteria2_text: Optional[str],
     judge_model: Optional[str],
     min_group_size: int,
 ) -> Dict[str, Any]:
-    if not criteria2_text.strip():
-        raise ValueError("criteria2 text is required and cannot be empty")
-
     group_manifest = _load_manifest_or_build(dataset_dir, json_pattern, groups_file)
     groups = group_manifest.get("groups", [])
     if not isinstance(groups, list):
@@ -755,12 +815,23 @@ async def run_llm_group_ranking(
             continue
 
         group_norm_dir = normalized_root / group_id
-        payload, condition_to_source = _prepare_group_run_payload(
-            group=group,
-            normalized_dir=group_norm_dir,
-            criteria2_text=criteria2_text,
-            judge_model=judge_model,
-        )
+        try:
+            payload, condition_to_source, group_criteria2 = _prepare_group_run_payload(
+                group=group,
+                normalized_dir=group_norm_dir,
+                criteria2_text=criteria2_text,
+                judge_model=judge_model,
+            )
+        except ValueError as exc:
+            skipped_groups.append(
+                {
+                    "group_id": group_id,
+                    "task": task,
+                    "reason": str(exc),
+                    "size": len(files),
+                }
+            )
+            continue
 
         if len(payload.get("conditions", [])) < 2:
             skipped_groups.append(
@@ -798,6 +869,7 @@ async def run_llm_group_ranking(
             {
                 "group_id": group_id,
                 "task": task,
+                "criteria2": group_criteria2,
                 "size": len(payload.get("conditions", [])),
                 "ranking": transformed_ranking,
                 "raw_result_file": str(raw_result_path.resolve()),
@@ -808,7 +880,7 @@ async def run_llm_group_ranking(
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "dataset_dir": str(dataset_dir.resolve()),
         "groups_file": str(groups_file.resolve()) if groups_file else None,
-        "criteria2": criteria2_text,
+        "criteria2": _normalize_text(criteria2_text or "") or None,
         "judge_model": judge_model,
         "group_count_total": len(groups),
         "group_count_evaluated": len(output_groups),
@@ -823,11 +895,12 @@ async def run_llm_group_ranking(
     human_template = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "based_on_llm_file": str(llm_summary_path.resolve()),
-        "criteria2": criteria2_text,
+        "criteria2": _normalize_text(criteria2_text or "") or None,
         "groups": [
             {
                 "group_id": group["group_id"],
                 "task": group["task"],
+                "criteria2": group.get("criteria2"),
                 "ranking": [row.get("source_file") for row in group.get("ranking", [])],
                 "items": [
                     {
@@ -861,8 +934,16 @@ def _parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     group_parser = subparsers.add_parser("group", help="Build task group manifest from dataset JSON files")
-    group_parser.add_argument("--dataset-dir", default=str(TECH_EVAL_DIR / "dataset"), help="Dataset directory")
-    group_parser.add_argument("--json-pattern", default="*.json", help="Top-level JSON glob pattern")
+    group_parser.add_argument(
+        "--dataset-dir",
+        default=str(DEFAULT_TASK_GROUP_DATASET_DIR),
+        help="Dataset directory (default: technical_evaluation/results/dataset_grouped_by_task_v2)",
+    )
+    group_parser.add_argument(
+        "--json-pattern",
+        default=DEFAULT_TASK_GROUP_JSON_PATTERN,
+        help="JSON glob pattern (default: **/*.json for grouped task folders)",
+    )
     group_parser.add_argument(
         "--output-file",
         default=str(TECH_EVAL_DIR / "results" / "task_groups_latest.json"),
@@ -875,16 +956,38 @@ def _parse_args() -> argparse.Namespace:
     )
 
     llm_parser = subparsers.add_parser("llm-rank", help="Run criteria2 ranking within each task group")
-    llm_parser.add_argument("--dataset-dir", default=str(TECH_EVAL_DIR / "dataset"), help="Dataset directory")
-    llm_parser.add_argument("--json-pattern", default="*.json", help="Top-level JSON glob pattern")
+    llm_parser.add_argument(
+        "--dataset-dir",
+        default=str(DEFAULT_TASK_GROUP_DATASET_DIR),
+        help="Dataset directory (default: technical_evaluation/results/dataset_grouped_by_task_v2)",
+    )
+    llm_parser.add_argument(
+        "--json-pattern",
+        default=DEFAULT_TASK_GROUP_JSON_PATTERN,
+        help="JSON glob pattern (default: **/*.json for grouped task folders)",
+    )
     llm_parser.add_argument("--groups-file", default=None, help="Optional existing group manifest JSON")
     llm_parser.add_argument(
         "--output-dir",
         default=str(TECH_EVAL_DIR / "results"),
         help="Output directory for ranking run outputs",
     )
-    llm_parser.add_argument("--criteria2-text", required=True, help="Criteria2 assertion used for ranking")
-    llm_parser.add_argument("--judge-model", default=None, help="Optional judge model override")
+    llm_parser.add_argument(
+        "--criteria2-text",
+        default=None,
+        help="Optional criteria2 assertion override. If omitted, read criteria2 from dataset JSON files in each group.",
+    )
+    llm_parser.add_argument(
+        "--judge-model",
+        default=None,
+        help=f"Optional judge model override (default run set: {', '.join(DEFAULT_JUDGE_MODELS)})",
+    )
+    llm_parser.add_argument(
+        "--judge-models",
+        nargs="+",
+        default=None,
+        help="Optional list of judge models (supports space- or comma-separated values). Overrides --judge-model.",
+    )
     llm_parser.add_argument("--min-group-size", type=int, default=2, help="Minimum group size to evaluate")
 
     agreement_parser = subparsers.add_parser("inter-agreement", help="Compute inter-agreement between LLM and human rankings")
@@ -893,19 +996,53 @@ def _parse_args() -> argparse.Namespace:
     agreement_parser.add_argument("--output-file", default=None, help="Optional output JSON file for agreement report")
 
     full_parser = subparsers.add_parser("full", help="Run group build + llm ranking + optional agreement")
-    full_parser.add_argument("--dataset-dir", default=str(TECH_EVAL_DIR / "dataset"), help="Dataset directory")
-    full_parser.add_argument("--json-pattern", default="*.json", help="Top-level JSON glob pattern")
+    full_parser.add_argument(
+        "--dataset-dir",
+        default=str(DEFAULT_TASK_GROUP_DATASET_DIR),
+        help="Dataset directory (default: technical_evaluation/results/dataset_grouped_by_task_v2)",
+    )
+    full_parser.add_argument(
+        "--json-pattern",
+        default=DEFAULT_TASK_GROUP_JSON_PATTERN,
+        help="JSON glob pattern (default: **/*.json for grouped task folders)",
+    )
     full_parser.add_argument(
         "--output-dir",
         default=str(TECH_EVAL_DIR / "results"),
         help="Output directory for full run outputs",
     )
-    full_parser.add_argument("--criteria2-text", required=True, help="Criteria2 assertion used for ranking")
-    full_parser.add_argument("--judge-model", default=None, help="Optional judge model override")
+    full_parser.add_argument(
+        "--criteria2-text",
+        default=None,
+        help="Optional criteria2 assertion override. If omitted, read criteria2 from dataset JSON files in each group.",
+    )
+    full_parser.add_argument(
+        "--judge-model",
+        default=None,
+        help=f"Optional judge model override (default run set: {', '.join(DEFAULT_JUDGE_MODELS)})",
+    )
+    full_parser.add_argument(
+        "--judge-models",
+        nargs="+",
+        default=None,
+        help="Optional list of judge models (supports space- or comma-separated values). Overrides --judge-model.",
+    )
     full_parser.add_argument("--min-group-size", type=int, default=2, help="Minimum group size to evaluate")
     full_parser.add_argument("--human-ranking-file", default=None, help="Optional human ranking file for agreement")
 
-    return parser.parse_args()
+    raw_argv = sys.argv[1:]
+    known_commands = {"group", "llm-rank", "inter-agreement", "full"}
+    needs_default_command = bool(raw_argv) and raw_argv[0] not in known_commands and raw_argv[0] not in {"-h", "--help"}
+
+    if not raw_argv:
+        print("[INFO] No command specified; defaulting to 'full'")
+        return parser.parse_args(["full"])
+
+    if needs_default_command:
+        print("[INFO] No command specified; defaulting to 'full'")
+        return parser.parse_args(["full", *raw_argv])
+
+    return parser.parse_args(raw_argv)
 
 
 def main() -> int:
@@ -934,21 +1071,33 @@ def main() -> int:
         groups_file = Path(args.groups_file).resolve() if args.groups_file else None
         output_dir = Path(args.output_dir).resolve()
 
-        result = asyncio.run(
-            run_llm_group_ranking(
-                dataset_dir=dataset_dir,
-                json_pattern=args.json_pattern,
-                groups_file=groups_file,
-                output_dir=output_dir,
-                criteria2_text=args.criteria2_text,
-                judge_model=args.judge_model,
-                min_group_size=args.min_group_size,
-            )
-        )
+        judge_models = _resolve_judge_models(args.judge_model, getattr(args, "judge_models", None))
+        multi_model_mode = len(judge_models) > 1
 
-        print(f"[DONE] LLM ranking output dir: {result['run_output_dir']}")
-        print(f"[DONE] LLM ranking summary: {result['llm_summary_file']}")
-        print(f"[DONE] Human template: {result['human_template_file']}")
+        for judge_model in judge_models:
+            model_output_dir = output_dir
+            if multi_model_mode:
+                model_output_dir = output_dir / _judge_output_subdir_name(judge_model)
+
+            result = asyncio.run(
+                run_llm_group_ranking(
+                    dataset_dir=dataset_dir,
+                    json_pattern=args.json_pattern,
+                    groups_file=groups_file,
+                    output_dir=model_output_dir,
+                    criteria2_text=args.criteria2_text,
+                    judge_model=judge_model,
+                    min_group_size=args.min_group_size,
+                )
+            )
+
+            print(f"[DONE] Judge model: {judge_model or 'default'}")
+            print(f"[DONE] LLM ranking output dir: {result['run_output_dir']}")
+            print(f"[DONE] LLM ranking summary: {result['llm_summary_file']}")
+            print(f"[DONE] Human template: {result['human_template_file']}")
+
+        if multi_model_mode:
+            print(f"[DONE] Multi-model output root: {output_dir}")
         return 0
 
     if args.command == "inter-agreement":
@@ -978,39 +1127,51 @@ def main() -> int:
         dataset_dir = Path(args.dataset_dir).resolve()
         output_dir = Path(args.output_dir).resolve()
 
-        llm_result = asyncio.run(
-            run_llm_group_ranking(
-                dataset_dir=dataset_dir,
-                json_pattern=args.json_pattern,
-                groups_file=None,
-                output_dir=output_dir,
-                criteria2_text=args.criteria2_text,
-                judge_model=args.judge_model,
-                min_group_size=args.min_group_size,
-            )
-        )
+        judge_models = _resolve_judge_models(args.judge_model, getattr(args, "judge_models", None))
+        multi_model_mode = len(judge_models) > 1
 
-        print(f"[DONE] LLM ranking summary: {llm_result['llm_summary_file']}")
-        print(f"[DONE] Human template: {llm_result['human_template_file']}")
+        for judge_model in judge_models:
+            model_output_dir = output_dir
+            if multi_model_mode:
+                model_output_dir = output_dir / _judge_output_subdir_name(judge_model)
 
-        human_ranking_raw = getattr(args, "human_ranking_file", None)
-        if human_ranking_raw:
-            human_file = Path(human_ranking_raw).resolve()
-            agreement_path = Path(llm_result["run_output_dir"]).resolve() / "inter_agreement.json"
-            report = compute_inter_agreement(
-                llm_ranking_file=Path(llm_result["llm_summary_file"]).resolve(),
-                human_ranking_file=human_file,
-                output_file=agreement_path,
-            )
-            print(f"[DONE] Inter-agreement report: {agreement_path}")
-            print(
-                "[DONE] groups_compared={} spearman_mean={} kendall_tau_b_mean={} top1_agreement_rate={}".format(
-                    report.get("groups_compared"),
-                    report.get("spearman_mean"),
-                    report.get("kendall_tau_b_mean"),
-                    report.get("top1_agreement_rate"),
+            llm_result = asyncio.run(
+                run_llm_group_ranking(
+                    dataset_dir=dataset_dir,
+                    json_pattern=args.json_pattern,
+                    groups_file=None,
+                    output_dir=model_output_dir,
+                    criteria2_text=args.criteria2_text,
+                    judge_model=judge_model,
+                    min_group_size=args.min_group_size,
                 )
             )
+
+            print(f"[DONE] Judge model: {judge_model or 'default'}")
+            print(f"[DONE] LLM ranking summary: {llm_result['llm_summary_file']}")
+            print(f"[DONE] Human template: {llm_result['human_template_file']}")
+
+            human_ranking_raw = getattr(args, "human_ranking_file", None)
+            if human_ranking_raw:
+                human_file = Path(human_ranking_raw).resolve()
+                agreement_path = Path(llm_result["run_output_dir"]).resolve() / "inter_agreement.json"
+                report = compute_inter_agreement(
+                    llm_ranking_file=Path(llm_result["llm_summary_file"]).resolve(),
+                    human_ranking_file=human_file,
+                    output_file=agreement_path,
+                )
+                print(f"[DONE] Inter-agreement report: {agreement_path}")
+                print(
+                    "[DONE] groups_compared={} spearman_mean={} kendall_tau_b_mean={} top1_agreement_rate={}".format(
+                        report.get("groups_compared"),
+                        report.get("spearman_mean"),
+                        report.get("kendall_tau_b_mean"),
+                        report.get("top1_agreement_rate"),
+                    )
+                )
+
+        if multi_model_mode:
+            print(f"[DONE] Multi-model output root: {output_dir}")
 
         return 0
 

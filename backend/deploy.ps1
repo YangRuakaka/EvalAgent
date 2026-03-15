@@ -50,8 +50,9 @@ $BrowserAgentBrowserLaunchTimeout = "120"
 $BrowserAgentBrowserLaunchRetries = "3"
 $BrowserAgentBrowserRetryBackoffSeconds = "2"
 $JudgeEvaluationMaxConcurrency = "12"
-$JudgeEvaluationStepMaxConcurrency = "12"
-$JudgeEvaluationTaskTimeoutSeconds = "1800"
+$JudgeEvaluationStepMaxConcurrency = "16"
+$JudgeEvaluationTotalLlmConcurrencyBudget = "192"
+$JudgeEvaluationTaskTimeoutSeconds = "3600"
 
 # --- Pre-flight Checks ---
 
@@ -230,6 +231,7 @@ $EnvVars = @(
     "BROWSER_AGENT_BROWSER_RETRY_BACKOFF_SECONDS=$BrowserAgentBrowserRetryBackoffSeconds",
     "JUDGE_EVALUATION_MAX_CONCURRENCY=$JudgeEvaluationMaxConcurrency",
     "JUDGE_EVALUATION_STEP_MAX_CONCURRENCY=$JudgeEvaluationStepMaxConcurrency",
+    "JUDGE_EVALUATION_TOTAL_LLM_CONCURRENCY_BUDGET=$JudgeEvaluationTotalLlmConcurrencyBudget",
     "JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS=$JudgeEvaluationTaskTimeoutSeconds",
     "BROWSER_AGENT_FORCE_THREADED_RUN_ON_WINDOWS=true",
     "BROWSER_AGENT_ENABLE_SCREENSHOT_PROCESSING=false",

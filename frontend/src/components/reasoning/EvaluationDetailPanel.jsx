@@ -1,6 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { verdictToColor, granularityLabels } from './utils/criteriaInteraction';
+import { verdictToColor } from './utils/criteriaInteraction';
 import './EvaluationDetailPanel.css';
 
 
@@ -63,11 +63,8 @@ const EvaluationDetailPanel = ({
                 </span>
               </div>
               
-              {/* Granularity and Confidence */}
+              {/* Confidence */}
               <div className="evaluation-detail-metadata">
-                <span className="granularity-badge">
-                  {granularityLabels[evaluation.required_granularity]}
-                </span>
                 <span className="confidence-badge">
                   Confidence: {(evaluation.confidence_score * 100).toFixed(0)}%
                 </span>
@@ -123,7 +120,6 @@ EvaluationDetailPanel.propTypes = {
     confidence_score: PropTypes.number,
     aggregated_step_summary: PropTypes.string,
     relevant_steps: PropTypes.arrayOf(PropTypes.number),
-    required_granularity: PropTypes.string,
   })),
   onClose: PropTypes.func,
 };

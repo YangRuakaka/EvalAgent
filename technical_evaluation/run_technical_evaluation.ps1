@@ -9,8 +9,10 @@ param(
     [int]$MaxConditionsPerRequest = 0,
     [string[]]$JudgeModels = @(),
     [string]$FixedBatchId = "latest",
-    [int]$RequestMaxConcurrency = 1,
+    [int]$RequestMaxConcurrency = 4,
     [switch]$SkipExisting,
+    [switch]$ShowStageTimings,
+    [switch]$ShowLlmIo,
     [string]$PythonExe = "",
     [ValidateSet("agentic", "step_level", "global_summary")]
     [string[]]$Modes = @("agentic")
@@ -154,13 +156,21 @@ foreach ($mode in $Modes) {
             $argsList += "--skip-existing"
         }
 
+        if ($ShowStageTimings) {
+            $argsList += "--show-stage-timings"
+        }
+
+        if ($ShowLlmIo) {
+            $argsList += "--show-llm-io"
+        }
+
         if (-not [string]::IsNullOrWhiteSpace($judgeModel)) {
             $argsList += "--judge-model"
             $argsList += $judgeModel
         }
 
         $judgeModelLabel = if ([string]::IsNullOrWhiteSpace($judgeModel)) { "<request/default>" } else { $judgeModel }
-        Write-Host "[RUN] mode=$mode judge_model=$judgeModelLabel results_dir=$resultsDir input_mode=$InputMode pattern=$Pattern json_pattern=$JsonPattern max_files=$MaxFiles request_max_concurrency=$RequestMaxConcurrency skip_existing=$SkipExisting"
+        Write-Host "[RUN] mode=$mode judge_model=$judgeModelLabel results_dir=$resultsDir input_mode=$InputMode pattern=$Pattern json_pattern=$JsonPattern max_files=$MaxFiles request_max_concurrency=$RequestMaxConcurrency skip_existing=$SkipExisting show_stage_timings=$ShowStageTimings show_llm_io=$ShowLlmIo"
         & $pythonCmd @argsList
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE

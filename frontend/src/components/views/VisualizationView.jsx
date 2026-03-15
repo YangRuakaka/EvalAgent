@@ -10,6 +10,7 @@ import { useExperimentEvaluation } from '../../hooks/useExperimentEvaluation';
 import './VisualizationView.css';
 
 const EVALUATION_MODEL_OPTIONS = [
+	{ value: 'gpt-5', label: 'OpenAI GPT-5' },
 	{ value: 'gpt-4o-mini', label: 'OpenAI GPT-4o mini' },
 	{ value: 'gpt-4o', label: 'OpenAI GPT-4o' },
 	{ value: 'deepseek-chat', label: 'DeepSeek Chat' },

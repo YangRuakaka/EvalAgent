@@ -22,6 +22,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Directly set provider key here if you do not want to use .env.
 # Leave empty or placeholder to fall back to environment variables.
+HARDCODED_DEEPSEEK_API_KEY = ""
+HARDCODED_OPENAI_API_KEY = ""
 
 def _strip_wrapping_quotes(value: str) -> str:
     stripped = value.strip()
@@ -70,10 +72,10 @@ def _load_env_file(env_path: Path, override: bool = False) -> int:
 
 def _bootstrap_env() -> None:
     env_candidates = [
-        Path.cwd() / ".env",
         Path.cwd() / "backend" / ".env",
-        SCRIPT_DIR / ".env",
         SCRIPT_DIR / "backend" / ".env",
+        Path.cwd() / ".env",
+        SCRIPT_DIR / ".env",
     ]
 
     loaded = 0
@@ -135,7 +137,8 @@ class StandaloneSettings:
             output_dir=output_dir,
             max_steps=_env_int("BROWSER_AGENT_MAX_STEPS", default=20, min_value=1),
             enable_screenshots=_env_bool("BROWSER_AGENT_ENABLE_SCREENSHOTS", default=True),
-            max_screenshots=_env_int("BROWSER_AGENT_MAX_SCREENSHOTS", default=3, min_value=0),
+            # 0 means unlimited screenshots; any positive value caps saved screenshots.
+            max_screenshots=_env_int("BROWSER_AGENT_MAX_SCREENSHOTS", default=0, min_value=0),
             force_threaded_run_on_windows=_env_bool(
                 "BROWSER_AGENT_FORCE_THREADED_RUN_ON_WINDOWS",
                 default=True,
@@ -191,34 +194,43 @@ class RunResult:
 # Team members can safely change tasks/personas/models/run_times here.
 # ---------------------------------------------------------------------------
 TASKS: List[TaskConfig] = [
+    # TaskConfig(
+    #     name="Book Shoes Online",
+    #     url="http://34.55.136.249:3000/RiverBuy",
+    #     description="Buy a pair of shoes.",
+    # ),http://localhost:3000/
     TaskConfig(
-        name="Book flight",
-        url="http://34.55.136.249:3000/flight",
-        description="Book a flight from ORD to LAX.",
+        name="Book Shoes Online",
+        url="http://localhost:3000/RiverBuy",
+        description="Buy a pair of shoes.",
     ),
-    TaskConfig(
-        name="Rent a car",
-        url="http://34.55.136.249:3000/zoomcar",
-        description="Rent a car for a family vacation.",
-    ),
+    # TaskConfig(
+    #     name="Rent a car",
+    #     url="http://34.55.136.249:3000/zoomcar",
+    #     description="Rent a car for a family vacation.",
+    # ),
 ]
 
 PERSONAS: List[PersonaConfig] = [
     PersonaConfig(
         value="Frugality",
-        content="You maximize value for money and avoid unnecessary spending.",
+        content="Emma is 29 years old and values saving money and making thoughtful purchasing decisions. She is willing to spend time researching and comparing options to find the best deals and discounts. She prefers budget-friendly choices and is cautious about unnecessary expenses.",
     ),
+    # PersonaConfig(
+    #     value="Sustainability",
+    #     content="You prioritize environmentally friendly and socially responsible choices.",
+    # ),
+    # PersonaConfig(
+    #     value="Comfort",
+    #     content="You prioritize a comfortable and enjoyable travel experience.",
+    # ),
+    # PersonaConfig(
+    #     value="Luxury",
+    #     content="You prioritize comfort and premium experiences, even at higher costs.",
+    # ),
     PersonaConfig(
-        value="Sustainability",
-        content="You prioritize environmentally friendly and socially responsible choices.",
-    ),
-    PersonaConfig(
-        value="Comfort",
-        content="You prioritize a comfortable and enjoyable travel experience.",
-    ),
-    PersonaConfig(
-        value="Luxury",
-        content="You prioritize comfort and premium experiences, even at higher costs.",
+        value="Innovation",
+        content="Emma is 29 years old and works as a software engineer. She likes to stay updated with the latest technology trends and enjoys trying out new gadgets and services. She values efficiency and is open to using innovative solutions that can enhance her travel experience.",
     ),
 ]
 
@@ -1039,6 +1051,13 @@ async def run_experiment(
 
     if not settings.enable_screenshots:
         logging.warning("BROWSER_AGENT_ENABLE_SCREENSHOTS is false. details.screenshots will be empty.")
+    elif settings.max_screenshots > 0:
+        logging.info(
+            "BROWSER_AGENT_MAX_SCREENSHOTS=%d. Only the first N screenshots per run will be saved.",
+            settings.max_screenshots,
+        )
+    else:
+        logging.info("BROWSER_AGENT_MAX_SCREENSHOTS=%d. Screenshot saving is unlimited.", settings.max_screenshots)
 
     if website_url is not None:
         logging.info("Applying website URL override to all tasks | website_url=%s", tasks[0].url)

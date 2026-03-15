@@ -540,7 +540,6 @@ def _build_dataset_json_appended_output(
             "overall_assessment": llm_criterion.get("overall_assessment"),
             "overall_reasoning": llm_criterion.get("overall_reasoning"),
             "confidence": llm_criterion.get("confidence"),
-            "granularity": llm_criterion.get("granularity"),
             "involved_steps": llm_criterion.get("involved_steps") if isinstance(llm_criterion.get("involved_steps"), list) else [],
         }
         criteria_results.append(criterion_result)
@@ -848,6 +847,145 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+def _format_seconds(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.3f}s"
+
+
+def _compute_percentile(values: Sequence[float], percentile: float) -> float | None:
+    if not values:
+        return None
+
+    sorted_values = sorted(float(v) for v in values)
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+
+    normalized_percentile = max(0.0, min(100.0, float(percentile)))
+    rank = (len(sorted_values) - 1) * (normalized_percentile / 100.0)
+    lower_index = int(rank)
+    upper_index = min(lower_index + 1, len(sorted_values) - 1)
+    if lower_index == upper_index:
+        return sorted_values[lower_index]
+
+    weight = rank - lower_index
+    return sorted_values[lower_index] * (1.0 - weight) + sorted_values[upper_index] * weight
+
+
+def _iter_request_timing_rows(summary: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    files = summary.get("files")
+    if not isinstance(files, list):
+        return
+
+    for file_item in files:
+        if not isinstance(file_item, dict):
+            continue
+
+        source_file = str(file_item.get("file") or "")
+        requests = file_item.get("requests")
+        if not isinstance(requests, list):
+            continue
+
+        for request_item in requests:
+            if not isinstance(request_item, dict):
+                continue
+
+            raw_duration = request_item.get("duration_seconds")
+            duration_seconds = float(raw_duration) if isinstance(raw_duration, (int, float)) else None
+
+            yield {
+                "file": source_file,
+                "request_index": request_item.get("request_index"),
+                "model_index": request_item.get("model_index"),
+                "status": str(request_item.get("status") or "pending"),
+                "duration_seconds": duration_seconds,
+                "output_file": str(request_item.get("output_file") or ""),
+            }
+
+
+_CONNECTION_ERROR_PATTERN = re.compile(r"\bconnection\s+error\b", re.IGNORECASE)
+
+
+def _iter_text_values(value: Any) -> Iterable[str]:
+    stack: list[Any] = [value]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, str):
+            yield current
+        elif isinstance(current, dict):
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+
+
+def _result_contains_connection_error(payload: Any) -> bool:
+    for text in _iter_text_values(payload):
+        if _CONNECTION_ERROR_PATTERN.search(text):
+            return True
+    return False
+
+
+def _extract_last_criterion_involved_steps(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return None
+
+    criteria_lists: list[list[Any]] = []
+
+    judge_evaluation = payload.get("judge_evaluation")
+    if isinstance(judge_evaluation, dict):
+        criteria_results = judge_evaluation.get("criteria_results")
+        if isinstance(criteria_results, list):
+            criteria_lists.append(criteria_results)
+
+    result_payload = payload.get("result")
+    if isinstance(result_payload, dict):
+        conditions = result_payload.get("conditions")
+        if isinstance(conditions, list):
+            for condition in conditions:
+                if not isinstance(condition, dict):
+                    continue
+                criteria = condition.get("criteria")
+                if isinstance(criteria, list):
+                    criteria_lists.append(criteria)
+
+    conditions = payload.get("conditions")
+    if isinstance(conditions, list):
+        for condition in conditions:
+            if not isinstance(condition, dict):
+                continue
+            criteria = condition.get("criteria")
+            if isinstance(criteria, list):
+                criteria_lists.append(criteria)
+
+    for criteria in reversed(criteria_lists):
+        if not criteria:
+            continue
+        for criterion in reversed(criteria):
+            if not isinstance(criterion, dict):
+                continue
+            if "involved_steps" in criterion:
+                return criterion.get("involved_steps")
+
+    return None
+
+
+def _existing_output_rerun_reason(output_path: Path) -> str | None:
+    try:
+        payload = json.loads(output_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return f"existing output unreadable ({exc})"
+
+    if _result_contains_connection_error(payload):
+        return "contains connection error"
+
+    last_involved_steps = _extract_last_criterion_involved_steps(payload)
+    if last_involved_steps is not None:
+        if not isinstance(last_involved_steps, list) or len(last_involved_steps) == 0:
+            return "final involved_steps is empty"
+
+    return None
+
+
 async def run_batch(
     dataset_dir: Path,
     results_dir: Path,
@@ -864,6 +1002,7 @@ async def run_batch(
     fixed_batch_id: str | None,
     request_max_concurrency: int,
     skip_existing: bool,
+    show_stage_timings: bool,
 ) -> int:
     batch_started_at = time.perf_counter()
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -876,6 +1015,7 @@ async def run_batch(
             # Avoid stale normalized files when reusing a fixed batch id.
             shutil.rmtree(normalized_dataset_json_dir)
 
+    source_build_started_at = time.perf_counter()
     input_sources = _build_input_sources(
         dataset_dir=dataset_dir,
         pattern=pattern,
@@ -885,6 +1025,7 @@ async def run_batch(
         max_files=max_files,
         normalized_dataset_json_dir=normalized_dataset_json_dir,
     )
+    source_build_finished_at = time.perf_counter()
 
     if not input_sources:
         if input_mode == "dataset_json":
@@ -929,6 +1070,7 @@ async def run_batch(
 
     request_jobs: list[dict[str, Any]] = []
     stop_after_build = False
+    request_plan_started_at = time.perf_counter()
 
     for source in input_sources:
         file_result: dict[str, Any] = {
@@ -1019,6 +1161,10 @@ async def run_batch(
                 stop_after_build = True
                 break
 
+    request_plan_finished_at = time.perf_counter()
+    request_execution_started_at = request_plan_finished_at
+    request_execution_finished_at = request_execution_started_at
+
     async def _run_request_job(job: dict[str, Any]) -> dict[str, Any]:
         source: InputSourceRequests = job["source"]
         payload_for_run: dict[str, Any] = job["payload_for_run"]
@@ -1040,7 +1186,13 @@ async def run_batch(
 
         skip_allowed = False
         if skip_existing and output_path.exists():
-            if not emit_annotatable_output or input_mode == "dataset_json":
+            rerun_reason = _existing_output_rerun_reason(output_path)
+            if rerun_reason is not None:
+                file_warnings.append(
+                    f"Existing output forced rerun ({rerun_reason}): {output_name}"
+                )
+                print(f"[INFO] Re-running existing output: {output_name} ({rerun_reason})")
+            elif not emit_annotatable_output or input_mode == "dataset_json":
                 skip_allowed = True
             elif annotatable_output_path is not None and annotatable_output_path.exists():
                 skip_allowed = True
@@ -1162,6 +1314,8 @@ async def run_batch(
                 if fail_fast and request_update.get("status") == "error":
                     break
 
+            request_execution_finished_at = time.perf_counter()
+
     summary["finished_at"] = datetime.now().isoformat(timespec="seconds")
     summary["duration_seconds"] = round(time.perf_counter() - batch_started_at, 3)
     summary["total_files"] = len(summary["files"])
@@ -1172,6 +1326,20 @@ async def run_batch(
     summary["failed_requests"] = failed_requests
 
     summary_path = results_dir / f"batch_summary_{batch_id}.json"
+    summary["timings"] = {
+        "input_source_build_seconds": round(source_build_finished_at - source_build_started_at, 3),
+        "request_plan_build_seconds": round(request_plan_finished_at - request_plan_started_at, 3),
+        "request_execution_seconds": round(request_execution_finished_at - request_execution_started_at, 3),
+        "summary_write_seconds": None,
+        "batch_total_seconds": summary["duration_seconds"],
+    }
+
+    summary_write_started_at = time.perf_counter()
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    summary_write_finished_at = time.perf_counter()
+
+    summary["timings"]["summary_write_seconds"] = round(summary_write_finished_at - summary_write_started_at, 3)
+
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[DONE] Batch: {batch_id}")
@@ -1180,6 +1348,57 @@ async def run_batch(
         f"[DONE] Requests: success={success_requests}, skipped={skipped_requests}, "
         f"failed={failed_requests}, total={total_requests}"
     )
+
+    if show_stage_timings:
+        timing_rows = list(_iter_request_timing_rows(summary))
+        known_durations = [
+            row["duration_seconds"]
+            for row in timing_rows
+            if isinstance(row.get("duration_seconds"), (int, float))
+        ]
+
+        avg_duration = (sum(known_durations) / len(known_durations)) if known_durations else None
+        min_duration = min(known_durations) if known_durations else None
+        max_duration = max(known_durations) if known_durations else None
+        p50_duration = _compute_percentile(known_durations, 50.0)
+        p95_duration = _compute_percentile(known_durations, 95.0)
+
+        print("[TIMINGS] ===== Complete Time Consumption Log =====")
+        print(f"[TIMINGS] batch_id={batch_id}")
+        print(
+            "[TIMINGS] phases: "
+            f"input_source_build={_format_seconds(summary['timings']['input_source_build_seconds'])}, "
+            f"request_plan_build={_format_seconds(summary['timings']['request_plan_build_seconds'])}, "
+            f"request_execution={_format_seconds(summary['timings']['request_execution_seconds'])}, "
+            f"summary_write={_format_seconds(summary['timings']['summary_write_seconds'])}, "
+            f"batch_total={_format_seconds(summary['timings']['batch_total_seconds'])}"
+        )
+        print(
+            "[TIMINGS] request_stats: "
+            f"total={total_requests}, executed={success_requests + failed_requests}, skipped={skipped_requests}, "
+            f"duration_count={len(known_durations)}, avg={_format_seconds(avg_duration)}, "
+            f"min={_format_seconds(min_duration)}, p50={_format_seconds(p50_duration)}, "
+            f"p95={_format_seconds(p95_duration)}, max={_format_seconds(max_duration)}"
+        )
+        print("[TIMINGS] request_details:")
+
+        if not timing_rows:
+            print("[TIMINGS] - (no requests)")
+        else:
+            for row in timing_rows:
+                request_index = row.get("request_index")
+                model_index = row.get("model_index")
+                request_index_text = f"{int(request_index):02d}" if isinstance(request_index, int) else str(request_index)
+                model_index_text = f"{int(model_index):02d}" if isinstance(model_index, int) else str(model_index)
+                print(
+                    "[TIMINGS] - "
+                    f"file={row['file']} "
+                    f"req={request_index_text} "
+                    f"model={model_index_text} "
+                    f"status={row['status']} "
+                    f"duration={_format_seconds(row['duration_seconds'])} "
+                    f"output={row['output_file']}"
+                )
 
     return 0 if (total_requests > 0 and failed_requests == 0 and (success_requests + skipped_requests) == total_requests) else 2
 
@@ -1263,15 +1482,35 @@ def main() -> int:
     parser.add_argument(
         "--request-max-concurrency",
         type=int,
-        default=1,
-        help="Max number of batch requests to evaluate concurrently (default: 1, preserving original serial behavior)",
+        default=4,
+        help="Max number of batch requests to evaluate concurrently (default: 4)",
     )
     parser.add_argument(
         "--skip-existing",
         action="store_true",
         help="Skip requests whose output files already exist (for incremental reruns)",
     )
+    parser.add_argument(
+        "--show-stage-timings",
+        action="store_true",
+        help="Print judge stage timing logs to console for each criterion/phase",
+    )
+    parser.add_argument(
+        "--show-llm-io",
+        action="store_true",
+        help="Print LLM prompt/input/output content to console",
+    )
     args = parser.parse_args()
+
+    if args.show_stage_timings:
+        os.environ["JUDGE_EVALUATION_VERBOSE_STEP_LOGS"] = "true"
+        settings.JUDGE_EVALUATION_VERBOSE_STEP_LOGS = True
+        print("[INFO] Enabled stage timing logs (--show-stage-timings)")
+
+    if args.show_llm_io:
+        os.environ["LLM_ENABLE_CONSOLE_TRACE"] = "true"
+        settings.LLM_ENABLE_CONSOLE_TRACE = True
+        print("[INFO] Enabled LLM input/output console trace (--show-llm-io)")
 
     dataset_dir = Path(args.dataset_dir).resolve()
     results_dir = Path(args.results_dir).resolve()
@@ -1312,6 +1551,7 @@ def main() -> int:
             fixed_batch_id=fixed_batch_id,
             request_max_concurrency=args.request_max_concurrency,
             skip_existing=args.skip_existing,
+            show_stage_timings=args.show_stage_timings,
         )
     )
 

@@ -324,18 +324,6 @@ export const computeImageHash = async (src, options = {}) => {
 		return null;
 	}
 
-	const contentKey = `${normalizedSrc}::content-sha1`;
-	if (hashCache.has(contentKey)) {
-		return hashCache.get(contentKey);
-	}
-
-	const contentHash = await hashBinaryContent(normalizedSrc);
-	if (contentHash) {
-		const normalizedContentHash = `sha1-${contentHash}`;
-		hashCache.set(contentKey, normalizedContentHash);
-		return normalizedContentHash;
-	}
-
 	const size = options.hashSize || DEFAULT_HASH_SIZE;
 	const borderIgnoreRatio = Number.isFinite(options.borderIgnoreRatio)
 		? Math.min(Math.max(options.borderIgnoreRatio, 0), 0.3)
@@ -357,9 +345,21 @@ export const computeImageHash = async (src, options = {}) => {
 			hashCache.set(key, hash);
 			return hash;
 		} catch (mainThreadError) {
-			const fallback = await hashBinaryContent(normalizedSrc);
-			hashCache.set(key, fallback);
-			return fallback;
+			const contentKey = `${normalizedSrc}::content-sha1`;
+			if (hashCache.has(contentKey)) {
+				return hashCache.get(contentKey);
+			}
+
+			const fallbackContentHash = await hashBinaryContent(normalizedSrc);
+			if (!fallbackContentHash) {
+				hashCache.set(key, null);
+				return null;
+			}
+
+			const normalizedContentHash = `sha1-${fallbackContentHash}`;
+			hashCache.set(contentKey, normalizedContentHash);
+			hashCache.set(key, normalizedContentHash);
+			return normalizedContentHash;
 		}
 	}
 };

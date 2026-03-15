@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import math
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +17,7 @@ from ..schemas.judge import (
     AggregatedSteps,
     EvaluationResult,
     EvidenceCitation,
+    EvaluateStatus,
     Granularity,
     GranularityRequirement,
     JudgeEvaluationReport,
@@ -30,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 SHORT_TRACE_FAST_PATH_MAX_STEPS = 5
+PROMPT_NULL_LITERAL = "null"
 
 
 class JudgeEvaluatorService:
@@ -48,6 +51,163 @@ class JudgeEvaluatorService:
         self.phase_evidence_extraction_template = EvaluationPrompts.get_phase_evidence_extraction_prompt()
         self.phase_overall_synthesis_template = EvaluationPrompts.get_phase_overall_synthesis_prompt()
         self.phase_step_verdict_synthesis_template = EvaluationPrompts.get_phase_step_verdict_synthesis_prompt()
+        self.multi_condition_ranking_template = EvaluationPrompts.get_multi_condition_ranking_prompt()
+
+    def _should_log_stage_timing(self) -> bool:
+        return bool(getattr(settings, "JUDGE_EVALUATION_VERBOSE_STEP_LOGS", False))
+
+    def _log_stage_timing(self, stage: str, started_at: float, **fields: Any) -> None:
+        if not self._should_log_stage_timing():
+            return
+
+        elapsed_seconds = max(0.0, time.perf_counter() - float(started_at))
+        field_tokens: list[str] = []
+        for key, value in fields.items():
+            if value is None:
+                continue
+            text = str(value).replace("\n", " ").strip()
+            if not text:
+                continue
+            field_tokens.append(f"{key}={text}")
+
+        suffix = f" {' '.join(field_tokens)}" if field_tokens else ""
+        logger.info(
+            "[judge][timing] stage=%s elapsed=%.3fs%s",
+            stage,
+            elapsed_seconds,
+            suffix,
+        )
+
+    def _should_log_llm_response_details(self) -> bool:
+        return bool(getattr(settings, "LLM_ENABLE_CONSOLE_TRACE", False))
+
+    def _response_to_text(self, response_obj: Any) -> str:
+        if response_obj is None:
+            return ""
+
+        content = getattr(response_obj, "content", None)
+        if isinstance(content, str):
+            return content
+        if content is not None:
+            try:
+                return json.dumps(content, ensure_ascii=False, indent=2)
+            except Exception:
+                return str(content)
+
+        text = getattr(response_obj, "text", None)
+        if isinstance(text, str):
+            return text
+
+        return str(response_obj)
+
+    def _log_llm_response_details(
+        self,
+        *,
+        stage: str,
+        response_text: str,
+        response_obj: Any,
+        criterion_name: Optional[str] = None,
+        phase_id: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> None:
+        if not self._should_log_llm_response_details():
+            return
+
+        normalized = str(response_text or "")
+        logger.info(
+            "[judge][llm-response] stage=%s model=%s criterion=%s phase_id=%s chars=%d",
+            stage,
+            model_name,
+            criterion_name,
+            phase_id,
+            len(normalized),
+        )
+        logger.info("[judge][llm-response][raw] stage=%s payload=%s", stage, normalized)
+
+        parsed = self._extract_json_object(normalized)
+        if parsed is not None:
+            logger.info(
+                "[judge][llm-response][json] stage=%s payload=%s",
+                stage,
+                json.dumps(parsed, ensure_ascii=False, indent=2),
+            )
+
+        usage_metadata = getattr(response_obj, "usage_metadata", None)
+        response_metadata = getattr(response_obj, "response_metadata", None)
+        if usage_metadata is not None:
+            logger.info(
+                "[judge][llm-response][usage] stage=%s payload=%s",
+                stage,
+                json.dumps(usage_metadata, ensure_ascii=False, default=str),
+            )
+        if response_metadata is not None:
+            logger.info(
+                "[judge][llm-response][response_metadata] stage=%s payload=%s",
+                stage,
+                json.dumps(response_metadata, ensure_ascii=False, default=str),
+            )
+
+        # Fast diagnosis for reasoning-model responses that consume all completion budget
+        # before emitting user-visible text content.
+        finish_reason, reasoning_tokens = self._extract_finish_reason_and_reasoning_tokens(response_obj)
+
+        if not normalized.strip() and finish_reason == "length" and reasoning_tokens > 0:
+            logger.warning(
+                "[judge][llm-response][diagnosis] stage=%s empty_visible_output=true probable_cause=max_completion_tokens_exhausted_by_reasoning reasoning_tokens=%d",
+                stage,
+                reasoning_tokens,
+            )
+
+    def _extract_finish_reason_and_reasoning_tokens(self, response_obj: Any) -> tuple[str, int]:
+        finish_reason = ""
+        reasoning_tokens = 0
+
+        response_metadata = getattr(response_obj, "response_metadata", None)
+        if isinstance(response_metadata, dict):
+            finish_reason = str(response_metadata.get("finish_reason") or "").strip().lower()
+            token_usage = response_metadata.get("token_usage")
+            if isinstance(token_usage, dict):
+                completion_details = token_usage.get("completion_tokens_details")
+                if isinstance(completion_details, dict):
+                    try:
+                        reasoning_tokens = int(completion_details.get("reasoning_tokens") or 0)
+                    except Exception:
+                        reasoning_tokens = 0
+
+        if reasoning_tokens <= 0:
+            usage_metadata = getattr(response_obj, "usage_metadata", None)
+            if isinstance(usage_metadata, dict):
+                output_details = usage_metadata.get("output_token_details")
+                if isinstance(output_details, dict):
+                    try:
+                        reasoning_tokens = int(output_details.get("reasoning") or 0)
+                    except Exception:
+                        reasoning_tokens = 0
+
+        return finish_reason, max(0, int(reasoning_tokens or 0))
+
+    def _is_empty_length_truncated_response(self, response_obj: Any, response_text: str) -> bool:
+        if str(response_text or "").strip():
+            return False
+
+        finish_reason, reasoning_tokens = self._extract_finish_reason_and_reasoning_tokens(response_obj)
+        return finish_reason == "length" and reasoning_tokens > 0
+
+    def _resolve_evidence_extraction_max_tokens(self, *, retry: bool = False) -> int:
+        setting_name = (
+            "JUDGE_EVIDENCE_EXTRACTION_RETRY_MAX_TOKENS"
+            if retry
+            else "JUDGE_EVIDENCE_EXTRACTION_MAX_TOKENS"
+        )
+        raw_value = getattr(settings, setting_name, 0)
+        try:
+            value = int(raw_value or 0)
+        except Exception:
+            value = 0
+
+        if value <= 0:
+            value = int(getattr(settings, "DEFAULT_MAX_TOKENS", 4000) or 4000)
+        return max(1, value)
 
     async def _invoke_chain_async(
         self,
@@ -62,6 +222,18 @@ class JudgeEvaluatorService:
             return await asyncio.to_thread(chain.invoke, invoke_dict)
 
     def _extract_json_object(self, response_text: str) -> Optional[Dict[str, Any]]:
+        if response_text is None:
+            return None
+
+        if not isinstance(response_text, str):
+            if isinstance(response_text, (dict, list)):
+                try:
+                    response_text = json.dumps(response_text, ensure_ascii=False)
+                except Exception:
+                    response_text = str(response_text)
+            else:
+                response_text = str(response_text)
+
         if not response_text:
             return None
 
@@ -140,6 +312,58 @@ class JudgeEvaluatorService:
         }
         return mapping.get(lowered, "unknown")
 
+    def _prompt_text(self, value: Any) -> str:
+        if value is None:
+            return PROMPT_NULL_LITERAL
+
+        if isinstance(value, str):
+            return value if value.strip() else PROMPT_NULL_LITERAL
+
+        if isinstance(value, (dict, list, tuple)):
+            try:
+                return json.dumps(value, ensure_ascii=False)
+            except Exception:
+                pass
+
+        text = str(value)
+        return text if text.strip() else PROMPT_NULL_LITERAL
+
+    def _prompt_text_with_fallback(self, *values: Any) -> str:
+        for value in values:
+            text = self._prompt_text(value)
+            if text != PROMPT_NULL_LITERAL:
+                return text
+        return PROMPT_NULL_LITERAL
+
+    def _apply_step_verdicts_to_evidence(
+        self,
+        evidence_by_step: Dict[int, List[EvidenceCitation]],
+        step_assessments: List[Dict[str, Any]],
+    ) -> None:
+        if not evidence_by_step or not step_assessments:
+            return
+
+        step_verdict_by_index: Dict[int, EvaluateStatus] = {}
+        for item in step_assessments:
+            if not isinstance(item, dict):
+                continue
+
+            raw_step_index = item.get("step_index")
+            if not isinstance(raw_step_index, int):
+                continue
+
+            step_verdict_by_index[raw_step_index] = EvaluateStatus(
+                self._normalize_step_verdict(item.get("verdict"))
+            )
+
+        for step_index, evidence_list in evidence_by_step.items():
+            step_verdict = step_verdict_by_index.get(int(step_index))
+            if step_verdict is None:
+                continue
+
+            for evidence in evidence_list:
+                evidence.verdict = step_verdict
+
     async def synthesize_step_assessments(
         self,
         task_name: str,
@@ -173,7 +397,7 @@ class JudgeEvaluatorService:
                         "source_field": source_field,
                         "highlighted_text": ev.highlighted_text,
                         "reasoning": ev.reasoning or "",
-                        "verdict": str(verdict or ""),
+                        "verdict": self._normalize_step_verdict(verdict),
                     }
                 )
 
@@ -181,17 +405,25 @@ class JudgeEvaluatorService:
             llm = self.llm_factory.get_langchain_llm(model_name)
             chain = self.phase_step_verdict_synthesis_template | llm
             invoke_dict = {
-                "criterion_name": criterion_name,
-                "criterion_assertion": criterion_assertion,
-                "criterion_intent": str(criterion_reasoning or criterion_assertion or ""),
+                "criterion_name": self._prompt_text(criterion_name),
+                "criterion_assertion": self._prompt_text(criterion_assertion),
+                "criterion_intent": self._prompt_text_with_fallback(criterion_reasoning, criterion_assertion),
                 "phase_id": "criterion_step_synthesis",
-                "phase_summary": str(phase_criterion_summary or criterion_verdict or ""),
+                "phase_summary": self._prompt_text_with_fallback(phase_criterion_summary, criterion_verdict),
                 "verified_evidence_json": json.dumps(verified_evidence_payload, ensure_ascii=False, indent=2),
                 "phase_steps_context": "Grounded evidence snippets grouped by step for post-hoc step-level synthesis.",
             }
 
             response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
-            response_text = response.content if hasattr(response, "content") else str(response)
+            response_text = self._response_to_text(response)
+            self._log_llm_response_details(
+                stage="step_assessment_synthesis",
+                response_text=response_text,
+                response_obj=response,
+                criterion_name=criterion_name,
+                phase_id="criterion_step_synthesis",
+                model_name=model_name,
+            )
             response_data = self._extract_json_object(response_text) or {}
             raw_items = response_data.get("step_assessments", [])
             if not isinstance(raw_items, list):
@@ -230,6 +462,103 @@ class JudgeEvaluatorService:
             )
             return {}
 
+    async def rank_multi_conditions(
+        self,
+        task_name: str,
+        criterion_name: str,
+        criterion_assertion: str,
+        criterion_description: str,
+        condition_summaries: List[Dict[str, Any]],
+        model_name: Optional[str] = None,
+        llm_semaphore: Optional[asyncio.Semaphore] = None,
+    ) -> Dict[str, Any]:
+        if len(condition_summaries or []) < 2:
+            return {}
+
+        normalized_summaries: List[Dict[str, Any]] = []
+        valid_condition_ids: set[str] = set()
+        for item in condition_summaries:
+            if not isinstance(item, dict):
+                continue
+
+            condition_id = str(item.get("condition_id", "") or "").strip()
+            if not condition_id:
+                continue
+
+            valid_condition_ids.add(condition_id)
+            normalized_summaries.append(item)
+
+        if len(valid_condition_ids) < 2:
+            return {}
+
+        try:
+            llm = self.llm_factory.get_langchain_llm(model_name)
+            chain = self.multi_condition_ranking_template | llm
+            invoke_dict = {
+                "task_name": self._prompt_text(task_name),
+                "criterion_name": self._prompt_text(criterion_name),
+                "criterion_assertion": self._prompt_text(criterion_assertion),
+                "criterion_description": self._prompt_text(criterion_description),
+                "condition_summaries_json": json.dumps(
+                    normalized_summaries,
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            }
+
+            response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
+            response_text = self._response_to_text(response)
+            self._log_llm_response_details(
+                stage="multi_condition_ranking",
+                response_text=response_text,
+                response_obj=response,
+                criterion_name=criterion_name,
+                model_name=model_name,
+            )
+            response_data = self._extract_json_object(response_text) or {}
+            raw_ranking = response_data.get("ranking", [])
+            if not isinstance(raw_ranking, list):
+                return {}
+
+            ranking: List[Dict[str, str]] = []
+            seen_condition_ids: set[str] = set()
+            for item in raw_ranking:
+                if not isinstance(item, dict):
+                    continue
+
+                condition_id = str(item.get("condition_id", "") or "").strip()
+                if (
+                    not condition_id
+                    or condition_id not in valid_condition_ids
+                    or condition_id in seen_condition_ids
+                ):
+                    continue
+
+                seen_condition_ids.add(condition_id)
+                ranking.append(
+                    {
+                        "condition_id": condition_id,
+                        "reasoning": str(item.get("reasoning", "") or "").strip(),
+                    }
+                )
+
+            if not ranking:
+                return {}
+
+            return {
+                "ranking": ranking,
+                "ranking_reasoning": str(response_data.get("ranking_reasoning", "") or "").strip(),
+                "comparison_summary": str(response_data.get("comparison_summary", "") or "").strip(),
+            }
+        except Exception as exc:
+            logger.warning(
+                "Multi-condition ranking failed for criterion=%s model=%s error=%s",
+                criterion_name,
+                model_name,
+                exc,
+            )
+            return {}
+
     async def _interpret_criterion_intent_async(
         self,
         task_name: str,
@@ -243,17 +572,25 @@ class JudgeEvaluatorService:
             llm = self.llm_factory.get_langchain_llm(model_name)
             chain = self.criteria_interpretation_template | llm
             invoke_dict = {
-                "task_name": task_name,
-                "criterion_name": criterion_name,
-                "criterion_assertion": criterion_assertion,
-                "personas": ", ".join(personas) if personas else "None",
+                "task_name": self._prompt_text(task_name),
+                "criterion_name": self._prompt_text(criterion_name),
+                "criterion_assertion": self._prompt_text(criterion_assertion),
             }
 
             response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
-            response_text = response.content if hasattr(response, "content") else str(response)
+            response_text = self._response_to_text(response)
+            self._log_llm_response_details(
+                stage="criteria_interpretation",
+                response_text=response_text,
+                response_obj=response,
+                criterion_name=criterion_name,
+                model_name=model_name,
+            )
             response_data = self._extract_json_object(response_text) or {}
-            criterion_intent = str(response_data.get("criterion_intent", "") or "").strip()
-            return criterion_intent or criterion_assertion
+            criterion_intent = self._prompt_text(response_data.get("criterion_intent", "")).strip()
+            if criterion_intent != PROMPT_NULL_LITERAL:
+                return criterion_intent
+            return self._prompt_text(criterion_assertion)
         except Exception as exc:
             logger.warning(
                 "Criteria interpretation failed for criterion=%s model=%s error=%s",
@@ -261,7 +598,7 @@ class JudgeEvaluatorService:
                 model_name,
                 exc,
             )
-            return criterion_assertion
+            return self._prompt_text(criterion_assertion)
 
     def _collect_logprob_values(self, node: Any, sink: List[float]) -> None:
         if isinstance(node, dict):
@@ -584,15 +921,11 @@ class JudgeEvaluatorService:
     def _format_steps_for_unified_segmentation(self, all_steps: List[Dict[str, Any]]) -> str:
         lines: List[str] = []
         for idx, step in enumerate(all_steps):
-            thinking = str(step.get("thinking_process") or step.get("thinking") or "")[:300]
-            memory = str(step.get("memory") or "")[:220]
-            evaluation = str(step.get("evaluation_previous_goal") or "")[:220]
-            next_goal = str(step.get("next_goal") or "")[:220]
-            try:
-                action_text = json.dumps(step.get("action"), ensure_ascii=False)
-            except Exception:
-                action_text = str(step.get("action"))
-            action_text = action_text[:300]
+            thinking = self._prompt_text_with_fallback(step.get("thinking_process"), step.get("thinking"))[:300]
+            memory = self._prompt_text(step.get("memory"))[:220]
+            evaluation = self._prompt_text(step.get("evaluation_previous_goal"))[:220]
+            next_goal = self._prompt_text(step.get("next_goal"))[:220]
+            action_text = self._prompt_text(step.get("action"))[:300]
 
             lines.append(
                 f"Step {idx}:\n"
@@ -652,19 +985,30 @@ class JudgeEvaluatorService:
             ]
         return phases
 
-    def _build_phase_steps_context(self, all_steps: List[Dict[str, Any]], step_indices: List[int]) -> str:
+    def _build_phase_steps_context(
+        self,
+        all_steps: List[Dict[str, Any]],
+        step_indices: List[int],
+        max_chars_per_field: Optional[int] = None,
+    ) -> str:
+        char_limit: Optional[int] = None
+        if isinstance(max_chars_per_field, int) and max_chars_per_field > 0:
+            char_limit = max_chars_per_field
+
+        def _clip(value: str) -> str:
+            if char_limit is None:
+                return value
+            return value[:char_limit]
+
         context_parts: List[str] = []
         valid_indices = sorted({i for i in step_indices if isinstance(i, int) and 0 <= i < len(all_steps)})
         for step_idx in valid_indices:
             step = all_steps[step_idx]
-            thinking = step.get("thinking_process") or step.get("thinking") or "N/A"
-            memory = step.get("memory", "N/A")
-            eval_prev = step.get("evaluation_previous_goal", "N/A")
-            next_goal = step.get("next_goal", "N/A")
-            try:
-                action_text = json.dumps(step.get("action"), ensure_ascii=False)
-            except Exception:
-                action_text = str(step.get("action"))
+            thinking = _clip(self._prompt_text_with_fallback(step.get("thinking_process"), step.get("thinking")))
+            memory = _clip(self._prompt_text(step.get("memory")))
+            eval_prev = _clip(self._prompt_text(step.get("evaluation_previous_goal")))
+            next_goal = _clip(self._prompt_text(step.get("next_goal")))
+            action_text = _clip(self._prompt_text(step.get("action")))
 
             context_parts.append(
                 f"Step Index: {step_idx}\n"
@@ -681,6 +1025,7 @@ class JudgeEvaluatorService:
         self,
         criterion_name: str,
         criterion_assertion: str,
+        criterion_description: str,
         criterion_intent: str,
         task_name: str,
         personas: List[str],
@@ -716,10 +1061,31 @@ class JudgeEvaluatorService:
             enable_evidence_expansion=enable_evidence_expansion,
             llm_semaphore=llm_semaphore,
         )
+        phase_results = [result]
 
-        return result.model_copy(
+        final = await self._synthesize_overall_from_phase_results_async(
+            criterion_name=criterion_name,
+            criterion_assertion=criterion_assertion,
+            criterion_description=criterion_description,
+            task_name=task_name,
+            personas=personas,
+            models=models,
+            criterion_intent=criterion_intent,
+            persona_task_alignment="",
+            global_behavior_summary="",
+            phase_results=phase_results,
+            target_phases=[phase],
+            model_name=model_name,
+            all_steps=all_steps,
+            llm_semaphore=llm_semaphore,
+        )
+
+        if final.verdict == "UNABLE_TO_EVALUATE":
+            final = phase_results[0]
+
+        return final.model_copy(
             update={
-                "verdict": self._normalize_verdict(result.verdict),
+                "verdict": self._normalize_binary_verdict(final.verdict),
                 "aggregated_step_summary": (
                     f"Short-trace fast path evaluated {len(step_indices)} steps as a single behavior chain."
                 )[:500],
@@ -742,14 +1108,21 @@ class JudgeEvaluatorService:
         llm = self.llm_factory.get_langchain_llm(model_name)
         chain = self.phase_segmentation_template | llm
         invoke_dict = {
-            "task_name": task_name,
-            "criterion_name": criterion_name,
-            "criterion_intent": criterion_intent,
+            "task_name": self._prompt_text(task_name),
+            "criterion_name": self._prompt_text(criterion_name),
+            "criterion_intent": self._prompt_text(criterion_intent),
             "steps_text": self._format_steps_for_unified_segmentation(all_steps),
         }
 
         response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
-        response_text = response.content if hasattr(response, "content") else str(response)
+        response_text = self._response_to_text(response)
+        self._log_llm_response_details(
+            stage="phase_segmentation",
+            response_text=response_text,
+            response_obj=response,
+            criterion_name=criterion_name,
+            model_name=model_name,
+        )
         response_data = self._extract_json_object(response_text) or {}
 
         raw_phases = response_data.get("phases", [])
@@ -797,6 +1170,7 @@ class JudgeEvaluatorService:
     ) -> EvaluationResult:
         del persona_task_alignment, global_behavior_summary, enable_evidence_expansion
 
+        phase_started_at = time.perf_counter()
         phase_id = str(phase.get("phase_id", "phase_unknown"))
         phase_summary = str(phase.get("phase_summary", ""))
         step_indices = [i for i in phase.get("step_indices", []) if isinstance(i, int)]
@@ -813,20 +1187,99 @@ class JudgeEvaluatorService:
         phase_steps_context = self._build_phase_steps_context(all_steps, step_indices)
 
         llm = self.llm_factory.get_langchain_llm(model_name)
-        evidence_chain = self.phase_evidence_extraction_template | llm
+        evidence_llm = self.llm_factory.get_langchain_llm(
+            model_name,
+            max_tokens=self._resolve_evidence_extraction_max_tokens(retry=False),
+        )
+        evidence_chain = self.phase_evidence_extraction_template | evidence_llm
         evidence_invoke_dict = {
-            "criterion_name": criterion_name,
-            "criterion_assertion": criterion_assertion,
-            "criterion_intent": criterion_intent,
-            "phase_id": phase_id,
-            "phase_summary": phase_summary,
+            "criterion_name": self._prompt_text(criterion_name),
+            "criterion_assertion": self._prompt_text(criterion_assertion),
+            "criterion_intent": self._prompt_text(criterion_intent),
+            "phase_id": self._prompt_text(phase_id),
+            "phase_summary": self._prompt_text(phase_summary),
             "phase_steps_context": phase_steps_context,
         }
 
+        evidence_started_at = time.perf_counter()
         evidence_response = await self._invoke_chain_async(evidence_chain, evidence_invoke_dict, llm_semaphore)
-        evidence_response_text = (
-            evidence_response.content if hasattr(evidence_response, "content") else str(evidence_response)
+        self._log_stage_timing(
+            "phase_evidence_extraction",
+            evidence_started_at,
+            criterion=criterion_name,
+            phase_id=phase_id,
+            step_count=len(step_indices),
         )
+        evidence_response_text = (
+            self._response_to_text(evidence_response)
+        )
+        self._log_llm_response_details(
+            stage="phase_evidence_extraction",
+            response_text=evidence_response_text,
+            response_obj=evidence_response,
+            criterion_name=criterion_name,
+            phase_id=phase_id,
+            model_name=model_name,
+        )
+
+        if self._is_empty_length_truncated_response(evidence_response, evidence_response_text):
+            retry_char_limit_raw = getattr(
+                settings,
+                "JUDGE_EVIDENCE_EXTRACTION_RETRY_FIELD_CHAR_LIMIT",
+                180,
+            )
+            try:
+                retry_char_limit = max(60, int(retry_char_limit_raw or 180))
+            except Exception:
+                retry_char_limit = 180
+
+            compact_phase_steps_context = self._build_phase_steps_context(
+                all_steps,
+                step_indices,
+                max_chars_per_field=retry_char_limit,
+            )
+            retry_llm = self.llm_factory.get_langchain_llm(
+                model_name,
+                max_tokens=self._resolve_evidence_extraction_max_tokens(retry=True),
+            )
+            retry_chain = self.phase_evidence_extraction_template | retry_llm
+            retry_invoke_dict = {
+                **evidence_invoke_dict,
+                "phase_steps_context": compact_phase_steps_context,
+            }
+
+            logger.warning(
+                "[judge][retry] stage=phase_evidence_extraction reason=empty_length_truncated_response phase_id=%s criterion=%s char_limit=%d",
+                phase_id,
+                criterion_name,
+                retry_char_limit,
+            )
+
+            retry_started_at = time.perf_counter()
+            retry_response = await self._invoke_chain_async(retry_chain, retry_invoke_dict, llm_semaphore)
+            self._log_stage_timing(
+                "phase_evidence_extraction_retry",
+                retry_started_at,
+                criterion=criterion_name,
+                phase_id=phase_id,
+                step_count=len(step_indices),
+            )
+
+            retry_response_text = self._response_to_text(retry_response)
+            self._log_llm_response_details(
+                stage="phase_evidence_extraction_retry",
+                response_text=retry_response_text,
+                response_obj=retry_response,
+                criterion_name=criterion_name,
+                phase_id=phase_id,
+                model_name=model_name,
+            )
+
+            retry_data = self._extract_json_object(retry_response_text)
+            if retry_data:
+                evidence_response = retry_response
+                evidence_response_text = retry_response_text
+
         evidence_token_prediction_confidence = self._extract_token_prediction_confidence(evidence_response)
         evidence_data = self._extract_json_object(evidence_response_text) or {}
         parsed_evidence = self._parse_highlighted_evidence_items(evidence_data.get("highlighted_evidence", []))
@@ -853,11 +1306,13 @@ class JudgeEvaluatorService:
                     if hasattr(evidence.source_field, "value")
                     else str(evidence.source_field)
                 )
+                verdict = evidence.verdict.value if hasattr(evidence.verdict, "value") else evidence.verdict
                 verified_evidence_payload.append(
                     {
                         "step_index": step_idx,
                         "source_field": source_field,
                         "highlighted_text": evidence.highlighted_text,
+                        "verdict": self._normalize_step_verdict(verdict),
                         "reasoning": evidence.reasoning or "",
                     }
                 )
@@ -867,21 +1322,37 @@ class JudgeEvaluatorService:
         if verified_evidence_payload:
             step_verdict_chain = self.phase_step_verdict_synthesis_template | llm
             step_verdict_invoke_dict = {
-                "criterion_name": criterion_name,
-                "criterion_assertion": criterion_assertion,
-                "criterion_intent": criterion_intent,
-                "phase_id": phase_id,
-                "phase_summary": phase_summary,
+                "criterion_name": self._prompt_text(criterion_name),
+                "criterion_assertion": self._prompt_text(criterion_assertion),
+                "criterion_intent": self._prompt_text(criterion_intent),
+                "phase_id": self._prompt_text(phase_id),
+                "phase_summary": self._prompt_text(phase_summary),
                 "verified_evidence_json": json.dumps(verified_evidence_payload, ensure_ascii=False, indent=2),
                 "phase_steps_context": phase_steps_context,
             }
 
+            step_verdict_started_at = time.perf_counter()
             step_response = await self._invoke_chain_async(
                 step_verdict_chain,
                 step_verdict_invoke_dict,
                 llm_semaphore,
             )
-            step_response_text = step_response.content if hasattr(step_response, "content") else str(step_response)
+            self._log_stage_timing(
+                "phase_step_verdict_synthesis",
+                step_verdict_started_at,
+                criterion=criterion_name,
+                phase_id=phase_id,
+                evidence_items=len(verified_evidence_payload),
+            )
+            step_response_text = self._response_to_text(step_response)
+            self._log_llm_response_details(
+                stage="phase_step_verdict_synthesis",
+                response_text=step_response_text,
+                response_obj=step_response,
+                criterion_name=criterion_name,
+                phase_id=phase_id,
+                model_name=model_name,
+            )
             step_token_prediction_confidence = self._extract_token_prediction_confidence(step_response)
             step_response_data = self._extract_json_object(step_response_text) or {}
             raw_step_assessments = step_response_data.get("step_assessments", [])
@@ -921,6 +1392,8 @@ class JudgeEvaluatorService:
                         "confidence_score": 0.0,
                     }
                 )
+
+        self._apply_step_verdicts_to_evidence(evidence_by_step, step_assessments)
 
         pass_count = sum(1 for item in step_assessments if item.get("verdict") == "pass")
         fail_count = sum(1 for item in step_assessments if item.get("verdict") == "fail")
@@ -1003,6 +1476,15 @@ class JudgeEvaluatorService:
             f"{phase_id}: pass={pass_count}, fail={fail_count}, partial={partial_count}, unknown={unknown_count}"
         )
 
+        self._log_stage_timing(
+            "phase_total",
+            phase_started_at,
+            criterion=criterion_name,
+            phase_id=phase_id,
+            step_count=len(step_indices),
+            grounded_evidence=len(grounded_evidence),
+        )
+
         return EvaluationResult(
             criterion_name=criterion_name,
             verdict=self._normalize_verdict(phase_verdict),
@@ -1045,6 +1527,7 @@ class JudgeEvaluatorService:
             )
 
         try:
+            criterion_started_at = time.perf_counter()
             logger.info(
                 "[judge][criterion-start] task=%s criterion=%s model=%s total_steps=%d",
                 task_name,
@@ -1052,6 +1535,8 @@ class JudgeEvaluatorService:
                 model_name,
                 len(all_steps),
             )
+
+            criterion_intent_started_at = time.perf_counter()
             criterion_intent = await self._interpret_criterion_intent_async(
                 task_name=task_name,
                 criterion_name=criterion_name,
@@ -1059,6 +1544,13 @@ class JudgeEvaluatorService:
                 personas=personas,
                 model_name=model_name,
                 llm_semaphore=llm_semaphore,
+            )
+            self._log_stage_timing(
+                "criterion_intent",
+                criterion_intent_started_at,
+                task=task_name,
+                criterion=criterion_name,
+                model=model_name,
             )
             persona_task_alignment = ""
             global_behavior_summary = ""
@@ -1074,9 +1566,11 @@ class JudgeEvaluatorService:
                     len(all_steps),
                     SHORT_TRACE_FAST_PATH_MAX_STEPS,
                 )
+                fast_path_started_at = time.perf_counter()
                 final = await self._evaluate_short_trace_fast_path_async(
                     criterion_name=criterion_name,
                     criterion_assertion=criterion_assertion,
+                    criterion_description=criterion_description or "",
                     criterion_intent=criterion_intent,
                     task_name=task_name,
                     personas=personas,
@@ -1086,6 +1580,13 @@ class JudgeEvaluatorService:
                     enable_evidence_expansion=enable_evidence_expansion,
                     llm_semaphore=llm_semaphore,
                 )
+                self._log_stage_timing(
+                    "short_trace_fast_path",
+                    fast_path_started_at,
+                    task=task_name,
+                    criterion=criterion_name,
+                    total_steps=len(all_steps),
+                )
                 logger.info(
                     "[judge][criterion-end] task=%s criterion=%s final_verdict=%s final_confidence=%.2f",
                     task_name,
@@ -1093,8 +1594,16 @@ class JudgeEvaluatorService:
                     final.verdict,
                     float(final.confidence_score or 0.0),
                 )
+                self._log_stage_timing(
+                    "criterion_total",
+                    criterion_started_at,
+                    task=task_name,
+                    criterion=criterion_name,
+                    verdict=final.verdict,
+                )
                 return final
 
+            phase_segmentation_started_at = time.perf_counter()
             segmentation = await self._segment_phases_by_dimensions_async(
                 criterion_name=criterion_name,
                 criterion_assertion=criterion_assertion,
@@ -1103,6 +1612,13 @@ class JudgeEvaluatorService:
                 all_steps=all_steps,
                 model_name=model_name,
                 llm_semaphore=llm_semaphore,
+            )
+            self._log_stage_timing(
+                "phase_segmentation",
+                phase_segmentation_started_at,
+                task=task_name,
+                criterion=criterion_name,
+                total_steps=len(all_steps),
             )
             phases = segmentation.get("phases", [])
             relevant_ids = set(segmentation.get("relevant_phase_ids", []))
@@ -1168,7 +1684,15 @@ class JudgeEvaluatorService:
                     )
                     return phase_result
 
+            phase_eval_started_at = time.perf_counter()
             phase_results = await asyncio.gather(*[_run(p) for p in target_phases])
+            self._log_stage_timing(
+                "all_phase_evaluations",
+                phase_eval_started_at,
+                task=task_name,
+                criterion=criterion_name,
+                phase_count=len(target_phases),
+            )
             phase_results = [r for r in phase_results if isinstance(r, EvaluationResult)]
             if not phase_results:
                 return EvaluationResult(
@@ -1180,6 +1704,7 @@ class JudgeEvaluatorService:
                     used_granularity=Granularity.PHASE_LEVEL,
                 )
 
+            overall_synthesis_started_at = time.perf_counter()
             final = await self._synthesize_overall_from_phase_results_async(
                 criterion_name=criterion_name,
                 criterion_assertion=criterion_assertion,
@@ -1195,6 +1720,13 @@ class JudgeEvaluatorService:
                 model_name=model_name,
                 all_steps=all_steps,
                 llm_semaphore=llm_semaphore,
+            )
+            self._log_stage_timing(
+                "overall_synthesis",
+                overall_synthesis_started_at,
+                task=task_name,
+                criterion=criterion_name,
+                phase_count=len(phase_results),
             )
 
             if final.verdict == "UNABLE_TO_EVALUATE" and len(phase_results) > 1:
@@ -1214,6 +1746,13 @@ class JudgeEvaluatorService:
                 criterion_name,
                 final.verdict,
                 float(final.confidence_score or 0.0),
+            )
+            self._log_stage_timing(
+                "criterion_total",
+                criterion_started_at,
+                task=task_name,
+                criterion=criterion_name,
+                verdict=final.verdict,
             )
             return final
         except Exception as exc:
@@ -1601,7 +2140,7 @@ class JudgeEvaluatorService:
         all_steps: List[Dict[str, Any]],
         llm_semaphore: Optional[asyncio.Semaphore] = None,
     ) -> EvaluationResult:
-        del criterion_description, models, persona_task_alignment, global_behavior_summary
+        del criterion_description, models, persona_task_alignment, global_behavior_summary, criterion_intent
 
         if not phase_results:
             return EvaluationResult(
@@ -1619,15 +2158,28 @@ class JudgeEvaluatorService:
             phase_id = str(phase_meta.get("phase_id", f"phase_{idx}"))
             step_indices = phase_meta.get("step_indices", [])
             phase_summary = str(phase_meta.get("phase_summary", ""))
+            phase_evidence = result.highlighted_evidence or []
+            pass_evidence = 0
+            partial_evidence = 0
+            fail_evidence = 0
+            for evidence in phase_evidence:
+                evidence_verdict = evidence.verdict.value if hasattr(evidence.verdict, "value") else evidence.verdict
+                normalized_evidence_verdict = self._normalize_step_verdict(evidence_verdict)
+                if normalized_evidence_verdict == "pass":
+                    pass_evidence += 1
+                elif normalized_evidence_verdict == "partial":
+                    partial_evidence += 1
+                elif normalized_evidence_verdict == "fail":
+                    fail_evidence += 1
+            unknown_evidence = max(0, len(phase_evidence) - pass_evidence - partial_evidence - fail_evidence)
             phase_chunks.append(
                 (
                     f"Phase: {phase_id}\n"
                     f"  Steps: {step_indices}\n"
                     f"  Phase Summary: {phase_summary}\n"
-                    f"  Verdict: {result.verdict}\n"
-                    f"  Confidence: {result.confidence_score}\n"
-                    f"  Reasoning: {result.reasoning}\n"
-                    f"  Evidence Count: {len(result.highlighted_evidence or [])}\n"
+                    f"  Evidence Verdict Distribution: pass={pass_evidence}, partial={partial_evidence}, fail={fail_evidence}, unknown={unknown_evidence}\n"
+                    f"  Evidence Count: {len(phase_evidence)}\n"
+                    f"  Phase Notes: {result.reasoning}\n"
                 )
             )
         phase_evaluations_summary = "\n".join(phase_chunks)
@@ -1661,16 +2213,21 @@ class JudgeEvaluatorService:
             llm = self.llm_factory.get_langchain_llm(model_name)
             chain = self.phase_overall_synthesis_template | llm
             invoke_dict = {
-                "task_name": task_name,
-                "criterion_name": criterion_name,
-                "criterion_assertion": criterion_assertion,
-                "personas": ", ".join(personas) if personas else "None",
-                "criterion_intent": criterion_intent,
-                "phase_evaluations_summary": phase_evaluations_summary,
+                "task_name": self._prompt_text(task_name),
+                "criterion_name": self._prompt_text(criterion_name),
+                "criterion_assertion": self._prompt_text(criterion_assertion),
+                "phase_evaluations_summary": self._prompt_text(phase_evaluations_summary),
                 "aggregated_evidence_json": json.dumps(aggregated_evidence_payload, ensure_ascii=False, indent=2),
             }
             response = await self._invoke_chain_async(chain, invoke_dict, llm_semaphore)
-            response_text = response.content if hasattr(response, "content") else str(response)
+            response_text = self._response_to_text(response)
+            self._log_llm_response_details(
+                stage="phase_overall_synthesis",
+                response_text=response_text,
+                response_obj=response,
+                criterion_name=criterion_name,
+                model_name=model_name,
+            )
             token_prediction_confidence = self._extract_token_prediction_confidence(response)
             response_data = self._extract_json_object(response_text)
             if not response_data:

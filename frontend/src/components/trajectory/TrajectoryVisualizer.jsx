@@ -11,6 +11,7 @@ import './TrajectoryVisualizer.css';
 
 const EMPTY_GRAPH = Object.freeze({ nodes: [], links: [], clusters: [], meta: {} });
 const HASH_REFINEMENT_IDLE_TIMEOUT = 600;
+const HASH_SIMILARITY_THRESHOLD = 20;
 const TRAJECTORY_GRAPH_CACHE_LIMIT = 12;
 const trajectoryGraphCache = new Map();
 
@@ -450,6 +451,7 @@ const TrajectoryVisualizer = ({
 		const buildTargetGraph = () => buildTrajectoryGraph(trajectory, {
 			hash: { hashSize: 16 },
 			hashConcurrency: 8,
+			hashSimilarityThreshold: HASH_SIMILARITY_THRESHOLD,
 			useImageHash,
 			usePreviewImage: shouldUsePreviewImage,
 			conditions: conditionsRef.current,

@@ -20,9 +20,6 @@ export function useJudgeReport(runId, initialSteps = [], evaluationResponse = nu
   // Locally computed aggregated data (Step + Report merge)
   const [enrichedSteps, setEnrichedSteps] = useState([]);
   
-  // Cached analyzed granularity (criterion → required_granularity)
-  const [granularityCache, setGranularityCache] = useState({});
-
   // Use ref to store latest initialSteps, avoiding infinite loops from dependency changes
   const stepsRef = useRef(initialSteps);
   useEffect(() => {
@@ -86,8 +83,6 @@ export function useJudgeReport(runId, initialSteps = [], evaluationResponse = nu
                 reasoning: involvedStep.reasoning,
                 confidence_score: involvedStep.confidenceScore,
                 highlighted_evidence: evidenceList, // Ensure it is an array
-                granularity: involvedStep.granularity,
-                isStepLevelEval: involvedStep.granularity === 'step_level'
               });
             });
           });
@@ -153,8 +148,6 @@ export function useJudgeReport(runId, initialSteps = [], evaluationResponse = nu
               reasoning: involvedStep.reasoning,
               confidence_score: involvedStep.confidenceScore,
               highlighted_evidence: evidenceList, 
-              granularity: involvedStep.granularity,
-              isStepLevelEval: involvedStep.granularity === 'step_level'
             });
           });
         });
@@ -188,7 +181,6 @@ export function useJudgeReport(runId, initialSteps = [], evaluationResponse = nu
           criterion_name: evaluation.criterion_name,
           verdict: evaluation.verdict,
           confidence_score: evaluation.confidence_score,
-          isStepLevelEval: evaluation.required_granularity === 'STEP_LEVEL',
         }));
       
       return {
@@ -200,12 +192,6 @@ export function useJudgeReport(runId, initialSteps = [], evaluationResponse = nu
     });
     
     setEnrichedSteps(enriched);
-    
-    const granularityDict = {};
-    judgeReport.evaluations?.forEach(evaluation => {
-      granularityDict[evaluation.criterion_name] = evaluation.required_granularity;
-    });
-    setGranularityCache(granularityDict);
   }, [runId]);
 
   
@@ -235,10 +221,6 @@ export function useJudgeReport(runId, initialSteps = [], evaluationResponse = nu
     }
   }, [runId, enrichStepsWithEvaluations]);
   
-  const getGranularityForCriterion = useCallback((criterionId) => {
-    return granularityCache[criterionId] || 'STEP_LEVEL';
-  }, [granularityCache]);
-  
   const getStepEvaluationDetails = useCallback((stepIndex) => {
     // Prefer using enrichedSteps which handles both formats
     if (enrichedSteps[stepIndex] && enrichedSteps[stepIndex].relatedEvaluations) {
@@ -262,12 +244,7 @@ export function useJudgeReport(runId, initialSteps = [], evaluationResponse = nu
     if (!cluster) return [];
     
     return report.evaluations
-      .filter(evaluation => {
-        if (evaluation.required_granularity === 'SUBTASK_CLUSTER') {
-          return evaluation.relevant_steps.some(idx => cluster.step_indices.includes(idx));
-        }
-        return evaluation.relevant_steps.some(idx => cluster.step_indices.includes(idx));
-      })
+      .filter(evaluation => evaluation.relevant_steps.some(idx => cluster.step_indices.includes(idx)))
       .map(evaluation => ({
         ...evaluation,
         affectsThisCluster: true,
@@ -286,7 +263,6 @@ export function useJudgeReport(runId, initialSteps = [], evaluationResponse = nu
     enrichedSteps,
     
     submitEvaluation,
-    getGranularityForCriterion,
     getStepEvaluationDetails,
     getClusterEvaluationDetails,
   };

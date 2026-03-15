@@ -25,8 +25,6 @@ export const API_ENDPOINTS = {
   },
   judge: {
     evaluateExperiment: '/judge/evaluate-experiment',
-    analyzeGranularity: '/judge/analyze-granularity',
-    aggregateSteps: '/judge/aggregate-steps',
   },
   maintenance: {
     cleanupFiles: '/maintenance/cleanup-files',

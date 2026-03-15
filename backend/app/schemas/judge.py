@@ -128,8 +128,7 @@ class EvidenceCitation(BaseModel):
 
 
 class StepEvaluationDetail(BaseModel):
-    """Detailed evaluation for a specific granularity level."""
-    granularity: Granularity = Field(..., description="Granularity level of this evaluation detail")
+    """Detailed evaluation for a grounded step group."""
     evaluateStatus: EvaluateStatus = Field(..., description="Pass/Fail status")
     reasoning: str = Field(..., description="Reasoning for the status")
     highlighted_evidence: List[EvidenceCitation] = Field(default_factory=list, description="Evidence supporting the evaluation")
@@ -250,7 +249,6 @@ class ExperimentCriterion(BaseModel):
 
 class ExperimentCriterionResult(ExperimentCriterion):
     """Result of evaluating a criterion."""
-    granularity: Granularity = Field(..., description="Overall granularity used")
     involved_steps: List[StepEvaluationDetail] = Field(..., description="Detailed evaluations")
     overall_assessment: Optional[EvaluateStatus] = Field(None, description="Overall pass/fail assessment for this criterion")
     overall_reasoning: Optional[str] = Field(None, description="Reasoning for the overall assessment")
@@ -309,7 +307,6 @@ class CriteriaMultiConditionAssessment(BaseModel):
     title: str = Field(..., description="Title of the criterion")
     assertion: str = Field(..., description="Assertion to verify")
     description: Optional[str] = Field(None, description="Description of the criterion")
-    granularity: Granularity = Field(..., description="Granularity level used for this criterion")
     condition_comparison: ConditionComparison = Field(..., description="Comparison results across conditions")
 
 
@@ -341,7 +338,6 @@ class ExperimentEvaluationResponse(BaseModel):
                             {
                                 "title": "Efficiency",
                                 "assertion": "steps < 10",
-                                "granularity": "step_level",
                                 "involved_steps": [],
                                 "overall_assessment": "pass",
                                 "overall_reasoning": "Completed in 5 steps",
@@ -357,7 +353,6 @@ class ExperimentEvaluationResponse(BaseModel):
                         {
                             "title": "Efficiency",
                             "assertion": "steps < 10",
-                            "granularity": "step_level",
                             "condition_comparison": {
                                 "best_condition_id": "run_1",
                                 "best_condition_rank": 1,

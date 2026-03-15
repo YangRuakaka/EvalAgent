@@ -35,12 +35,6 @@ export const evaluateStatusMap = {
   'unevaluated': { bg: '#f3f4f6', text: '#374151', border: '#9ca3af', label: 'Not Evaluated', icon: '○' },
 };
 
-export const granularityLabels = {
-  'STEP_LEVEL': '单步评估',
-  'SUBTASK_CLUSTER': '任务块评估',
-  'GLOBAL_SUMMARY': '全局评估',
-};
-
 export const evaluationAffectsStep = (evaluation, stepIndex) => {
   return evaluation.relevant_steps.includes(stepIndex);
 };

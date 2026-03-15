@@ -21,7 +21,6 @@ from ..schemas.judge import (
     StepEvaluationDetail,
     EvidenceCitation,
     EvaluateStatus,
-    Granularity,
     ExperimentCriterion,
     ConditionRequest,
     MultiConditionAssessment,
@@ -205,8 +204,6 @@ async def _process_single_criterion(
     """Process a single criterion evaluation asynchronously."""
     logger.info(f"Evaluating criterion: {crit.title}")
 
-    target_granularity = Granularity.PHASE_LEVEL
-
     # 5. Evaluate
     try:
         logger.info("Starting unified evaluation for criterion: %s", crit.title)
@@ -302,7 +299,6 @@ async def _process_single_criterion(
                 ev_dicts = [ev.model_dump() for ev in ev_list]
                 
                 step_detail = StepEvaluationDetail(
-                    granularity=target_granularity,
                     evaluateStatus=step_verdict,
                     reasoning=step_reasoning,
                     highlighted_evidence=ev_dicts,
@@ -338,7 +334,6 @@ async def _process_single_criterion(
             title=crit.title,
             assertion=crit.assertion,
             description=crit.description,
-            granularity=target_granularity,
             involved_steps=involved_steps_list,
             overall_assessment=overall_assessment,
             overall_reasoning=overall_reasoning,
@@ -351,7 +346,6 @@ async def _process_single_criterion(
             title=crit.title,
             assertion=crit.assertion,
             description=crit.description,
-            granularity=target_granularity,
             involved_steps=[],
             overall_assessment=EvaluateStatus.UNKNOWN,
             overall_reasoning=f"Criterion evaluation failed: {str(e)}",
@@ -539,19 +533,88 @@ def _build_ranking_reasoning(
         return f"No valid condition results were available for criterion '{criterion.title}'."
 
     lines = [
-        f"Ranking for '{criterion.title}' is determined by overall assessment first and confidence second.",
+        f"Ranking for '{criterion.title}' is determined by combining overall assessment with evidence strength.",
+        "Confidence score is retained for reporting only and is not used as a ranking basis.",
     ]
     best_item = ranking_items[0]
     lines.append(
-        f"Top condition: persona '{best_item.persona}' using model '{best_item.model}' run {best_item.run_index}, assessed as {best_item.overall_assessment.value} with confidence {best_item.confidence:.2f}."
+        f"Top condition: persona '{best_item.persona}' using model '{best_item.model}' run {best_item.run_index}, {best_item.summary}."
     )
 
     for item in ranking_items[1:]:
         lines.append(
-            f"Compared condition: persona '{item.persona}' using model '{item.model}' run {item.run_index}, assessed as {item.overall_assessment.value} with confidence {item.confidence:.2f}."
+            f"Compared condition: persona '{item.persona}' using model '{item.model}' run {item.run_index}, {item.summary}."
         )
 
     return " ".join(lines)
+
+
+def _compute_evidence_strength(criterion_result: ExperimentCriterionResult) -> float:
+    """
+    Compute a normalized evidence strength score for ranking.
+
+    This score captures how much grounded evidence supports the criterion result.
+    Confidence is intentionally excluded from this score.
+    """
+    step_details = criterion_result.involved_steps or []
+    if not step_details:
+        return 0.0
+
+    evidence_count = 0
+    unique_step_indexes = set()
+    unique_sources = set()
+    reasoning_support_count = 0
+    verdict_total = 0
+    verdict_match = 0
+
+    for step_detail in step_details:
+        unique_step_indexes.update(int(step_idx) for step_idx in (step_detail.steps or []))
+        if (step_detail.reasoning or "").strip():
+            reasoning_support_count += 1
+
+        for evidence in step_detail.highlighted_evidence or []:
+            highlighted_text = (evidence.highlighted_text or "").strip()
+            if not highlighted_text:
+                continue
+
+            evidence_count += 1
+            unique_step_indexes.add(int(evidence.step_index))
+            source_name = (
+                evidence.source_field.value
+                if hasattr(evidence.source_field, "value")
+                else str(evidence.source_field)
+            )
+            if source_name:
+                unique_sources.add(source_name)
+            if (evidence.reasoning or "").strip():
+                reasoning_support_count += 1
+
+            if evidence.verdict is not None:
+                verdict_total += 1
+                if evidence.verdict == step_detail.evaluateStatus:
+                    verdict_match += 1
+
+    evidence_density = min(1.0, evidence_count / 8.0)
+    step_coverage = min(1.0, len(unique_step_indexes) / 4.0)
+    source_diversity = min(1.0, len(unique_sources) / 3.0)
+    reasoning_support = min(
+        1.0,
+        reasoning_support_count / max(1, evidence_count + len(step_details)),
+    )
+    verdict_alignment = (
+        verdict_match / verdict_total
+        if verdict_total > 0
+        else 0.6
+    )
+
+    score = (
+        0.45 * evidence_density
+        + 0.20 * step_coverage
+        + 0.20 * source_diversity
+        + 0.10 * reasoning_support
+        + 0.05 * verdict_alignment
+    )
+    return _clip_confidence(score)
 
 
 def _fallback_ranking(
@@ -559,9 +622,10 @@ def _fallback_ranking(
     results: List[ConditionResult]
 ) -> List[RankingItem]:
     """
-    Fallback ranking when LLM fails.
-    
-    Priority: pass > partial > fail > unknown, then by confidence score.
+    Deterministic ranking for multi-condition comparison.
+
+    Priority: overall assessment (pass > partial > fail > unknown),
+    then evidence strength score.
     """
     status_priority = {
         EvaluateStatus.PASS: 0,
@@ -577,19 +641,24 @@ def _fallback_ranking(
         condition_evaluations.items(),
         key=lambda x: (
             status_priority.get(x[1].overall_assessment, 3),
-            -(x[1].confidence or 0)
+            -_compute_evidence_strength(x[1]),
+            str(x[0]),
         )
     )
     
     ranking_items = []
     for rank, (cond_id, crit_result) in enumerate(sorted_conditions, 1):
         result = condition_map[cond_id]
+        evidence_strength = _compute_evidence_strength(crit_result)
         ranking_item = RankingItem(
             rank=rank,
             condition_id=cond_id,
             overall_assessment=crit_result.overall_assessment,
             confidence=crit_result.confidence or 0,
-            summary=f"{crit_result.overall_assessment.value} (confidence: {crit_result.confidence or 0:.2f})",
+            summary=(
+                f"assessed as {crit_result.overall_assessment.value} "
+                f"with evidence score {evidence_strength:.2f}"
+            ),
             persona=result.persona,
             value=result.value,
             model=result.model,
@@ -600,13 +669,129 @@ def _fallback_ranking(
     return ranking_items
 
 
+def _build_condition_summaries_for_llm_ranking(
+    condition_evaluations: Dict[str, ExperimentCriterionResult],
+    results: List[ConditionResult],
+) -> List[Dict[str, Any]]:
+    condition_map = {result.conditionID: result for result in results}
+    summaries: List[Dict[str, Any]] = []
+
+    for condition_id, criterion_result in sorted(condition_evaluations.items(), key=lambda item: str(item[0])):
+        condition_result = condition_map.get(condition_id)
+        if condition_result is None:
+            continue
+
+        step_details = criterion_result.involved_steps or []
+        evidence_count = 0
+        source_fields = set()
+        for step_detail in step_details:
+            for evidence in step_detail.highlighted_evidence or []:
+                if not (evidence.highlighted_text or "").strip():
+                    continue
+                evidence_count += 1
+                source_name = (
+                    evidence.source_field.value
+                    if hasattr(evidence.source_field, "value")
+                    else str(evidence.source_field)
+                )
+                if source_name:
+                    source_fields.add(source_name)
+
+        summaries.append(
+            {
+                "condition_id": condition_id,
+                "persona": condition_result.persona,
+                "value": condition_result.value,
+                "model": condition_result.model,
+                "run_index": condition_result.run_index,
+                "overall_assessment": (criterion_result.overall_assessment or EvaluateStatus.UNKNOWN).value,
+                "overall_reasoning": criterion_result.overall_reasoning or "",
+                "evidence_score_hint": _compute_evidence_strength(criterion_result),
+                "evidence_item_count": evidence_count,
+                "evidence_source_diversity": len(source_fields),
+                "step_count": len(step_details),
+                # Included for reporting context only; ranking prompt explicitly forbids using it.
+                "confidence_for_reporting": float(criterion_result.confidence or 0.0),
+            }
+        )
+
+    return summaries
+
+
+def _build_ranking_items_from_llm_output(
+    llm_ranking_payload: Dict[str, Any],
+    condition_evaluations: Dict[str, ExperimentCriterionResult],
+    results: List[ConditionResult],
+) -> List[RankingItem]:
+    deterministic_ranking = _fallback_ranking(condition_evaluations, results)
+    raw_ranking = llm_ranking_payload.get("ranking", []) if isinstance(llm_ranking_payload, dict) else []
+    if not isinstance(raw_ranking, list):
+        return deterministic_ranking
+
+    valid_condition_ids = set(condition_evaluations.keys())
+    ordered_condition_ids: List[str] = []
+    reasoning_by_condition: Dict[str, str] = {}
+    for item in raw_ranking:
+        if not isinstance(item, dict):
+            continue
+
+        condition_id = normalize_to_string(item.get("condition_id"), "").strip()
+        if not condition_id or condition_id not in valid_condition_ids or condition_id in ordered_condition_ids:
+            continue
+
+        ordered_condition_ids.append(condition_id)
+        reasoning_by_condition[condition_id] = normalize_to_string(item.get("reasoning"), "").strip()
+
+    if not ordered_condition_ids:
+        return deterministic_ranking
+
+    # Ensure no condition is dropped if LLM output is incomplete.
+    for fallback_item in deterministic_ranking:
+        if fallback_item.condition_id not in ordered_condition_ids:
+            ordered_condition_ids.append(fallback_item.condition_id)
+
+    condition_map = {result.conditionID: result for result in results}
+    ranking_items: List[RankingItem] = []
+    for rank, condition_id in enumerate(ordered_condition_ids, 1):
+        criterion_result = condition_evaluations.get(condition_id)
+        condition_result = condition_map.get(condition_id)
+        if criterion_result is None or condition_result is None:
+            continue
+
+        evidence_strength = _compute_evidence_strength(criterion_result)
+        llm_reasoning = reasoning_by_condition.get(condition_id, "")
+        summary = llm_reasoning or (
+            f"assessed as {(criterion_result.overall_assessment or EvaluateStatus.UNKNOWN).value} "
+            f"with evidence score {evidence_strength:.2f}"
+        )
+        ranking_items.append(
+            RankingItem(
+                rank=rank,
+                condition_id=condition_id,
+                overall_assessment=criterion_result.overall_assessment or EvaluateStatus.UNKNOWN,
+                confidence=criterion_result.confidence or 0,
+                summary=summary,
+                persona=condition_result.persona,
+                value=condition_result.value,
+                model=condition_result.model,
+                run_index=condition_result.run_index,
+            )
+        )
+
+    return ranking_items or deterministic_ranking
+
+
 async def _generate_multi_condition_assessment(
     results: List[ConditionResult],
     criteria: List[ExperimentCriterion],
+    task_name: str,
+    services: JudgeServices,
+    judge_model: Optional[str] = None,
+    llm_semaphore: Optional[asyncio.Semaphore] = None,
 ) -> Optional[MultiConditionAssessment]:
     """
     Generate multi-condition assessment comparing all conditions against each criterion.
-    Uses LLM to rank and compare conditions for each criterion.
+    Uses LLM ranking based on overall assessment + evidence, with deterministic fallback.
     
     Args:
         results: List of evaluated conditions
@@ -634,25 +819,44 @@ async def _generate_multi_condition_assessment(
         
         if not criterion_results:
             continue
-        
-        # Get the granularity from the first result (should be same across conditions)
-        first_granularity = next(iter(criterion_results.values())).granularity
-        
-        ranking_items = _fallback_ranking(criterion_results, results)
-        ranking_reasoning = _build_ranking_reasoning(criterion, ranking_items)
+
+        llm_condition_summaries = _build_condition_summaries_for_llm_ranking(
+            criterion_results,
+            results,
+        )
+        llm_ranking_payload = await services.judge_evaluator.rank_multi_conditions(
+            task_name=task_name,
+            criterion_name=criterion.title,
+            criterion_assertion=criterion.assertion,
+            criterion_description=criterion.description or "",
+            condition_summaries=llm_condition_summaries,
+            model_name=judge_model,
+            llm_semaphore=llm_semaphore,
+        )
+
+        ranking_items = _build_ranking_items_from_llm_output(
+            llm_ranking_payload=llm_ranking_payload,
+            condition_evaluations=criterion_results,
+            results=results,
+        )
+        ranking_reasoning = normalize_to_string(
+            llm_ranking_payload.get("ranking_reasoning") if isinstance(llm_ranking_payload, dict) else "",
+            "",
+        ).strip() or _build_ranking_reasoning(criterion, ranking_items)
         
         best_condition_id = ranking_items[0].condition_id if ranking_items else None
         if not best_condition_id:
             continue
         
-        # Create comparison summary
-        comparison_summary_parts = []
-        for item in ranking_items:
-            comparison_summary_parts.append(
-                f"{item.condition_id}: {item.overall_assessment.value} "
-                f"(confidence: {item.confidence:.2f})"
-            )
-        comparison_summary = " > ".join(comparison_summary_parts)
+        comparison_summary = normalize_to_string(
+            llm_ranking_payload.get("comparison_summary") if isinstance(llm_ranking_payload, dict) else "",
+            "",
+        ).strip()
+        if not comparison_summary:
+            comparison_summary_parts = []
+            for item in ranking_items:
+                comparison_summary_parts.append(f"{item.condition_id}: {item.summary}")
+            comparison_summary = " > ".join(comparison_summary_parts)
         
         condition_comparison = ConditionComparison(
             best_condition_id=best_condition_id,
@@ -666,7 +870,6 @@ async def _generate_multi_condition_assessment(
             title=criterion.title,
             assertion=criterion.assertion,
             description=criterion.description,
-            granularity=first_granularity,
             condition_comparison=condition_comparison
         )
         
@@ -849,7 +1052,6 @@ async def evaluate_experiment(
                     title=req_crit.title,
                     assertion=req_crit.assertion,
                     description=req_crit.description,
-                    granularity=Granularity.PHASE_LEVEL,
                     involved_steps=[],
                     overall_assessment=EvaluateStatus.UNKNOWN,
                     overall_reasoning="No criterion result produced (internal timeout/failure).",
@@ -863,10 +1065,28 @@ async def evaluate_experiment(
         else:
             logger.warning("Skipping invalid condition result: %s", cond_id)
     
+    shared_task_names: List[str] = []
+    for ctx in loaded_contexts:
+        raw_task = ctx.get("task")
+        task_name = normalize_to_string(getattr(raw_task, "name", ""), "").strip()
+        if task_name and task_name not in shared_task_names:
+            shared_task_names.append(task_name)
+
+    ranking_task_name = " ; ".join(shared_task_names)
+    if len(shared_task_names) > 1:
+        logger.warning(
+            "Multiple task names detected for one experiment request: %s",
+            shared_task_names,
+        )
+
     # 6. Generate multi-condition assessment if there are 2+ conditions
     multi_condition_assessment = await _generate_multi_condition_assessment(
         condition_results,
         request.criteria,
+        task_name=ranking_task_name,
+        services=services,
+        judge_model=request.judge_model,
+        llm_semaphore=llm_semaphore,
     )
     
     # Create response

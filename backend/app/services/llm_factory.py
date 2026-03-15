@@ -341,10 +341,25 @@ class ChatLLMFactory:
                 "api_key": config.api_key,
                 "base_url": config.base_url,
                 "model": config.model,
-                "max_tokens": config.max_tokens,
                 "temperature": config.temperature,
                 "max_retries": 0,
             }
+            # GPT-5 and o-series reasoning models require max_completion_tokens
+            # instead of the legacy max_tokens parameter.
+            _model_lower = (config.model or "").lower()
+            _is_reasoning_model = _model_lower.startswith("gpt-5") or (
+                _model_lower.startswith("o") and _model_lower[1:2].isdigit()
+            )
+            if _is_reasoning_model:
+                chat_kwargs["max_completion_tokens"] = config.max_tokens
+                if provider is LLMProvider.OPENAI:
+                    reasoning_effort = str(
+                        getattr(self._settings, "OPENAI_REASONING_EFFORT", "") or ""
+                    ).strip()
+                    if reasoning_effort:
+                        chat_kwargs["reasoning_effort"] = reasoning_effort
+            else:
+                chat_kwargs["max_tokens"] = config.max_tokens
             return ChatOpenAI(**chat_kwargs)
 
         if provider is LLMProvider.ANTHROPIC:

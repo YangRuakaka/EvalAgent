@@ -18,6 +18,22 @@ const COLOR_PALETTE = schemeTableau10 || [
 
 const DEFAULT_HASH_CONCURRENCY = 8;
 
+const clamp01 = (value) => {
+	if (!Number.isFinite(value)) {
+		return null;
+	}
+
+	if (value < 0) {
+		return 0;
+	}
+
+	if (value > 1) {
+		return 1;
+	}
+
+	return value;
+};
+
 const asArray = (value) => {
 	if (!value) {
 		return [];
@@ -416,10 +432,14 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const hashSize = Number.isFinite(hashOptions.hashSize) && hashOptions.hashSize > 0
 		? Math.floor(hashOptions.hashSize)
 		: 16;
-	const perceptualHashLength = Math.ceil((hashSize * hashSize) / 4);
+	const totalHashBits = hashSize * hashSize;
+	const perceptualHashLength = Math.ceil(totalHashBits / 4);
+	const hashMinSimilarityRatio = clamp01(options.hashMinSimilarityRatio);
 	const hashSimilarityThreshold = Number.isFinite(options.hashSimilarityThreshold) && options.hashSimilarityThreshold >= 0
 		? Math.floor(options.hashSimilarityThreshold)
-		: (strictHashMatch ? 0 : Math.max(8, Math.round((hashSize * hashSize) * 0.09)));
+		: (hashMinSimilarityRatio !== null
+			? Math.floor(totalHashBits * (1 - hashMinSimilarityRatio))
+			: (strictHashMatch ? 0 : Math.max(8, Math.round(totalHashBits * 0.09))));
 	const usePreviewImage = options.usePreviewImage !== false;
 	const previewConcurrency = Number.isFinite(options.previewConcurrency) && options.previewConcurrency > 0
 		? Math.floor(options.previewConcurrency)
@@ -459,6 +479,7 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 	const hashConcurrency = Number.isFinite(options.hashConcurrency) && options.hashConcurrency > 0
 		? Math.floor(options.hashConcurrency)
 		: DEFAULT_HASH_CONCURRENCY;
+	const preventNonAdjacentSequenceMerge = options.preventNonAdjacentSequenceMerge !== false;
 	const canonicalPerceptualHashes = [];
 	const canonicalHashMap = new Map();
 
@@ -577,12 +598,23 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 
 	sequences.forEach((sequence, sequenceIndex) => {
 		const screenshots = sequence.screenshots;
+		const hashLastPositionInSequence = new Map();
 
 		for (let position = 0; position < screenshots.length; position += 1) {
 			const screenshot = screenshots[position];
 			const occurrenceId = `${sequenceIndex}-${position}`;
 			const hash = hashByOccurrence.get(`${sequenceIndex}-${position}`) || null;
-			const nodeId = useImageHash && hash
+			let canMergeByHash = useImageHash && Boolean(hash);
+
+			if (canMergeByHash && preventNonAdjacentSequenceMerge) {
+				const lastPosition = hashLastPositionInSequence.get(hash);
+				if (Number.isFinite(lastPosition) && position - lastPosition > 1) {
+					canMergeByHash = false;
+				}
+				hashLastPositionInSequence.set(hash, position);
+			}
+
+			const nodeId = canMergeByHash
 				? `node-${hash}`
 				: `node-seq-${sequenceIndex}-pos-${position}`;
 

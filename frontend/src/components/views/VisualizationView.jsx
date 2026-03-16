@@ -214,7 +214,7 @@ const VisualizationView = ({
 					<section className={`visualization-view__panel${activeTab !== 'trajectory' ? ' visualization-view__panel--hidden' : ''}`}>
 						{activeTrajectoryEntry ? (
 							hasActiveTrajectoryContent ? (
-								<div key={activeTrajectoryEntry.id} className="visualization-view__run-panel">
+								<div className="visualization-view__run-panel">
 									<TrajectoryVisualizer
 										runId={activeTrajectoryEntry.id}
 										trajectory={activeTrajectoryEntry?.trajectory || null}

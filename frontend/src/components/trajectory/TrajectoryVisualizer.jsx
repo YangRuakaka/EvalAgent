@@ -10,10 +10,11 @@ import useResizeObserver from '../../hooks/useResizeObserver';
 import './TrajectoryVisualizer.css';
 
 const EMPTY_GRAPH = Object.freeze({ nodes: [], links: [], clusters: [], meta: {} });
-const HASH_REFINEMENT_IDLE_TIMEOUT = 600;
-const HASH_SIMILARITY_THRESHOLD = 20;
+const HASH_MIN_SIMILARITY_RATIO = 1.0; // Require exact hash matches for node merging when hashing is enabled
 const TRAJECTORY_GRAPH_CACHE_LIMIT = 12;
+const TRAJECTORY_GRAPH_JOB_CACHE_LIMIT = 24;
 const trajectoryGraphCache = new Map();
+const trajectoryGraphJobCache = new Map();
 
 const readCachedTrajectoryGraph = (cacheKey) => {
 	if (!cacheKey || !trajectoryGraphCache.has(cacheKey)) {
@@ -24,6 +25,14 @@ const readCachedTrajectoryGraph = (cacheKey) => {
 	trajectoryGraphCache.delete(cacheKey);
 	trajectoryGraphCache.set(cacheKey, cached);
 	return cached;
+};
+
+const peekCachedTrajectoryGraph = (cacheKey) => {
+	if (!cacheKey) {
+		return null;
+	}
+
+	return trajectoryGraphCache.get(cacheKey) || null;
 };
 
 const writeCachedTrajectoryGraph = (cacheKey, graph) => {
@@ -45,18 +54,49 @@ const writeCachedTrajectoryGraph = (cacheKey, graph) => {
 	}
 };
 
-const scheduleIdleWork = (callback, timeout = 500) => {
-	if (typeof callback !== 'function') {
-		return () => {};
+const readCachedTrajectoryGraphJob = (cacheKey) => {
+	if (!cacheKey || !trajectoryGraphJobCache.has(cacheKey)) {
+		return null;
 	}
 
-	if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-		const idleId = window.requestIdleCallback(callback, { timeout });
-		return () => window.cancelIdleCallback(idleId);
+	const cached = trajectoryGraphJobCache.get(cacheKey);
+	trajectoryGraphJobCache.delete(cacheKey);
+	trajectoryGraphJobCache.set(cacheKey, cached);
+	return cached;
+};
+
+const writeCachedTrajectoryGraphJob = (cacheKey, job) => {
+	if (!cacheKey || !job) {
+		return;
 	}
 
-	const timerId = window.setTimeout(callback, Math.min(timeout, 600));
-	return () => window.clearTimeout(timerId);
+	if (trajectoryGraphJobCache.has(cacheKey)) {
+		trajectoryGraphJobCache.delete(cacheKey);
+	}
+
+	trajectoryGraphJobCache.set(cacheKey, job);
+
+	while (trajectoryGraphJobCache.size > TRAJECTORY_GRAPH_JOB_CACHE_LIMIT) {
+		const oldestKey = trajectoryGraphJobCache.keys().next().value;
+		if (!oldestKey) {
+			break;
+		}
+		trajectoryGraphJobCache.delete(oldestKey);
+	}
+};
+
+const getOrCreateTrajectoryGraphJob = (cacheKey, factory) => {
+	const existing = readCachedTrajectoryGraphJob(cacheKey);
+	if (existing) {
+		return existing;
+	}
+
+	const created = typeof factory === 'function' ? factory() : null;
+	if (created) {
+		writeCachedTrajectoryGraphJob(cacheKey, created);
+	}
+
+	return created;
 };
 
 const coerceText = (value) => {
@@ -273,6 +313,7 @@ const TrajectoryVisualizer = ({
 	const containerRef = useRef(null);
 	const conditionsRef = useRef(Array.isArray(conditions) ? conditions : []);
 	const backendLogContentRef = useRef(null);
+	const graphRef = useRef(EMPTY_GRAPH);
 
 	const { width: shellWidth, height: shellHeight } = useResizeObserver(graphShellRef);
 
@@ -392,10 +433,22 @@ const TrajectoryVisualizer = ({
 			`refresh:${refreshNonce}`,
 		].join('::');
 	}, [hasTrajectory, runId, trajectorySummarySignature, conditionsSignature, useImageHash, shouldUsePreviewImage, refreshNonce]);
+	const effectiveGraph = useMemo(() => {
+		if (graph !== EMPTY_GRAPH) {
+			return graph;
+		}
+
+		return peekCachedTrajectoryGraph(graphCacheKey) || graph;
+	}, [graph, graphCacheKey]);
 
 	useEffect(() => {
 		conditionsRef.current = Array.isArray(conditions) ? conditions : [];
 	}, [conditionsSignature, conditions]);
+
+	useEffect(() => {
+		graphRef.current = effectiveGraph;
+	}, [effectiveGraph]);
+
 	const normalizedBackendLogs = Array.isArray(backendLogs) ? backendLogs : [];
 	const backendStatusLabel = typeof backendRunStatus === 'string' && backendRunStatus.trim()
 		? backendRunStatus.trim().toUpperCase()
@@ -419,14 +472,25 @@ const TrajectoryVisualizer = ({
 
 	useEffect(() => {
 		let isMounted = true;
-		let cancelRefinement = () => {};
 
-		const safeSetGraph = (nextGraph) => {
-			if (!isMounted) {
+		const graphHasCompleteHash = (candidate) => candidate?.meta?.hashingEnabled === true
+			&& candidate?.meta?.isHashComplete !== false;
+
+		const safeApplyGraph = (nextGraph, source) => {
+			if (!isMounted || !nextGraph) {
 				return;
 			}
 
-			setGraph(nextGraph);
+			setGraph((previousGraph) => {
+				const previousGraphComplete = graphHasCompleteHash(previousGraph);
+				const nextGraphComplete = graphHasCompleteHash(nextGraph);
+
+				if (source === 'preview' && previousGraphComplete && !nextGraphComplete) {
+					return previousGraph;
+				}
+
+				return nextGraph;
+			});
 		};
 
 		if (!hasTrajectory) {
@@ -436,7 +500,6 @@ const TrajectoryVisualizer = ({
 			setIsRefiningGraph(false);
 			return () => {
 				isMounted = false;
-				cancelRefinement();
 			};
 		}
 
@@ -451,139 +514,141 @@ const TrajectoryVisualizer = ({
 		const buildTargetGraph = () => buildTrajectoryGraph(trajectory, {
 			hash: { hashSize: 16 },
 			hashConcurrency: 8,
-			hashSimilarityThreshold: HASH_SIMILARITY_THRESHOLD,
+			hashMinSimilarityRatio: HASH_MIN_SIMILARITY_RATIO,
 			useImageHash,
 			usePreviewImage: shouldUsePreviewImage,
 			conditions: conditionsRef.current,
 		});
 
-		const startHashRefinement = () => {
-			if (!useImageHash) {
-				setIsRefiningGraph(false);
-				return;
-			}
-
-			setIsRefiningGraph(true);
-			cancelRefinement = scheduleIdleWork(() => {
-				buildTargetGraph()
-					.then((result) => {
-						if (!isMounted) {
-							return;
-						}
-
-						safeSetGraph(result);
-						writeCachedTrajectoryGraph(graphCacheKey, result);
-					})
-					.catch((err) => {
-						if (!isMounted) {
-							return;
-						}
-
-						console.error('[trajectory] Failed to refine graph', err);
-					})
-					.finally(() => {
-						if (!isMounted) {
-							return;
-						}
-
-						setIsRefiningGraph(false);
-					});
-			}, HASH_REFINEMENT_IDLE_TIMEOUT);
+		const buildAndCacheGraph = async (buildGraph) => {
+			const result = await buildGraph();
+			writeCachedTrajectoryGraph(graphCacheKey, result);
+			return result;
 		};
 
 		const cachedGraph = readCachedTrajectoryGraph(graphCacheKey);
+		const cachedGraphHasHash = cachedGraph?.meta?.hashingEnabled === true;
+		const cachedGraphHashComplete = cachedGraph?.meta?.isHashComplete !== false;
+		const shouldBuildPreviewGraph = !preferDirectHashBuild && !cachedGraph;
+		const shouldBuildTargetGraph = useImageHash
+			&& (preferDirectHashBuild || !cachedGraph || !cachedGraphHasHash || !cachedGraphHashComplete);
+
 		if (cachedGraph) {
 			setGraph(cachedGraph);
-			setError(null);
-			setIsProcessing(false);
+		} else {
+			setGraph(EMPTY_GRAPH);
+		}
 
-			const cachedGraphHasHash = cachedGraph?.meta?.hashingEnabled === true;
-			const cachedGraphHashComplete = cachedGraph?.meta?.isHashComplete !== false;
-			const shouldRefineCachedGraph = useImageHash
-				&& !preferDirectHashBuild
-				&& (!cachedGraphHasHash || !cachedGraphHashComplete);
+		setIsProcessing(!cachedGraph && (shouldBuildPreviewGraph || shouldBuildTargetGraph));
+		setError(null);
+		setIsRefiningGraph(shouldBuildTargetGraph);
 
-			if (shouldRefineCachedGraph) {
-				startHashRefinement();
-			} else {
-				setIsRefiningGraph(false);
-			}
-
+		if (!shouldBuildPreviewGraph && !shouldBuildTargetGraph) {
 			return () => {
 				isMounted = false;
-				cancelRefinement();
 			};
 		}
 
-		setIsProcessing(true);
-		setError(null);
-		setIsRefiningGraph(false);
+		const buildJob = getOrCreateTrajectoryGraphJob(graphCacheKey, () => {
+			const nextJob = {};
 
-		if (preferDirectHashBuild) {
-			buildTargetGraph()
-				.then((result) => {
+			const createBuildPromise = (builder) => buildAndCacheGraph(builder)
+				.catch((err) => {
+					trajectoryGraphJobCache.delete(graphCacheKey);
+					throw err;
+				});
+
+			if (shouldBuildPreviewGraph) {
+				nextJob.previewPromise = createBuildPromise(buildPreviewGraph);
+			}
+
+			if (shouldBuildTargetGraph) {
+				nextJob.targetPromise = createBuildPromise(buildTargetGraph);
+			}
+
+			if (!nextJob.previewPromise && !nextJob.targetPromise) {
+				return null;
+			}
+
+			return nextJob;
+		});
+
+		const previewPromise = shouldBuildPreviewGraph ? buildJob?.previewPromise : null;
+		const targetPromise = shouldBuildTargetGraph ? buildJob?.targetPromise : null;
+
+		if (!previewPromise && !targetPromise) {
+			setIsProcessing(false);
+			setIsRefiningGraph(false);
+			return () => {
+				isMounted = false;
+			};
+		}
+
+		if (previewPromise) {
+			previewPromise
+				.then((previewGraph) => {
 					if (!isMounted) {
 						return;
 					}
 
-					safeSetGraph(result);
-					writeCachedTrajectoryGraph(graphCacheKey, result);
+					safeApplyGraph(previewGraph, 'preview');
 					setIsProcessing(false);
 				})
 				.catch((err) => {
-					if (isMounted) {
-						console.error('[trajectory] Failed to build graph', err);
+					if (!isMounted) {
+						return;
+					}
+
+					console.error('[trajectory] Failed to build preview graph', err);
+					if (!targetPromise) {
 						setGraph(EMPTY_GRAPH);
 						setError(err);
 						setIsProcessing(false);
 						setIsRefiningGraph(false);
 					}
 				});
-
-			return () => {
-				isMounted = false;
-				cancelRefinement();
-			};
 		}
 
-		buildPreviewGraph()
-			.then((previewGraph) => {
-				if (!isMounted) {
-					return;
-				}
+		if (targetPromise) {
+			targetPromise
+				.then((targetGraph) => {
+					if (!isMounted) {
+						return;
+					}
 
-				safeSetGraph(previewGraph);
-				writeCachedTrajectoryGraph(graphCacheKey, previewGraph);
-				setIsProcessing(false);
-
-				if (!useImageHash) {
-					return;
-				}
-
-				startHashRefinement();
-			})
-			.catch((err) => {
-				if (isMounted) {
-					console.error('[trajectory] Failed to build graph', err);
-					setGraph(EMPTY_GRAPH);
-					setError(err);
+					safeApplyGraph(targetGraph, 'target');
+					setError(null);
 					setIsProcessing(false);
 					setIsRefiningGraph(false);
-				}
-			});
+				})
+				.catch((err) => {
+					if (!isMounted) {
+						return;
+					}
+
+					console.error('[trajectory] Failed to build hash graph', err);
+					const hasRenderableGraph = Array.isArray(graphRef.current?.nodes)
+						&& graphRef.current.nodes.length > 0;
+					if (!hasRenderableGraph) {
+						setGraph(EMPTY_GRAPH);
+						setError(err);
+					}
+					setIsProcessing(false);
+					setIsRefiningGraph(false);
+				});
+		}
 
 		return () => {
 			isMounted = false;
-			cancelRefinement();
 		};
-	}, [hasTrajectory, trajectory, graphCacheKey, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage, refreshNonce]);
+	}, [hasTrajectory, trajectory, graphCacheKey, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage]);
 
 
 	const legendEntries = useMemo(() => {
 		const details = Array.isArray(trajectory?.details) ? trajectory.details : [];
 		const colorMap = new Map();
-		if (Array.isArray(graph?.links)) {
-			graph.links.forEach(link => {
+		if (Array.isArray(effectiveGraph?.links)) {
+			effectiveGraph.links.forEach(link => {
 				if (typeof link.sequenceIndex === 'number' && link.color) {
 					if (!colorMap.has(link.sequenceIndex)) {
 						colorMap.set(link.sequenceIndex, link.color);
@@ -593,8 +658,8 @@ const TrajectoryVisualizer = ({
 		}
 		const nodePathMap = new Map();
 		const linkPathMap = new Map();
-		if (Array.isArray(graph?.nodes)) {
-			graph.nodes.forEach((node) => {
+		if (Array.isArray(effectiveGraph?.nodes)) {
+			effectiveGraph.nodes.forEach((node) => {
 				if (Array.isArray(node.occurrences)) {
 					node.occurrences.forEach((occ) => {
 						if (typeof occ.sequenceIndex === 'number') {
@@ -605,8 +670,8 @@ const TrajectoryVisualizer = ({
 				}
 			});
 		}
-		if (Array.isArray(graph?.links)) {
-			graph.links.forEach((link) => {
+		if (Array.isArray(effectiveGraph?.links)) {
+			effectiveGraph.links.forEach((link) => {
 				if (typeof link.sequenceIndex === 'number' && link.id) {
 					if (!linkPathMap.has(link.sequenceIndex)) linkPathMap.set(link.sequenceIndex, []);
 					const pos = typeof link.position === 'number' ? link.position : (link.source && link.target ? 0 : 0);
@@ -623,12 +688,12 @@ const TrajectoryVisualizer = ({
 			const color = colorMap.get(index) || '#1e3a8a';
 			const nodePath = (nodePathMap.get(index) || []).slice().sort((a, b) => a.position - b.position);
 			let linkPath = [];
-			if (Array.isArray(graph?.links) && nodePath.length > 1) {
+			if (Array.isArray(effectiveGraph?.links) && nodePath.length > 1) {
 				for (let i = 0; i < nodePath.length - 1; i++) {
 					const from = nodePath[i].nodeId;
 					const to = nodePath[i + 1].nodeId;
 					const pos = nodePath[i].position;
-					const link = graph.links.find(
+					const link = effectiveGraph.links.find(
 						l => l.sequenceIndex === index &&
 							((l.source?.id || l.source) === from) &&
 							((l.target?.id || l.target) === to)
@@ -655,7 +720,7 @@ const TrajectoryVisualizer = ({
 				fullPersona,
 			};
 		});
-	}, [trajectory, graph]);
+	}, [trajectory, effectiveGraph]);
 
 	// derive available filter options from legendEntries
 	const availableModels = useMemo(() => {
@@ -699,7 +764,7 @@ const TrajectoryVisualizer = ({
 	// compute a filtered view of the graph according to selected filter
 	const filteredGraph = useMemo(() => {
 		// Single-dimensional filtering
-		if (filterType === 'all' || !filterValue) return graph;
+		if (filterType === 'all' || !filterValue) return effectiveGraph;
 
 		const allowedSeq = new Set(
 			legendEntries
@@ -713,14 +778,14 @@ const TrajectoryVisualizer = ({
 		);
 
 		if (!allowedSeq.size) {
-			return { nodes: [], links: [], clusters: [], meta: graph?.meta || {} };
+			return { nodes: [], links: [], clusters: [], meta: effectiveGraph?.meta || {} };
 		}
 
-		const links = Array.isArray(graph?.links) ? graph.links.filter((l) => allowedSeq.has(l.sequenceIndex)) : [];
+		const links = Array.isArray(effectiveGraph?.links) ? effectiveGraph.links.filter((l) => allowedSeq.has(l.sequenceIndex)) : [];
 		const nodeIdsFromLinks = new Set(links.map((l) => (l.source?.id || l.source) || (l.target?.id || l.target)).flat());
 
-		const nodes = Array.isArray(graph?.nodes)
-			? graph.nodes.filter((n) => {
+		const nodes = Array.isArray(effectiveGraph?.nodes)
+			? effectiveGraph.nodes.filter((n) => {
 				if (nodeIdsFromLinks.has(n.id)) return true;
 				if (Array.isArray(n.occurrences)) {
 					return n.occurrences.some((occ) => allowedSeq.has(occ.sequenceIndex));
@@ -730,14 +795,14 @@ const TrajectoryVisualizer = ({
 			: [];
 
 		const nodeIdSet = new Set(nodes.map((n) => n.id));
-		const clusters = Array.isArray(graph?.clusters)
-			? graph.clusters
+		const clusters = Array.isArray(effectiveGraph?.clusters)
+			? effectiveGraph.clusters
 				.map((c) => ({ ...c, nodeIds: (c.nodeIds || []).filter((id) => nodeIdSet.has(id)) }))
 				.filter((c) => (c.nodeIds || []).length > 0)
 			: [];
 
-		return { nodes, links, clusters, meta: graph?.meta || {} };
-	}, [graph, filterType, filterValue, legendEntries]);
+		return { nodes, links, clusters, meta: effectiveGraph?.meta || {} };
+	}, [effectiveGraph, filterType, filterValue, legendEntries]);
 
 	// compute visible legend entries according to the same filter
 	const visibleLegendEntries = useMemo(() => {
@@ -762,7 +827,7 @@ const TrajectoryVisualizer = ({
 			return;
 		}
 
-		const snapshotKey = buildHighlightSnapshot(matchingEntry, graph?.meta);
+		const snapshotKey = buildHighlightSnapshot(matchingEntry, effectiveGraph?.meta);
 		setHighlightRequest((prev) => {
 			if (prev && prev.id === matchingEntry.id && prev.snapshotKey === snapshotKey) {
 				return prev;
@@ -778,7 +843,7 @@ const TrajectoryVisualizer = ({
 				snapshotKey,
 			};
 		});
-	}, [activeLegendId, visibleLegendEntries, graph]);
+	}, [activeLegendId, visibleLegendEntries, effectiveGraph]);
 
 		// clear active legend if it becomes invisible due to filter changes
 		useEffect(() => {
@@ -796,7 +861,7 @@ const TrajectoryVisualizer = ({
 		}
 
 		setActiveLegendId(entry.id);
-		const snapshotKey = buildHighlightSnapshot(entry, graph?.meta);
+		const snapshotKey = buildHighlightSnapshot(entry, effectiveGraph?.meta);
 		setHighlightRequest({
 			id: entry.id,
 			label: entry.label,

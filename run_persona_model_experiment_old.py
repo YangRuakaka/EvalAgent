@@ -273,40 +273,59 @@ TASKS: List[TaskConfig] = [
     #     name="Book Shoes Online",
     #     url="http://34.55.136.249:3000/RiverBuy",
     #     description="Buy a pair of shoes.",
-    # ),http://localhost:3000/
-    TaskConfig(
-        name="Book Shoes Online",
-        url="http://34.55.136.249:3000/RiverBuy",
-        description="Buy a pair of shoes.",
-    ),
+    # ),
+    # TaskConfig(
+    #     name="Book Shoes Online",
+    #     url="http://34.55.136.249:3000/RiverBuy",
+    #     description="Buy a pair of shoes.",
+    # ),
     # TaskConfig(
     #     name="Rent a car",
     #     url="http://34.55.136.249:3000/zoomcar",
     #     description="Rent a car for a family vacation.",
+    # ),
+    TaskConfig(
+        name="Book a flight",
+        url="http://34.55.136.249:3000/flight",
+        description="Book a flight from Chicago to Los Angeles on March 27th, returning on March 30th.",
+    ),
+    # TaskConfig(
+    #     name="Buy headphones",
+    #     url="http://34.55.136.249:3000/RiverBuy",
+    #     description="Buy a pair of headphones.",
+    # ),
+    # TaskConfig(
+    #     name="Buy milk",
+    #     url="http://34.55.136.249:3000/RiverBuy",
+    #     description="Buy milk.",
     # ),
 ]
 
 PERSONAS: List[PersonaConfig] = [
     # PersonaConfig(
     #     value="Frugality",
-    #     content="Emma is 29 years old and values saving money and making thoughtful purchasing decisions. She is willing to spend time researching and comparing options to find the best deals and discounts. She prefers budget-friendly choices and is cautious about unnecessary expenses.",
+    #     content="Emma is 29 years old and values saving money and making thoughtful purchasing decisions. She always chooses the cheapest option available. She is not concerned with brand names or premium features.",
     # ),
     # PersonaConfig(
     #     value="Sustainability",
-    #     content="You prioritize environmentally friendly and socially responsible choices.",
+    #     content="Emma is 29 years old and is environmentally conscious. She prefers to support brands and services that prioritize sustainability, ethical practices, and eco-friendly products. She is willing to invest more time and money into options that align with her values of reducing environmental impact. She does not like to use filters.",
     # ),
-    PersonaConfig(
-        value="Comfort",
-        content="You prioritize a comfortable and enjoyable travel experience.",
-    ),
+    # PersonaConfig(
+    #     value="Comfort",
+    #     content="Emma is 29 years old and values comfort and a good user experience. She is willing to pay a bit more for products and services that offer superior comfort, ease of use, and convenience. She prefers options that minimize hassle and provide a smooth experience from start to finish.",
+    # ),
     # PersonaConfig(
     #     value="Luxury",
-    #     content="You prioritize comfort and premium experiences, even at higher costs.",
+    #     content="Emma is 29 years old and values luxury in everything she purchases. She is willing to pay more for products and services that offer the best quality, design, and customer service among available options.",
     # ),
-    # PersonaConfig(
-    #     value="Innovation",
-    #     content="Emma is 29 years old and works as a software engineer. She likes to stay updated with the latest technology trends and enjoys trying out new gadgets and services. She values efficiency and is open to using innovative solutions that can enhance her travel experience.",
-    # ),
+    PersonaConfig(
+        value="Health-conscious",
+        content="Emma is 29 years old and values her health and well-being. She prefers products and services that promote a healthy lifestyle, such as organic food, fitness equipment, and wellness programs. She is willing to invest in her health and is open to trying new approaches to maintaining a balanced life.",
+    ),
+    PersonaConfig(
+        value="Innovation",
+        content="Emma is 29 years old and works as a software engineer. She likes to stay updated with the latest technology trends and enjoys trying out new gadgets and services. She values efficiency and is open to using innovative solutions that can enhance her travel experience.",
+    ),
 ]
 
 MODELS: List[str] = [

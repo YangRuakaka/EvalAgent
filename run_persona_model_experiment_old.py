@@ -152,7 +152,7 @@ class StandaloneSettings:
 
         return StandaloneSettings(
             output_dir=output_dir,
-            max_steps=_env_int("BROWSER_AGENT_MAX_STEPS", default=20, min_value=1),
+            max_steps=_env_int("BROWSER_AGENT_MAX_STEPS", default=15, min_value=1),
             enable_screenshots=_env_bool("BROWSER_AGENT_ENABLE_SCREENSHOTS", default=True),
             # 0 means unlimited screenshots; any positive value caps saved screenshots.
             max_screenshots=_env_int("BROWSER_AGENT_MAX_SCREENSHOTS", default=0, min_value=0),
@@ -230,10 +230,10 @@ class StandaloneSettings:
                 "BROWSER_AGENT_FINAL_RESPONSE_AFTER_FAILURE",
                 default=False,
             ),
-            # Disable browser-use planning/thinking by default to avoid plan-style behavior.
+            # Keep reasoning/thinking enabled by default so model_outputs includes richer traces.
             agent_use_thinking=_env_bool(
                 "BROWSER_AGENT_USE_THINKING",
-                default=False,
+                default=True,
             ),
         )
 
@@ -269,11 +269,6 @@ class RunResult:
 # Team members can safely change tasks/personas/models/run_times here.
 # ---------------------------------------------------------------------------
 TASKS: List[TaskConfig] = [
-    # TaskConfig(
-    #     name="Book Shoes Online",
-    #     url="http://34.55.136.249:3000/RiverBuy",
-    #     description="Buy a pair of shoes.",
-    # ),
     # TaskConfig(
     #     name="Book Shoes Online",
     #     url="http://34.55.136.249:3000/RiverBuy",
@@ -1462,6 +1457,7 @@ class StandaloneBrowserAgentService:
         summary: dict[str, Any],
     ) -> dict[str, Any]:
         step_descriptions = self._extract_action_descriptions(history, max_items=len(screenshots))
+        model_outputs = self._normalize_model_outputs(self._safe_call(history, "model_outputs"))
 
         return {
             "metadata": {
@@ -1490,11 +1486,35 @@ class StandaloneBrowserAgentService:
             "details": {
                 "screenshots": [_to_portable_path(Path(artifact.path)) for artifact in screenshots],
                 "step_descriptions": step_descriptions,
-                "model_outputs": self._to_serializable(self._safe_call(history, "model_outputs")),
+                "model_outputs": model_outputs,
                 "last_action": self._to_serializable(self._safe_call(history, "last_action")),
                 "structured_output": self._to_serializable(getattr(history, "structured_output", None)),
             },
         }
+
+    def _normalize_model_outputs(self, model_outputs_raw: Any) -> Any:
+        serialized = self._to_serializable(model_outputs_raw)
+
+        if isinstance(serialized, list):
+            return [self._normalize_model_output_entry(item) for item in serialized]
+        if isinstance(serialized, dict):
+            return self._normalize_model_output_entry(serialized)
+        return serialized
+
+    def _normalize_model_output_entry(self, item: Any) -> Any:
+        if not isinstance(item, dict):
+            return item
+
+        normalized = dict(item)
+        thinking = normalized.get("thinking")
+        thinking_process = normalized.get("thinking_process")
+
+        if thinking is None and thinking_process is not None:
+            normalized["thinking"] = thinking_process
+        if thinking_process is None and thinking is not None:
+            normalized["thinking_process"] = thinking
+
+        return normalized
 
     def _safe_call(self, obj: Any, method_name: str) -> Any:
         attr = getattr(obj, method_name, None)

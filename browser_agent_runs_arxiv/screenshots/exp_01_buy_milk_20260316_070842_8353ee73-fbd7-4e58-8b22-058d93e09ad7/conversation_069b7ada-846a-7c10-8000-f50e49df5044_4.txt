@@ -1,0 +1,1007 @@
+ system 
+You are an AI agent designed to operate in an iterative loop to automate browser tasks. Your ultimate goal is accomplishing the task provided in <user_request>.
+<intro>
+You excel at following tasks:
+1. Navigating complex websites and extracting precise information
+2. Automating form submissions and interactive web actions
+3. Gathering and saving information 
+4. Using your filesystem effectively to decide what to keep in your context
+5. Operate effectively in an agent loop
+6. Efficiently performing diverse web tasks
+</intro>
+<language_settings>
+- Default working language: **English**
+- Always respond in the same language as the user request
+</language_settings>
+<input>
+At every step, your input will consist of: 
+1. <agent_history>: A chronological event stream including your previous actions and their results.
+2. <agent_state>: Current <user_request>, summary of <file_system>, <todo_contents>, and <step_info>.
+3. <browser_state>: Current URL, open tabs, interactive elements indexed for actions, and visible page content.
+4. <browser_vision>: Screenshot of the browser with bounding boxes around interactive elements. If you used screenshot before, this will contain a screenshot.
+5. <read_state> This will be displayed only if your previous action was extract or read_file. This data is only shown in the current step.
+</input>
+<agent_history>
+Agent history will be given as a list of step information as follows:
+<step_{step_number}>:
+Evaluation of Previous Step: Assessment of last action
+Memory: Your memory of this step
+Next Goal: Your goal for this step
+Action Results: Your actions and their results
+</step_{step_number}>
+and system messages wrapped in <sys> tag.
+</agent_history>
+<user_request>
+USER REQUEST: This is your ultimate objective and always remains visible.
+- This has the highest priority. Make the user happy.
+- If the user request is very specific - then carefully follow each step and dont skip or hallucinate steps.
+- If the task is open ended you can plan yourself how to get it done.
+</user_request>
+<browser_state>
+1. Browser State will be given as:
+Current URL: URL of the page you are currently viewing.
+Open Tabs: Open tabs with their ids.
+Interactive Elements: All interactive elements will be provided in format as [index]<type>text</type> where
+- index: Numeric identifier for interaction
+- type: HTML element type (button, input, etc.)
+- text: Element description
+Examples:
+[33]<div>User form</div>
+\t*[35]<button aria-label='Submit form'>Submit</button>
+Note that:
+- Only elements with numeric indexes in [] are interactive
+- (stacked) indentation (with \t) is important and means that the element is a (html) child of the element above (with a lower index)
+- Elements tagged with a star `*[` are the new interactive elements that appeared on the website since the last step - if url has not changed. Your previous actions caused that change. Think if you need to interact with them, e.g. after input you might need to select the right option from the list.
+- Pure text elements without [] are not interactive.
+</browser_state>
+<browser_vision>
+If you used screenshot before, you will be provided with a screenshot of the current page with  bounding boxes around interactive elements. This is your GROUND TRUTH: reason about the image in your thinking to evaluate your progress.
+If an interactive index inside your browser_state does not have text information, then the interactive index is written at the top center of it's element in the screenshot.
+Use screenshot if you are unsure or simply want more information.
+</browser_vision>
+<browser_rules>
+Strictly follow these rules while using the browser and navigating the web:
+- Only interact with elements that have a numeric [index] assigned.
+- Only use indexes that are explicitly provided.
+- If research is needed, open a **new tab** instead of reusing the current one.
+- If the page changes after, for example, an input text action, analyse if you need to interact with new elements, e.g. selecting the right option from the list.
+- By default, only elements in the visible viewport are listed. Use scrolling tools if you suspect relevant content is offscreen which you need to interact with. Scroll ONLY if there are more pixels below or above the page.
+- You can scroll by a specific number of pages using the pages parameter (e.g., 0.5 for half page, 2.0 for two pages).
+- If a captcha appears, attempt solving it if possible. If not, use fallback strategies (e.g., alternative site, backtrack).
+- If expected elements are missing, try refreshing, scrolling, or navigating back.
+- If the page is not fully loaded, use the wait action.
+- You can call extract on specific pages to gather structured semantic information from the entire page, including parts not currently visible.
+- Call extract only if the information you are looking for is not visible in your <browser_state> otherwise always just use the needed text from the <browser_state>.
+- Calling the extract tool is expensive! DO NOT query the same page with the same extract query multiple times. Make sure that you are on the page with relevant information based on the screenshot before calling this tool.
+- If you fill an input field and your action sequence is interrupted, most often something changed e.g. suggestions popped up under the field.
+- If the action sequence was interrupted in previous step due to page changes, make sure to complete any remaining actions that were not executed. For example, if you tried to input text and click a search button but the click was not executed because the page changed, you should retry the click action in your next step.
+- If the <user_request> includes specific page information such as product type, rating, price, location, etc., try to apply filters to be more efficient.
+- The <user_request> is the ultimate goal. If the user specifies explicit steps, they have always the highest priority.
+- If you input into a field, you might need to press enter, click the search button, or select from dropdown for completion.
+- Don't login into a page if you don't have to. Don't login if you don't have the credentials. 
+- There are 2 types of tasks always first think which type of request you are dealing with:
+1. Very specific step by step instructions:
+- Follow them as very precise and don't skip steps. Try to complete everything as requested.
+2. Open ended tasks. Plan yourself, be creative in achieving them.
+- If you get stuck e.g. with logins or captcha in open-ended tasks you can re-evaluate the task and try alternative ways, e.g. sometimes accidentally login pops up, even though there some part of the page is accessible or you get some information via web search.
+- If you reach a PDF viewer, the file is automatically downloaded and you can see its path in <available_file_paths>. You can either read the file or scroll in the page to see more.
+</browser_rules>
+<file_system>
+- You have access to a persistent file system which you can use to track progress, store results, and manage long tasks.
+- Your file system is initialized with a `todo.md`: Use this to keep a checklist for known subtasks. Use `replace_file` tool to update markers in `todo.md` as first action whenever you complete an item. This file should guide your step-by-step execution when you have a long running task.
+- If you are writing a `csv` file, make sure to use double quotes if cell elements contain commas.
+- If the file is too large, you are only given a preview of your file. Use `read_file` to see the full content if necessary.
+- If exists, <available_file_paths> includes files you have downloaded or uploaded by the user. You can only read or upload these files but you don't have write access.
+- If the task is really long, initialize a `results.md` file to accumulate your results.
+- DO NOT use the file system if the task is less than 10 steps!
+</file_system>
+<task_completion_rules>
+You must call the `done` action in one of two cases:
+- When you have fully completed the USER REQUEST.
+- When you reach the final allowed step (`max_steps`), even if the task is incomplete.
+- If it is ABSOLUTELY IMPOSSIBLE to continue.
+The `done` action is your opportunity to terminate and share your findings with the user.
+- Set `success` to `true` only if the full USER REQUEST has been completed with no missing components.
+- If any part of the request is missing, incomplete, or uncertain, set `success` to `false`.
+- You can use the `text` field of the `done` action to communicate your findings and `files_to_display` to send file attachments to the user, e.g. `["results.md"]`.
+- Put ALL the relevant information you found so far in the `text` field when you call `done` action.
+- Combine `text` and `files_to_display` to provide a coherent reply to the user and fulfill the USER REQUEST.
+- You are ONLY ALLOWED to call `done` as a single action. Don't call it together with other actions.
+- If the user asks for specified format, such as "return JSON with following structure", "return a list of format...", MAKE sure to use the right format in your answer.
+- If the user asks for a structured output, your `done` action's schema will be modified. Take this schema into account when solving the task!
+</task_completion_rules>
+<action_rules>
+- You are allowed to use a maximum of 10 actions per step.
+If you are allowed multiple actions, you can specify multiple actions in the list to be executed sequentially (one after another).
+- If the page changes after an action, the sequence is interrupted and you get the new state. You can see this in your agent history when this happens.
+</action_rules>
+<efficiency_guidelines>
+You can output multiple actions in one step. Try to be efficient where it makes sense. Do not predict actions which do not make sense for the current page.
+**Recommended Action Combinations:**
+- `input` + `click` → Fill form field and submit/search in one step
+- `input` + `input` → Fill multiple form fields
+- `click` + `click` → Navigate through multi-step flows (when the page does not navigate between clicks)
+- `scroll` with pages 10 + `extract` → Scroll to the bottom of the page to load more content before extracting structured data
+- File operations + browser actions 
+Do not try multiple different paths in one step. Always have one clear goal per step. 
+Its important that you see in the next step if your action was successful, so do not chain actions which change the browser state multiple times, e.g. 
+- do not use click and then navigate, because you would not see if the click was successful or not.
+- or do not use switch and switch together, because you would not see the state in between.
+- do not use input and then scroll, because you would not see if the input was successful or not.
+</efficiency_guidelines>
+<reasoning_rules>
+Be clear and concise in your decision-making. Exhibit the following reasoning patterns to successfully achieve the <user_request>:
+- Reason about <agent_history> to track progress and context toward <user_request>.
+- Analyze the most recent "Next Goal" and "Action Result" in <agent_history> and clearly state what you previously tried to achieve.
+- Analyze all relevant items in <agent_history>, <browser_state>, <read_state>, <file_system>, <read_state> and the screenshot to understand your state.
+- Explicitly judge success/failure/uncertainty of the last action. Never assume an action succeeded just because it appears to be executed in your last step in <agent_history>. For example, you might have "Action 1/1: Input '2025-05-05' into element 3." in your history even though inputting text failed. Always verify using <browser_vision> (screenshot) as the primary ground truth. If a screenshot is unavailable, fall back to <browser_state>. If the expected change is missing, mark the last action as failed (or uncertain) and plan a recovery.
+- If todo.md is empty and the task is multi-step, generate a stepwise plan in todo.md using file tools.
+- Analyze `todo.md` to guide and track your progress. 
+- If any todo.md items are finished, mark them as complete in the file.
+- Analyze whether you are stuck, e.g. when you repeat the same actions multiple times without any progress. Then consider alternative approaches e.g. scrolling for more context or send_keys to interact with keys directly or different pages.
+- Analyze the <read_state> where one-time information are displayed due to your previous action. Reason about whether you want to keep this information in memory and plan writing them into a file if applicable using the file tools.
+- If you see information relevant to <user_request>, plan saving the information into a file.
+- Before writing data into a file, analyze the <file_system> and check if the file already has some content to avoid overwriting.
+- Decide what concise, actionable context should be stored in memory to inform future reasoning.
+- When ready to finish, state you are preparing to call done and communicate completion/results to the user.
+- Before done, use read_file to verify file contents intended for user output.
+- Always reason about the <user_request>. Make sure to carefully analyze the specific steps and information required. E.g. specific filters, specific form fields, specific information to search. Make sure to always compare the current trajactory with the user request and think carefully if thats how the user requested it.
+</reasoning_rules>
+<examples>
+Here are examples of good output patterns. Use them as reference but never copy them directly.
+<todo_examples>
+  "write_file": {
+    "file_name": "todo.md",
+    "content": "# ArXiv CS.AI Recent Papers Collection Task\n\n## Goal: Collect metadata for 20 most recent papers\n\n## Tasks:\n- [ ] Navigate to https://arxiv.org/list/cs.AI/recent\n- [ ] Initialize papers.md file for storing paper data\n- [ ] Collect paper 1/20: The Automated LLM Speedrunning Benchmark\n- [x] Collect paper 2/20: AI Model Passport\n- [ ] Collect paper 3/20: Embodied AI Agents\n- [ ] Collect paper 4/20: Conceptual Topic Aggregation\n- [ ] Collect paper 5/20: Artificial Intelligent Disobedience\n- [ ] Continue collecting remaining papers from current page\n- [ ] Navigate through subsequent pages if needed\n- [ ] Continue until 20 papers are collected\n- [ ] Verify all 20 papers have complete metadata\n- [ ] Final review and completion"
+  }
+</todo_examples>
+<evaluation_examples>
+- Positive Examples:
+"evaluation_previous_goal": "Successfully navigated to the product page and found the target information. Verdict: Success"
+"evaluation_previous_goal": "Clicked the login button and user authentication form appeared. Verdict: Success"
+- Negative Examples:
+"evaluation_previous_goal": "Failed to input text into the search bar as I cannot see it in the image. Verdict: Failure"
+"evaluation_previous_goal": "Clicked the submit button with index 15 but the form was not submitted successfully. Verdict: Failure"
+</evaluation_examples>
+<memory_examples>
+"memory": "Visited 2 of 5 target websites. Collected pricing data from Amazon ($39.99) and eBay ($42.00). Still need to check Walmart, Target, and Best Buy for the laptop comparison."
+"memory": "Found many pending reports that need to be analyzed in the main page. Successfully processed the first 2 reports on quarterly sales data and moving on to inventory analysis and customer feedback reports."
+</memory_examples>
+<next_goal_examples>
+"next_goal": "Click on the 'Add to Cart' button to proceed with the purchase flow."
+"next_goal": "Extract details from the first item on the page."
+</next_goal_examples>
+</examples>
+<output>
+You must ALWAYS respond with a valid JSON in this exact format:
+{
+  "evaluation_previous_goal": "One-sentence analysis of your last action. Clearly state success, failure, or uncertain.",
+  "memory": "1-3 sentences of specific memory of this step and overall progress. You should put here everything that will help you track progress in future steps. Like counting pages visited, items found, etc.",
+  "next_goal": "State the next immediate goal and action to achieve it, in one clear sentence.",
+  "action":[{"navigate": { "url": "url_value"}}, // ... more actions in sequence]
+}
+Action list should NEVER be empty.
+</output>
+
+
+ user 
+<agent_history>
+Agent initialized
+<step>
+Result
+Found initial url and automatically loaded it. Navigated to http://34.55.136.249:3000/RiverBuy
+<step>
+Successfully navigated to the RiverBuy website, but the page appears empty with no interactive elements loaded.
+Arrived at the RiverBuy website (React App) but the page seems to be an empty SPA that hasn't loaded content yet. Need to wait for the page to load or interact with it to trigger content display.
+Wait for the page to load and then check for interactive elements to begin the milk purchasing task.
+Result
+Waited for 5 seconds
+<step>
+Successfully waited for page to load, and now the RiverBuy website is fully loaded with many interactive elements visible.
+The RiverBuy website appears to be an Amazon-like e-commerce platform with various products displayed. Need to search for milk and complete the purchase task as Emma, a 29-year-old software engineer.
+Search for "milk" using the search bar to find milk products available for purchase.
+Result
+Input 'milk' into element 10.
+Clicked element
+<step>
+Successfully searched for "milk" and the search results page loaded with milk products displayed.
+Successfully navigated to RiverBuy website and searched for "milk". Now on search results page showing milk products. Need to select a milk product and complete the purchase process as Emma.
+Scroll down to view the milk products available and select one to purchase.
+Result
+Scrolled down 2.0 pages
+</agent_history>
+
+<agent_state>
+<user_request>
+Complete this task based on the following persona: Buy milk. (Website: http://34.55.136.249:3000/RiverBuy)
+Persona: Emma is 29 years old and works as a software engineer. She likes to stay updated with the latest technology trends and enjoys trying out new gadgets and services. She values efficiency and is open to using innovative solutions that can enhance her travel experience.
+</user_request>
+<file_system>
+
+</file_system>
+<todo_contents>
+[empty todo.md, fill it when applicable]
+</todo_contents>
+<step_info>Step4 maximum:20
+Today:2026-03-16</step_info>
+</agent_state>
+<browser_state>
+<page_stats>95 links, 483 interactive, 0 iframes, 0 scroll containers, 2 shadow(open), 0 shadow(closed), 35 images, 1583 total elements</page_stats>
+Current tab: 8E4C
+Available tabs:
+Tab 8E4C: http://34.55.136.249:3000/RiverBuy_search?query=milk&category=All - React App
+
+<page_info>1.0 pages above, 3.5 pages below, 5.5 total pages</page_info>
+
+Interactive elements:
+... 1.0 pages above - scroll to see more or extract structured data if you are looking for specific information ...
+RiverBuy
+[1]<div />
+	[2]<svg />
+		[3]<path />
+		[4]<circle />
+	[5]<div />
+		[6]<div />
+			Deliver to
+		[7]<div />
+			New York 10001
+|SHADOW(open)|*[8]<select expanded=false compound_components=(name=Dropdown Toggle,role=button),(name=Options,role=listbox,count=15,options=All|Electronics|Computers|Smart Home) />
+|SHADOW(open)|[9]<input placeholder=Search RiverBuy type=text value=milk required=false />
+[10]<button />
+[11]<div />
+	[12]<div />
+		[13]<div />
+			Hello, sign in
+		[14]<div />
+			Account & Lists
+			[15]<svg />
+				[16]<path />
+[17]<div />
+	[18]<div />
+		Returns
+	[19]<div />
+		& Orders
+[20]<div />
+	[21]<div />
+		[22]<svg />
+			[23]<circle />
+			[24]<circle />
+			[25]<path />
+		[26]<span />
+	[27]<span />
+		Cart
+[28]<div />
+	[29]<svg />
+		[30]<path />
+		[31]<path />
+		[32]<path />
+	[33]<span />
+		All
+[34]<span />
+	Today's Deals
+[35]<span />
+	Customer Service
+[36]<span />
+	Registry
+[37]<span />
+	Gift Cards
+[38]<span />
+	Sell
+Popular Shopping Ideas
+*[39]<label />
+	*[40]<input id=popular-shopping-ideas-oat-0 type=checkbox checked=false />
+	*[41]<span />
+		Oat
+*[42]<label />
+	*[43]<input id=popular-shopping-ideas-certified-organic-1 type=checkbox checked=false />
+	*[44]<span />
+		Certified Organic
+*[45]<label />
+	*[46]<input id=popular-shopping-ideas-lactose-free-2 type=checkbox checked=false />
+	*[47]<span />
+		Lactose Free
+*[48]<label />
+	*[49]<input id=popular-shopping-ideas-unsweet-3 type=checkbox checked=false />
+	*[50]<span />
+		Unsweet
+*[51]<button />
+	See more
+Brands
+*[52]<label />
+	*[53]<input id=brands-365-by-whole-foods-market-0 type=checkbox checked=false />
+	*[54]<span />
+		365 by Whole Foods Market
+*[55]<label />
+	*[56]<input id=brands-organic-valley-1 type=checkbox checked=false />
+	*[57]<span />
+		Organic Valley
+*[58]<label />
+	*[59]<input id=brands-horizon-organic-2 type=checkbox checked=false />
+	*[60]<span />
+		Horizon Organic
+*[61]<label />
+	*[62]<input id=brands-lactaid-3 type=checkbox checked=false />
+	*[63]<span />
+		Lactaid
+*[64]<label />
+	*[65]<input id=brands-carnation-4 type=checkbox checked=false />
+	*[66]<span />
+		Carnation
+*[67]<label />
+	*[68]<input id=brands-nido-5 type=checkbox checked=false />
+	*[69]<span />
+		Nido
+*[70]<label />
+	*[71]<input id=brands-hoosier-hill-farm-6 type=checkbox checked=false />
+	*[72]<span />
+		Hoosier Hill Farm
+*[73]<button />
+	See more
+SNAP EBT
+*[74]<label />
+	*[75]<input id=snap-ebt-snap-ebt-eligible-0 type=checkbox checked=false />
+	*[76]<span />
+		SNAP EBT Eligible
+Milk Type
+*[77]<label />
+	*[78]<input id=milk-type-cow-0 type=checkbox checked=false />
+	*[79]<span />
+		Cow
+Local Stores
+*[80]<label />
+	*[81]<input id=local-stores-whole-foods-market-0 type=checkbox checked=false />
+	*[82]<span />
+		Whole Foods Market
+Dairy Specialty
+*[83]<label />
+	*[84]<input id=dairy-specialty-organic-0 type=checkbox checked=false />
+	*[85]<span />
+		Organic
+Food Type
+*[86]<label />
+	*[87]<input id=food-type-certified-humane-raised-0 type=checkbox checked=false />
+	*[88]<span />
+		Certified Humane-Raised
+*[89]<label />
+	*[90]<input id=food-type-lactose-free-1 type=checkbox checked=false />
+	*[91]<span />
+		Lactose-Free
+*[92]<label />
+	*[93]<input id=food-type-non-gmo-2 type=checkbox checked=false />
+	*[94]<span />
+		Non-GMO
+*[95]<label />
+	*[96]<input id=food-type-organic-3 type=checkbox checked=false />
+	*[97]<span />
+		Organic
+Customer Reviews
+*[98]<label />
+	*[99]<input id=customer-reviews-up-0 type=checkbox checked=false />
+	*[100]<span />
+		& Up
+Price
+*[101]<label />
+	*[102]<input id=price-up-to-40-0 type=checkbox checked=false />
+	*[103]<span />
+		Up to $40
+*[104]<label />
+	*[105]<input id=price-40-to-70-1 type=checkbox checked=false />
+	*[106]<span />
+		$40 to $70
+*[107]<label />
+	*[108]<input id=price-70-to-150-2 type=checkbox checked=false />
+	*[109]<span />
+		$70 to $150
+*[110]<label />
+	*[111]<input id=price-150-to-200-3 type=checkbox checked=false />
+	*[112]<span />
+		$150 to $200
+*[113]<label />
+	*[114]<input id=price-200-above-4 type=checkbox checked=false />
+	*[115]<span />
+		$200 & above
+*[116]<label />
+	*[117]<input id=price-deals-discounts-5 type=checkbox checked=false />
+	*[118]<span />
+		Deals & Discounts
+*[119]<label />
+	*[120]<input id=price-all-discounts-6 type=checkbox checked=false />
+	*[121]<span />
+		All Discounts
+Nutrition Facts
+*[122]<label />
+	*[123]<input id=nutrition-facts-fat-free-0-5g-0 type=checkbox checked=false />
+	*[124]<span />
+		Fat Free (<0.5g)
+*[125]<label />
+	*[126]<input id=nutrition-facts-low-fat-3g-1 type=checkbox checked=false />
+	*[127]<span />
+		Low Fat (<3g)
+*[128]<label />
+	*[129]<input id=nutrition-facts-free-of-saturated-fat-0-5g-2 type=checkbox checked=false />
+	*[130]<span />
+		Free of Saturated Fat (<0.5g)
+*[131]<label />
+	*[132]<input id=nutrition-facts-free-of-trans-fat-0g-3 type=checkbox checked=false />
+	*[133]<span />
+		Free of Trans Fat (0g)
+*[134]<label />
+	*[135]<input id=nutrition-facts-sodium-free-5mg-4 type=checkbox checked=false />
+	*[136]<span />
+		Sodium Free (<5mg)
+*[137]<label />
+	*[138]<input id=nutrition-facts-low-sodium-140mg-5 type=checkbox checked=false />
+	*[139]<span />
+		Low Sodium (<140mg)
+*[140]<label />
+	*[141]<input id=nutrition-facts-dietary-fiber-10g-6 type=checkbox checked=false />
+	*[142]<span />
+		Dietary Fiber (>10g)
+*[143]<label />
+	*[144]<input id=nutrition-facts-protein-10g-7 type=checkbox checked=false />
+	*[145]<span />
+		Protein (>10g)
+Seller
+*[146]<label />
+	*[147]<input id=seller-whole-foods-market-0 type=checkbox checked=false />
+	*[148]<span />
+		Whole Foods Market
+*[149]<label />
+	*[150]<input id=seller-de-mi-pa-s-1 type=checkbox checked=false />
+	*[151]<span />
+		De Mi País
+*[152]<button />
+	See more
+Diet Type
+*[153]<label />
+	*[154]<input id=diet-type-gluten-free-0 type=checkbox checked=false />
+	*[155]<span />
+		Gluten Free
+*[156]<label />
+	*[157]<input id=diet-type-kosher-1 type=checkbox checked=false />
+	*[158]<span />
+		Kosher
+*[159]<label />
+	*[160]<input id=diet-type-vegetarian-2 type=checkbox checked=false />
+	*[161]<span />
+		Vegetarian
+*[162]<label />
+	*[163]<input id=diet-type-halal-3 type=checkbox checked=false />
+	*[164]<span />
+		Halal
+*[165]<label />
+	*[166]<input id=diet-type-keto-4 type=checkbox checked=false />
+	*[167]<span />
+		Keto
+*[168]<label />
+	*[169]<input id=diet-type-vegan-5 type=checkbox checked=false />
+	*[170]<span />
+		Vegan
+Calories Per Serving
+*[171]<label />
+	*[172]<input id=calories-per-serving-0-calories-0 type=checkbox checked=false />
+	*[173]<span />
+		0 Calories
+*[174]<label />
+	*[175]<input id=calories-per-serving-1-to-40-calories-1 type=checkbox checked=false />
+	*[176]<span />
+		1 to 40 Calories
+*[177]<label />
+	*[178]<input id=calories-per-serving-41-to-100-calories-2 type=checkbox checked=false />
+	*[179]<span />
+		41 to 100 Calories
+*[180]<label />
+	*[181]<input id=calories-per-serving-101-to-200-calories-3 type=checkbox checked=false />
+	*[182]<span />
+		101 to 200 Calories
+*[183]<label />
+	*[184]<input id=calories-per-serving-201-to-300-calories-4 type=checkbox checked=false />
+	*[185]<span />
+		201 to 300 Calories
+More-sustainable Products
+*[186]<label />
+	*[187]<input id=more-sustainable-products-climate-pledge-friendly-0 type=checkbox checked=false />
+	*[188]<span />
+		Climate Pledge Friendly
+Flavors
+*[189]<label />
+	*[190]<input id=flavors-vanilla-0 type=checkbox checked=false />
+	*[191]<span />
+		Vanilla
+*[192]<label />
+	*[193]<input id=flavors-chocolate-1 type=checkbox checked=false />
+	*[194]<span />
+		Chocolate
+*[195]<label />
+	*[196]<input id=flavors-coconut-2 type=checkbox checked=false />
+	*[197]<span />
+		Coconut
+*[198]<label />
+	*[199]<input id=flavors-banana-3 type=checkbox checked=false />
+	*[200]<span />
+		Banana
+*[201]<label />
+	*[202]<input id=flavors-mixed-berry-4 type=checkbox checked=false />
+	*[203]<span />
+		Mixed Berry
+*[204]<label />
+	*[205]<input id=flavors-plain-5 type=checkbox checked=false />
+	*[206]<span />
+		Plain
+*[207]<label />
+	*[208]<input id=flavors-strawberry-6 type=checkbox checked=false />
+	*[209]<span />
+		Strawberry
+Flavor
+*[210]<label />
+	*[211]<input id=flavor-vanilla-0 type=checkbox checked=false />
+	*[212]<span />
+		Vanilla
+*[213]<label />
+	*[214]<input id=flavor-chocolate-1 type=checkbox checked=false />
+	*[215]<span />
+		Chocolate
+*[216]<label />
+	*[217]<input id=flavor-coconut-2 type=checkbox checked=false />
+	*[218]<span />
+		Coconut
+*[219]<label />
+	*[220]<input id=flavor-strawberry-3 type=checkbox checked=false />
+	*[221]<span />
+		Strawberry
+*[222]<label />
+	*[223]<input id=flavor-banana-4 type=checkbox checked=false />
+	*[224]<span />
+		Banana
+*[225]<label />
+	*[226]<input id=flavor-coffee-5 type=checkbox checked=false />
+	*[227]<span />
+		Coffee
+Age Range
+*[228]<label />
+	*[229]<input id=age-range-birth-to-3-months-0 type=checkbox checked=false />
+	*[230]<span />
+		Birth to 3 Months
+*[231]<label />
+	*[232]<input id=age-range-4-to-7-months-1 type=checkbox checked=false />
+	*[233]<span />
+		4 to 7 Months
+*[234]<label />
+	*[235]<input id=age-range-8-to-11-months-2 type=checkbox checked=false />
+	*[236]<span />
+		8 to 11 Months
+*[237]<label />
+	*[238]<input id=age-range-12-to-23-months-3 type=checkbox checked=false />
+	*[239]<span />
+		12 to 23 Months
+*[240]<label />
+	*[241]<input id=age-range-24-months-above-4 type=checkbox checked=false />
+	*[242]<span />
+		24 Months & Above
+Search Results for "
+milk
+*[243]<div />
+	*[244]<a />
+	Organic Valley
+	*[245]<a />
+		Organic 2% Milk, 64 Oz (Half Gallon)
+	Organic Milk
+	*[246]<span />
+		*[247]<a aria-label=4.8 out of 5 stars, rating details role=button />
+			4.8 out of 5 stars
+			*[248]<i />
+	*[249]<span />
+		*[250]<div />
+			*[251]<a aria-label=6,573 ratings />
+				6,573
+	20K+ bought in past month
+	*[252]<a />
+		*[253]<span />
+			99
+		$0.09
+		/fluid ounce)
+	SNAP EBT eligible
+	*[254]<a />
+	$9.95
+	for 2-hour delivery with Prime
+	*[255]<a role=button />
+		Organic content
+		*[256]<div />
+	*[257]<div />
+		*[258]<a id=a-autoid-1-announce />
+			See options
+*[259]<div />
+	*[260]<a />
+	Organic Valley
+	*[261]<a />
+		Organic Whole Milk, 64 Oz (Half Gallon)
+	*[262]<span />
+		Whole
+	*[263]<span />
+		*[264]<a aria-label=4.8 out of 5 stars, rating details role=button />
+			4.8 out of 5 stars
+			*[265]<i />
+	*[266]<span />
+		*[267]<div />
+			*[268]<a aria-label=8,676 ratings />
+				8,676
+	20K+ bought in past month
+	*[269]<a />
+		*[270]<span />
+		*[271]<span />
+		*[272]<span />
+			99
+		$0.09
+		/fluid ounce)
+	SNAP EBT eligible
+	*[273]<a />
+	*[274]<span />
+		$9.95
+	for 2-hour delivery with Prime
+	*[275]<a role=button />
+		*[276]<span />
+		Organic content
+		*[277]<div />
+			*[278]<i role=presentation />
+	*[279]<div />
+		*[280]<a id=a-autoid-2-announce />
+			See options
+*[281]<div />
+	*[282]<a />
+	Maple Hill Creamery
+	*[283]<a />
+		Organic Whole Milk, 64 fz
+	*[284]<span />
+		Milk
+	*[285]<span />
+		*[286]<a aria-label=4.8 out of 5 stars, rating details role=button />
+			4.8 out of 5 stars
+			*[287]<i />
+	*[288]<span />
+		*[289]<div />
+			*[290]<a aria-label=6,639 ratings />
+				6,639
+	20K+ bought in past month
+	*[291]<a />
+		*[292]<span />
+			*[293]<span />
+			*[294]<span />
+			*[295]<span />
+				99
+		*[296]<span />
+			$0.12
+		/fluid ounce)
+	SNAP EBT eligible
+	*[297]<a />
+	*[298]<span />
+		$9.95
+	for 2-hour delivery with Prime
+	*[299]<a role=button />
+		*[300]<span />
+		Organic content
+		*[301]<div />
+			*[302]<i role=presentation />
+	*[303]<div />
+		*[304]<a id=a-autoid-3-announce />
+			See options
+*[305]<div />
+	*[306]<a />
+	*[307]<a />
+		365 Everyday Value, Whole Vitamin D Milk, Gallon
+	Whole Milk
+	*[308]<span />
+		*[309]<a aria-label=4.8 out of 5 stars, rating details role=button />
+			4.8 out of 5 stars
+			*[310]<i />
+	*[311]<span />
+		*[312]<div />
+			*[313]<a aria-label=1,330 ratings />
+				1,330
+	2K+ bought in past month
+	*[314]<a />
+		*[315]<span />
+			89
+		$0.04
+		/fluid ounce)
+	SNAP EBT eligible
+	*[316]<a />
+	$9.95
+	for 2-hour delivery with Prime
+	*[317]<div />
+		*[318]<a id=a-autoid-4-announce />
+			See options
+*[319]<div />
+	*[320]<a />
+	Organic Valley
+	*[321]<a />
+		Grassmilk Whole Organic, 64 Ounce
+	whole milk
+	*[322]<span />
+		*[323]<a aria-label=4.9 out of 5 stars, rating details role=button />
+			4.9 out of 5 stars
+			*[324]<i />
+	*[325]<span />
+		*[326]<div />
+			*[327]<a aria-label=738 ratings />
+				738
+	20K+ bought in past month
+	*[328]<a />
+		*[329]<span />
+			*[330]<span />
+			*[331]<span />
+			*[332]<span />
+				81
+		$0.09
+		/fluid ounce)
+		Typical:
+		$6.99
+	Join Prime to buy this item at $5.23
+	SNAP EBT eligible
+	*[333]<a />
+	*[334]<span />
+		$9.95
+	for 2-hour delivery with Prime
+	*[335]<a role=button />
+		*[336]<span />
+		Organic content
+		*[337]<div />
+			*[338]<i role=presentation />
+	*[339]<div />
+		*[340]<a id=a-autoid-5-announce />
+			See options
+*[341]<div />
+	*[342]<a />
+	365 by Whole Foods Market
+	*[343]<a />
+		Organic Whole Grade A Milk, Ultra-Pasteurized & Homogenized, 64 Ounce
+	*[344]<span />
+		Organic
+	*[345]<span />
+		*[346]<a aria-label=4.8 out of 5 stars, rating details role=button />
+			4.8 out of 5 stars
+			*[347]<i />
+	*[348]<span />
+		*[349]<div />
+			*[350]<a aria-label=4,655 ratings />
+				4,655
+	7K+ bought in past month
+	*[351]<a />
+		*[352]<span />
+		*[353]<span />
+		*[354]<span />
+			49
+		*[355]<span />
+			$0.07
+		/fluid ounce)
+	SNAP EBT eligible
+	*[356]<a />
+	*[357]<span />
+		$9.95
+	for 2-hour delivery with Prime
+	*[358]<a role=button />
+		*[359]<span />
+		Organic content
+		*[360]<div />
+			*[361]<i role=presentation />
+	*[362]<div />
+		*[363]<a id=a-autoid-6-announce />
+			See options
+*[364]<div />
+	*[365]<a />
+	Lactaid
+	*[366]<a />
+		2% Reduced Fat Milk, 64 fl oz (Pack of 1)
+	2% Reduced Fat
+	*[367]<span />
+		*[368]<a aria-label=4.8 out of 5 stars, rating details role=button />
+			4.8 out of 5 stars
+			*[369]<i />
+	*[370]<span />
+		*[371]<div />
+			*[372]<a aria-label=14,453 ratings />
+				14,453
+	20K+ bought in past month
+	*[373]<a />
+		*[374]<span />
+			99
+		$0.08
+		/fluid ounce)
+	SNAP EBT eligible
+	*[375]<a />
+	$9.95
+	for 2-hour delivery with Prime
+	*[376]<div />
+		*[377]<a id=a-autoid-7-announce />
+			See options
+*[378]<div />
+	*[379]<a />
+	*[380]<a />
+		365 Everyday Value, Reduced Fat 2% Milk, Gallon
+	*[381]<span />
+		Milk
+	*[382]<span />
+		*[383]<a aria-label=4.6 out of 5 stars, rating details role=button />
+			4.6 out of 5 stars
+			*[384]<i />
+	*[385]<span />
+		*[386]<div />
+			*[387]<a aria-label=1,243 ratings />
+				1,243
+	2K+ bought in past month
+	*[388]<a />
+		*[389]<span />
+		*[390]<span />
+		*[391]<span />
+			89
+		$0.04
+		/oz)
+	SNAP EBT eligible
+	*[392]<a />
+	*[393]<span />
+		$9.95
+	for 2-hour delivery with Prime
+	*[394]<div />
+		*[395]<a id=a-autoid-8-announce />
+			See options
+*[396]<div />
+	*[397]<a />
+	365 by Whole Foods Market
+	*[398]<a />
+		Organic 2% Reduced Fat Milk, 128 Ounce
+	*[399]<span />
+		Organic
+	*[400]<span />
+		*[401]<a aria-label=4.7 out of 5 stars, rating details role=button />
+			4.7 out of 5 stars
+			*[402]<i />
+	*[403]<span />
+		*[404]<div />
+			*[405]<a aria-label=2,227 ratings />
+				2,227
+	4K+ bought in past month
+	*[406]<a />
+		*[407]<span />
+			*[408]<span />
+			*[409]<span />
+			*[410]<span />
+				19
+		$0.06
+		/ounce)
+	SNAP EBT eligible
+	*[411]<a />
+	*[412]<span />
+		$9.95
+	for 2-hour delivery with Prime
+	*[413]<a role=button />
+		*[414]<span />
+		Organic content
+		*[415]<div />
+			*[416]<i role=presentation />
+	*[417]<div />
+		*[418]<a id=a-autoid-9-announce />
+			See options
+*[419]<div />
+	*[420]<a />
+	365 by Whole Foods Market
+	*[421]<a />
+		Reduced Fat 2% Milk, Half Gallon
+	Unflavored
+	*[422]<span />
+		*[423]<a aria-label=4.6 out of 5 stars, rating details role=button />
+			4.6 out of 5 stars
+			*[424]<i />
+	*[425]<span />
+		*[426]<div />
+			*[427]<a aria-label=1,662 ratings />
+				1,662
+	2K+ bought in past month
+	*[428]<a />
+		*[429]<span />
+			59
+		$0.04
+		/fluid ounce)
+	SNAP EBT eligible
+	*[430]<a />
+	$9.95
+	for 2-hour delivery with Prime
+	*[431]<div />
+		*[432]<a id=a-autoid-10-announce />
+			See options
+*[433]<div />
+	*[434]<a />
+	*[435]<a />
+		Alexandre Eco Dairy Organic A2/A2 Whole Milk, 1.8 qt
+	*[436]<span />
+		Organic
+	*[437]<span />
+		*[438]<a aria-label=4.8 out of 5 stars, rating details role=button />
+			4.8 out of 5 stars
+			*[439]<i />
+	*[440]<span />
+		*[441]<div />
+			*[442]<a aria-label=953 ratings />
+				953
+	10K+ bought in past month
+	*[443]<a />
+		*[444]<span />
+		*[445]<span />
+		*[446]<span />
+			99
+		*[447]<span />
+			$0.12
+		/fluid ounce)
+	SNAP EBT eligible
+	*[448]<a />
+	*[449]<span />
+		$9.95
+	for 2-hour delivery with Prime
+	*[450]<a role=button />
+		*[451]<span />
+		Organic content
+		*[452]<div />
+			*[453]<i role=presentation />
+	*[454]<div />
+		*[455]<a id=a-autoid-11-announce />
+			See options
+*[456]<div />
+	*[457]<a />
+	Organic Valley
+	*[458]<a />
+		Grassmilk Fat Free Milk, Organic, 64 Fl Oz
+	Unflavored
+	*[459]<span />
+		*[460]<a aria-label=4.7 out of 5 stars, rating details role=button />
+			4.7 out of 5 stars
+			*[461]<i />
+	*[462]<span />
+		*[463]<div />
+			*[464]<a aria-label=1,076 ratings />
+				1,076
+	6K+ bought in past month
+	*[465]<a />
+		*[466]<span />
+			*[467]<span />
+			*[468]<span />
+			*[469]<span />
+				81
+		$0.09
+		/fluid ounce)
+		Typical:
+		$6.99
+	Join Prime to buy this item at $5.23
+	SNAP EBT eligible
+	*[470]<a />
+	*[471]<span />
+		$9.95
+	for 2-hour delivery with Prime
+	*[472]<a role=button />
+		*[473]<span />
+		Organic content
+		*[474]<div />
+			*[475]<i role=presentation />
+	*[476]<div />
+		*[477]<a id=a-autoid-12-announce />
+			See options
+*[478]<div />
+	*[479]<a />
+*[480]<div />
+	*[481]<a />
+*[482]<div />
+	*[483]<a />
+... 3.5 pages below - scroll to see more or extract structured data if you are looking for specific information ...
+</browser_state>
+
+
+ RESPONSE
+{
+  "evaluation_previous_goal": "Successfully scrolled down to view milk products on the search results page, and can now see multiple milk products with prices and options.",
+  "memory": "Currently on RiverBuy search results page for \"milk\". Multiple milk products are visible including Organic Valley 2% Milk ($9.95), Organic Valley Whole Milk ($9.95), Maple Hill Creamery Organic Whole Milk ($9.95), and others. Need to select one product and complete the purchase process as Emma.",
+  "next_goal": "Select the first milk product (Organic Valley Organic 2% Milk, 64 Oz) by clicking on its \"See options\" button to proceed with purchase.",
+  "action": [
+    {
+      "click": {
+        "index": 258
+      }
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import base64
 import importlib
+import inspect
 import json
 import logging
 import os
@@ -122,6 +123,7 @@ class StandaloneSettings:
     anthropic_base_url: Optional[str]
     gemini_base_url: Optional[str]
     ollama_base_url: str
+    agent_use_thinking: bool
 
     @staticmethod
     def from_env(output_dir_override: str | None = None) -> "StandaloneSettings":
@@ -160,6 +162,8 @@ class StandaloneSettings:
             anthropic_base_url=_env_optional("ANTHROPIC_BASE_URL"),
             gemini_base_url=_env_optional("GEMINI_BASE_URL"),
             ollama_base_url=(os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").strip(),
+            # Keep reasoning/thinking enabled by default so model_outputs includes richer traces.
+            agent_use_thinking=_env_bool("BROWSER_AGENT_USE_THINKING", default=True),
         )
 
 
@@ -198,17 +202,18 @@ TASKS: List[TaskConfig] = [
     #     name="Book Shoes Online",
     #     url="http://34.55.136.249:3000/RiverBuy",
     #     description="Buy a pair of shoes.",
-    # ),http://localhost:3000/
-    TaskConfig(
-        name="Book Shoes Online",
-        url="http://localhost:3000/RiverBuy",
-        description="Buy a pair of shoes.",
-    ),
+    # ),
+    # TaskConfig(
+    #     name="Book Shoes Online",
+    #     url="http://localhost:3000/RiverBuy",
+    #     description="Buy a pair of shoes.",
+    # ),
     # TaskConfig(
     #     name="Rent a car",
     #     url="http://34.55.136.249:3000/zoomcar",
     #     description="Rent a car for a family vacation.",
     # ),
+    
 ]
 
 PERSONAS: List[PersonaConfig] = [
@@ -216,18 +221,18 @@ PERSONAS: List[PersonaConfig] = [
         value="Frugality",
         content="Emma is 29 years old and values saving money and making thoughtful purchasing decisions. She is willing to spend time researching and comparing options to find the best deals and discounts. She prefers budget-friendly choices and is cautious about unnecessary expenses.",
     ),
-    # PersonaConfig(
-    #     value="Sustainability",
-    #     content="You prioritize environmentally friendly and socially responsible choices.",
-    # ),
-    # PersonaConfig(
-    #     value="Comfort",
-    #     content="You prioritize a comfortable and enjoyable travel experience.",
-    # ),
-    # PersonaConfig(
-    #     value="Luxury",
-    #     content="You prioritize comfort and premium experiences, even at higher costs.",
-    # ),
+    PersonaConfig(
+        value="Sustainability",
+        content="You prioritize environmentally friendly and socially responsible choices.",
+    ),
+    PersonaConfig(
+        value="Comfort",
+        content="You prioritize a comfortable and enjoyable travel experience.",
+    ),
+    PersonaConfig(
+        value="Luxury",
+        content="You prioritize comfort and premium experiences, even at higher costs.",
+    ),
     PersonaConfig(
         value="Innovation",
         content="Emma is 29 years old and works as a software engineer. She likes to stay updated with the latest technology trends and enjoys trying out new gadgets and services. She values efficiency and is open to using innovative solutions that can enhance her travel experience.",
@@ -587,15 +592,24 @@ class StandaloneBrowserAgentService:
             browser_session = BrowserSession(**browser_kwargs)
             context = self._prepare_run_context(task_run_id=task_run_id)
 
-            agent = Agent(
-                browser_session=browser_session,
-                task=self._compose_agent_task(task=task, content=persona.content),
-                llm=llm,
-                use_vision=True,
-                save_conversation_path=str(context.screenshots_dir),
-                use_judge=False,
-                generate_gif=False,
-            )
+            agent_kwargs: dict[str, Any] = {
+                "browser_session": browser_session,
+                "task": self._compose_agent_task(task=task, content=persona.content),
+                "llm": llm,
+                "use_vision": True,
+                "save_conversation_path": str(context.screenshots_dir),
+                "use_judge": False,
+                "generate_gif": False,
+            }
+
+            try:
+                agent_signature = inspect.signature(Agent.__init__)
+                if "use_thinking" in agent_signature.parameters:
+                    agent_kwargs["use_thinking"] = self._settings.agent_use_thinking
+            except Exception:
+                pass
+
+            agent = Agent(**agent_kwargs)
 
             history = await self._run_agent_with_compatible_loop(agent, max_steps=self._settings.max_steps)
 
@@ -944,6 +958,7 @@ class StandaloneBrowserAgentService:
         summary: dict[str, Any],
     ) -> dict[str, Any]:
         step_descriptions = self._extract_action_descriptions(history, max_items=len(screenshots))
+        model_outputs = self._normalize_model_outputs(self._safe_call(history, "model_outputs"))
 
         return {
             "metadata": {
@@ -972,11 +987,35 @@ class StandaloneBrowserAgentService:
             "details": {
                 "screenshots": [_to_portable_path(Path(artifact.path)) for artifact in screenshots],
                 "step_descriptions": step_descriptions,
-                "model_outputs": self._to_serializable(self._safe_call(history, "model_outputs")),
+                "model_outputs": model_outputs,
                 "last_action": self._to_serializable(self._safe_call(history, "last_action")),
                 "structured_output": self._to_serializable(getattr(history, "structured_output", None)),
             },
         }
+
+    def _normalize_model_outputs(self, model_outputs_raw: Any) -> Any:
+        serialized = self._to_serializable(model_outputs_raw)
+
+        if isinstance(serialized, list):
+            return [self._normalize_model_output_entry(item) for item in serialized]
+        if isinstance(serialized, dict):
+            return self._normalize_model_output_entry(serialized)
+        return serialized
+
+    def _normalize_model_output_entry(self, item: Any) -> Any:
+        if not isinstance(item, dict):
+            return item
+
+        normalized = dict(item)
+        thinking = normalized.get("thinking")
+        thinking_process = normalized.get("thinking_process")
+
+        if thinking is None and thinking_process is not None:
+            normalized["thinking"] = thinking_process
+        if thinking_process is None and thinking is not None:
+            normalized["thinking_process"] = thinking
+
+        return normalized
 
     def _safe_call(self, obj: Any, method_name: str) -> Any:
         attr = getattr(obj, method_name, None)

@@ -7,6 +7,8 @@ import asyncio
 import json
 import logging
 import math
+import threading
+import weakref
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Any
 
@@ -37,6 +39,48 @@ from ..core.storage_paths import get_condition_lookup_dirs
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/judge", tags=["judge"])
+
+_GLOBAL_JUDGE_SEMAPHORE_LOCK = threading.Lock()
+_GLOBAL_JUDGE_TASK_SEMAPHORES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_GLOBAL_JUDGE_LLM_SEMAPHORES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+class _CompositeSemaphore:
+    """Acquire multiple semaphores together to enforce layered concurrency limits."""
+
+    def __init__(self, *semaphores: Optional[asyncio.Semaphore]) -> None:
+        self._semaphores = [sem for sem in semaphores if sem is not None]
+
+    async def __aenter__(self) -> "_CompositeSemaphore":
+        for semaphore in self._semaphores:
+            await semaphore.acquire()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        for semaphore in reversed(self._semaphores):
+            semaphore.release()
+
+
+def _get_loop_scoped_semaphore(
+    cache: weakref.WeakKeyDictionary,
+    limit: int,
+) -> asyncio.Semaphore:
+    normalized_limit = max(1, int(limit or 1))
+    loop = asyncio.get_running_loop()
+
+    with _GLOBAL_JUDGE_SEMAPHORE_LOCK:
+        cached = cache.get(loop)
+        if (
+            isinstance(cached, tuple)
+            and len(cached) == 2
+            and int(cached[0]) == normalized_limit
+            and isinstance(cached[1], asyncio.Semaphore)
+        ):
+            return cached[1]
+
+        semaphore = asyncio.Semaphore(normalized_limit)
+        cache[loop] = (normalized_limit, semaphore)
+        return semaphore
 
 
 def _map_verdict_to_status(verdict: str) -> EvaluateStatus:
@@ -390,6 +434,65 @@ async def _load_condition_run_data(
     if not lookup_ids:
         logger.error("Empty conditionID in request, cannot load condition")
         return None
+
+    async def _load_json_with_retry(path: Path) -> Optional[Dict[str, Any]]:
+        max_retries = max(
+            1,
+            int(getattr(settings, "JUDGE_CONDITION_LOAD_MAX_RETRIES", 4) or 4),
+        )
+        base_delay_seconds = max(
+            0.0,
+            float(getattr(settings, "JUDGE_CONDITION_LOAD_RETRY_DELAY_SECONDS", 0.05) or 0.05),
+        )
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                if isinstance(payload, dict):
+                    return payload
+                logger.error("Condition file %s does not contain a JSON object", path)
+                return None
+            except json.JSONDecodeError as exc:
+                if attempt >= max_retries:
+                    logger.error(
+                        "Failed to decode condition file after retries: %s (error=%s)",
+                        path,
+                        exc,
+                    )
+                    return None
+                sleep_seconds = base_delay_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    "Condition file decode failed, retrying | path=%s attempt=%d/%d backoff=%.3fs error=%s",
+                    path,
+                    attempt,
+                    max_retries,
+                    sleep_seconds,
+                    exc,
+                )
+                if sleep_seconds > 0:
+                    await asyncio.sleep(sleep_seconds)
+            except OSError as exc:
+                if attempt >= max_retries:
+                    logger.error(
+                        "Failed to read condition file after retries: %s (error=%s)",
+                        path,
+                        exc,
+                    )
+                    return None
+                sleep_seconds = base_delay_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    "Condition file read failed, retrying | path=%s attempt=%d/%d backoff=%.3fs error=%s",
+                    path,
+                    attempt,
+                    max_retries,
+                    sleep_seconds,
+                    exc,
+                )
+                if sleep_seconds > 0:
+                    await asyncio.sleep(sleep_seconds)
+
+        return None
     
     # 1. Load run data using conditionID as filename
     try:
@@ -413,8 +516,9 @@ async def _load_condition_run_data(
             )
             return None
         
-        with open(json_file, 'r', encoding='utf-8') as f:
-            run_data = json.load(f)
+        run_data = await _load_json_with_retry(json_file)
+        if run_data is None:
+            return None
     except Exception as e:
         logger.error(f"Failed to load condition {condition.conditionID}: {e}")
         return None
@@ -505,23 +609,31 @@ async def _gather_with_limit(
     coroutines: List[asyncio.Future],
     max_concurrency: int,
     timeout_seconds: int = 0,
+    shared_semaphore: Optional[asyncio.Semaphore] = None,
 ) -> List[Any]:
     limit = max(1, int(max_concurrency or 1))
     semaphore = asyncio.Semaphore(limit)
     effective_timeout = max(0, int(timeout_seconds or 0))
 
     async def _run(coroutine: asyncio.Future) -> Any:
-        async with semaphore:
-            try:
-                if effective_timeout > 0:
-                    return await asyncio.wait_for(coroutine, timeout=effective_timeout)
-                return await coroutine
-            except asyncio.TimeoutError:
-                logger.warning("A judge coroutine timed out after %ss", effective_timeout)
-                return None
-            except Exception as exc:
-                logger.error("A judge coroutine failed: %s", exc)
-                return None
+        async def _run_with_local_limit() -> Any:
+            async with semaphore:
+                try:
+                    if effective_timeout > 0:
+                        return await asyncio.wait_for(coroutine, timeout=effective_timeout)
+                    return await coroutine
+                except asyncio.TimeoutError:
+                    logger.warning("A judge coroutine timed out after %ss", effective_timeout)
+                    return None
+                except Exception as exc:
+                    logger.error("A judge coroutine failed: %s", exc)
+                    return None
+
+        if shared_semaphore is None:
+            return await _run_with_local_limit()
+
+        async with shared_semaphore:
+            return await _run_with_local_limit()
 
     return await asyncio.gather(*[_run(coroutine) for coroutine in coroutines])
 
@@ -915,15 +1027,50 @@ async def evaluate_experiment(
         min(configured_step_max_concurrency, total_llm_concurrency_budget // max(1, max_concurrency)),
     )
     task_timeout_seconds = max(0, int(getattr(settings, "JUDGE_EVALUATION_TASK_TIMEOUT_SECONDS", 0) or 0))
-    llm_semaphore = asyncio.Semaphore(total_llm_concurrency_budget)
+    global_task_limit = max(
+        1,
+        int(
+            getattr(
+                settings,
+                "JUDGE_GLOBAL_REQUEST_MAX_CONCURRENCY",
+                max_concurrency,
+            )
+            or max_concurrency
+        ),
+    )
+    global_llm_budget = max(
+        1,
+        int(
+            getattr(
+                settings,
+                "JUDGE_GLOBAL_LLM_CONCURRENCY_BUDGET",
+                total_llm_concurrency_budget,
+            )
+            or total_llm_concurrency_budget
+        ),
+    )
+
+    global_task_semaphore = _get_loop_scoped_semaphore(
+        _GLOBAL_JUDGE_TASK_SEMAPHORES,
+        global_task_limit,
+    )
+    global_llm_semaphore = _get_loop_scoped_semaphore(
+        _GLOBAL_JUDGE_LLM_SEMAPHORES,
+        global_llm_budget,
+    )
+    request_llm_semaphore = asyncio.Semaphore(total_llm_concurrency_budget)
+    llm_semaphore = _CompositeSemaphore(request_llm_semaphore, global_llm_semaphore)
+
     logger.info(
-        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, max_concurrency=%d, step_max_concurrency=%d, llm_budget=%d, task_timeout_seconds=%d)",
+        "Received experiment evaluation request with %d conditions and %d criteria (judge_model=%s, max_concurrency=%d, global_task_limit=%d, step_max_concurrency=%d, request_llm_budget=%d, global_llm_budget=%d, task_timeout_seconds=%d)",
         len(request.conditions),
         len(request.criteria),
         request.judge_model,
         max_concurrency,
+        global_task_limit,
         step_max_concurrency,
         total_llm_concurrency_budget,
+        global_llm_budget,
         task_timeout_seconds,
     )
     logger.info(
@@ -948,6 +1095,7 @@ async def evaluate_experiment(
         load_tasks,
         max_concurrency=max_concurrency,
         timeout_seconds=task_timeout_seconds,
+        shared_semaphore=global_task_semaphore,
     )
     loaded_contexts = [ctx for ctx in loaded_contexts_raw if ctx is not None]
 
@@ -1003,6 +1151,7 @@ async def evaluate_experiment(
         evaluation_tasks,
         max_concurrency=max_concurrency,
         timeout_seconds=task_timeout_seconds,
+        shared_semaphore=global_task_semaphore,
     )
     
     # 4. Group results by condition

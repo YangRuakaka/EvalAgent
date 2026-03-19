@@ -11,6 +11,7 @@ export const useDagInteractions = (activeRunId) => {
     const dagInteractionCounterRef = useRef(0);
     const dagInteractionLastRecordedAtRef = useRef(new Map());
     const dagZoomScaleByRunRef = useRef(new Map());
+    const dagZoomTranslateByRunRef = useRef(new Map());
 
     const handleDAGInteraction = useCallback((interaction) => {
         if (!interaction || typeof interaction !== 'object') {
@@ -36,6 +37,7 @@ export const useDagInteractions = (activeRunId) => {
         const normalizedPayload = normalizeDAGInteractionForExport(interaction, {
             runKey,
             zoomScaleByRunRef: dagZoomScaleByRunRef,
+            zoomTranslateByRunRef: dagZoomTranslateByRunRef,
         });
         if (!normalizedPayload) {
             return;
@@ -61,8 +63,8 @@ export const useDagInteractions = (activeRunId) => {
         const timestamp = new Date();
         const summary = buildDAGInteractionSummary(dagInteractions);
         const payload = {
-            exportVersion: 'dag_interactions_focused_v2',
-            granularity: 'focused',
+            exportVersion: 'dag_interactions_detailed_v3',
+            granularity: 'detailed',
             exportedAt: timestamp.toISOString(),
             count: dagInteractions.length,
             summary,
@@ -89,7 +91,8 @@ export const useDagInteractions = (activeRunId) => {
             dagInteractionCounterRef.current = 0;
             dagInteractionLastRecordedAtRef.current.clear();
             dagZoomScaleByRunRef.current.clear();
-            alert(`Exported ${payload.count} focused DAG interactions.`);
+            dagZoomTranslateByRunRef.current.clear();
+            alert(`Exported ${payload.count} detailed DAG interactions.`);
         } catch (error) {
             alert(`Failed to export DAG interactions: ${error?.message || 'unknown error'}`);
         } finally {

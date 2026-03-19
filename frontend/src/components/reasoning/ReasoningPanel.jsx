@@ -904,7 +904,7 @@ const HighlightText = ({ text, highlights, tagName = 'div', className = '', sour
 									key={`${i}-${layerIndex}`}
 									style={{
 										backgroundColor: verdictStyle ? verdictStyle.bg : layer.color,
-										border: `1px solid ${borderColor}`,
+										border: `2px solid ${borderColor}`,
 										padding: '0 2px',
 										borderRadius: '2px',
 										cursor: isInteractive ? 'help' : 'inherit',
@@ -1003,7 +1003,7 @@ const ActionVisualizer = ({ action, highlights, onHover }) => {
 					backgroundColor: cardHighlight.verdict && evaluateStatusMap[cardHighlight.verdict.toLowerCase()]
 						? evaluateStatusMap[cardHighlight.verdict.toLowerCase()].bg
 						: cardHighlight.color,
-					border: `1px solid ${cardHighlight.criteriaColor || cardHighlight.color}`,
+					border: `2px solid ${cardHighlight.criteriaColor || cardHighlight.color}`,
 					...(extraCardRings.length > 0 ? { boxShadow: extraCardRings.join(', ') } : {}),
 				} : {};
 

@@ -1,6 +1,7 @@
 """
 Dependency injection for FastAPI routes.
 """
+import threading
 from typing import Generator
 from dataclasses import dataclass
 
@@ -23,6 +24,7 @@ class JudgeServices:
 
 # Global service instances (lazy initialized)
 _judge_services: JudgeServices | None = None
+_judge_services_lock = threading.Lock()
 
 
 def get_judge_services() -> JudgeServices:
@@ -36,13 +38,15 @@ def get_judge_services() -> JudgeServices:
     global _judge_services
     
     if _judge_services is None:
-        # Initialize all services
-        llm_factory = ChatLLMFactory()
-        judge_evaluator = JudgeEvaluatorService(llm_factory=llm_factory)
-        
-        _judge_services = JudgeServices(
-            llm_factory=llm_factory,
-            judge_evaluator=judge_evaluator
-        )
+        with _judge_services_lock:
+            if _judge_services is None:
+                # Initialize all services once even under concurrent requests.
+                llm_factory = ChatLLMFactory()
+                judge_evaluator = JudgeEvaluatorService(llm_factory=llm_factory)
+
+                _judge_services = JudgeServices(
+                    llm_factory=llm_factory,
+                    judge_evaluator=judge_evaluator
+                )
     
     return _judge_services

@@ -173,6 +173,7 @@ class BrowserAgentService:
         self._active_runs_lock = asyncio.Lock()
         # Background run management
         self._run_store: Dict[str, dict] = {}
+        self._run_store_lock = threading.Lock()
         self._run_screenshot_url_prefixes: Dict[str, str] = {}
         self._background_run_tasks: Dict[str, asyncio.Task[None]] = {}
         self._run_runtime_stats: Dict[str, dict] = {}
@@ -287,9 +288,10 @@ class BrowserAgentService:
             buffer.append(text)
             snapshot = list(buffer)
 
-        status_payload = self._run_store.get(normalized_run_id)
-        if isinstance(status_payload, dict):
-            status_payload["logs"] = snapshot
+        with self._run_store_lock:
+            status_payload = self._run_store.get(normalized_run_id)
+            if isinstance(status_payload, dict):
+                status_payload["logs"] = snapshot
 
         if self._stdout_run_logger is not None:
             try:
@@ -317,16 +319,29 @@ class BrowserAgentService:
             **payload,
             "logs": self._get_run_logs(run_id),
         }
-        self._run_store[normalized_run_id] = enriched_payload
+        with self._run_store_lock:
+            self._run_store[normalized_run_id] = enriched_payload
         try:
             status_file = self._status_file_path(normalized_run_id)
-            status_file.parent.mkdir(parents=True, exist_ok=True)
-            status_file.write_text(
-                json.dumps(enriched_payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            self._atomic_write_json(status_file, enriched_payload)
         except Exception as exc:
             logger.warning("Failed to persist run status | run_id=%s error=%s", normalized_run_id, exc)
+
+    def _atomic_write_json(self, path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            os.replace(tmp_path, path)
+        finally:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except Exception:
+                pass
 
     def _set_run_status(
         self,
@@ -342,7 +357,8 @@ class BrowserAgentService:
         if not normalized_run_id:
             return None
 
-        previous = self._run_store.get(normalized_run_id)
+        with self._run_store_lock:
+            previous = self._run_store.get(normalized_run_id)
         if not isinstance(previous, dict):
             previous = self._read_run_status(normalized_run_id) or {}
 
@@ -383,15 +399,19 @@ class BrowserAgentService:
         return None
 
     def get_active_run_id(self) -> Optional[str]:
-        for run_id, payload in self._run_store.items():
+        with self._run_store_lock:
+            run_items = list(self._run_store.items())
+        for run_id, payload in run_items:
             if payload.get("status") in self._ACTIVE_RUN_STATUSES:
                 return run_id
         return None
 
     def get_active_run_ids(self) -> List[str]:
+        with self._run_store_lock:
+            run_items = list(self._run_store.items())
         return [
             run_id
-            for run_id, payload in self._run_store.items()
+            for run_id, payload in run_items
             if payload.get("status") in self._ACTIVE_RUN_STATUSES
         ]
 
@@ -788,7 +808,8 @@ class BrowserAgentService:
                 "Stop it first or wait for it to finish."
             )
 
-        previous = self._run_store.get(normalized_run_id, {})
+        with self._run_store_lock:
+            previous = self._run_store.get(normalized_run_id, {})
         payload = self._set_run_status(
             normalized_run_id,
             "running",
@@ -884,7 +905,9 @@ class BrowserAgentService:
             self._append_run_log(run_id, f"Background execution timed out | run_id={run_id} timeout={timeout}s")
 
         except asyncio.CancelledError:
-            if self._run_store.get(run_id, {}).get("status") != "cancelled":
+            with self._run_store_lock:
+                current_status = self._run_store.get(run_id, {}).get("status")
+            if current_status != "cancelled":
                 runtime_stats = self._get_run_runtime_stats(run_id)
                 self._set_run_status(
                     run_id,
@@ -925,10 +948,12 @@ class BrowserAgentService:
         if not normalized_run_id:
             return None
 
-        status = self._run_store.get(normalized_run_id)
+        with self._run_store_lock:
+            status = self._run_store.get(normalized_run_id)
         if status is not None:
-            status.setdefault("logs", self._get_run_logs(normalized_run_id))
-            return status
+            status_copy = dict(status)
+            status_copy.setdefault("logs", self._get_run_logs(normalized_run_id))
+            return status_copy
         persisted = self._read_run_status(normalized_run_id)
         if persisted is not None:
             persisted.setdefault("logs", self._get_run_logs(normalized_run_id))
@@ -1323,10 +1348,7 @@ class BrowserAgentService:
                 screenshots=screenshot_artifacts,
                 summary=summary_payload,
             )
-            context.history_path.write_text(
-                json.dumps(history_payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            self._atomic_write_json(context.history_path, history_payload)
 
             screenshot_paths = [artifact.path for artifact in screenshot_artifacts]
 

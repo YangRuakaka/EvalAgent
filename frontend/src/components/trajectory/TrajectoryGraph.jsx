@@ -27,7 +27,8 @@ const PARALLEL_LINK_CURVE_MULTIPLIER = 0.1;
 const PARALLEL_LINK_CONTROL_PULL = 0.4;
 const ACTION_CHIP_VERTICAL_NUDGE = 10;
 const RENDER_FRAME_SKIP = 2;
-const NODE_DRAG_RENDER_FRAME_SKIP = 6;
+const NODE_DRAG_RENDER_FRAME_SKIP = 3;
+const NODE_DRAG_LOG_INTERVAL = 90;
 const SIMULATION_ALPHA_MIN = 0.02;
 const SIMULATION_ALPHA_DECAY = 0.045;
 const ICON_PIN = 'M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z';
@@ -172,6 +173,13 @@ const markerIdForColor = (color) => {
 	}
 
 	return `trajectory-arrowhead-${color.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'default'}`;
+};
+
+const getLinkEndpointId = (endpoint) => {
+	if (typeof endpoint === 'object') {
+		return endpoint?.id || null;
+	}
+	return endpoint || null;
 };
 
 const targetWithinSelector = (target, selector) => {
@@ -436,9 +444,12 @@ const TrajectoryGraph = ({
 	const onLinkClickRef = useRef(onLinkClick);
 	const lastMouseMoveLoggedAtRef = useRef(0);
 	const lastZoomLoggedAtRef = useRef(0);
+	const lastZoomTransformRef = useRef({ k: 1, x: 0, y: 0 });
 	const lastDragLoggedAtRef = useRef(0);
 	const interactionDepthRef = useRef(0);
 	const isNodeDraggingRef = useRef(false);
+	const activeDraggedNodeIdRef = useRef(null);
+	const activeDragSessionRef = useRef(null);
 	const activeSimulationCleanupRef = useRef(null);
 
 	const setInteractionPerformanceMode = useCallback((enabled) => {
@@ -517,6 +528,8 @@ const TrajectoryGraph = ({
 		() => () => {
 			cancelHighlightTimers();
 			interactionDepthRef.current = 0;
+			activeDraggedNodeIdRef.current = null;
+			activeDragSessionRef.current = null;
 			setInteractionPerformanceMode(false);
 			// Cleanup tooltip timeout
 			if (tooltipTimeoutRef.current) {
@@ -587,12 +600,22 @@ const TrajectoryGraph = ({
 
 				const now = Date.now();
 				if (now - lastZoomLoggedAtRef.current >= 160) {
+					const previousZoom = lastZoomTransformRef.current || { k: 1, x: 0, y: 0 };
+					const nextZoom = {
+						k: Number(event.transform.k || 1),
+						x: Number(event.transform.x || 0),
+						y: Number(event.transform.y || 0),
+					};
+					lastZoomTransformRef.current = nextZoom;
 					lastZoomLoggedAtRef.current = now;
 					emitInteraction({
 						type: 'zoom_pan',
-						scale: Number(event.transform.k?.toFixed?.(4) || event.transform.k || 1),
-						translateX: Number(event.transform.x?.toFixed?.(2) || event.transform.x || 0),
-						translateY: Number(event.transform.y?.toFixed?.(2) || event.transform.y || 0),
+						scale: Number(nextZoom.k.toFixed(4)),
+						translateX: Number(nextZoom.x.toFixed(2)),
+						translateY: Number(nextZoom.y.toFixed(2)),
+						deltaScale: Number((nextZoom.k - previousZoom.k).toFixed(4)),
+						deltaX: Number((nextZoom.x - previousZoom.x).toFixed(2)),
+						deltaY: Number((nextZoom.y - previousZoom.y).toFixed(2)),
 					});
 				}
 			})
@@ -965,10 +988,17 @@ const TrajectoryGraph = ({
 
 		linksMerged.on('click', (event, link) => {
 			event.stopPropagation();
+			const sourceNodeId = getLinkEndpointId(link?.source);
+			const targetNodeId = getLinkEndpointId(link?.target);
 			emitInteraction({
 				type: 'link_click',
 				linkId: link?.id || null,
 				actionType: null,
+				sourceNodeId,
+				targetNodeId,
+				count: Number.isFinite(link?.count) ? link.count : null,
+				sequenceIndex: Number.isFinite(link?.sequenceIndex) ? link.sequenceIndex : null,
+				actionCount: Array.isArray(link?.actionTypes) ? link.actionTypes.length : 0,
 			});
 			if (typeof onLinkClickRef.current === 'function') {
 				onLinkClickRef.current({ link, actionType: null });
@@ -1012,10 +1042,15 @@ const TrajectoryGraph = ({
 				.attr('transform', (_, idx) => `translate(0, ${(idx - (actionTypes.length - 1) / 2) * 24})`)
 				.on('click', (event, actionType) => {
 					event.stopPropagation();
+					const sourceNodeId = getLinkEndpointId(link?.source);
+					const targetNodeId = getLinkEndpointId(link?.target);
 					emitInteraction({
 						type: 'link_action_click',
 						linkId: link?.id || null,
 						actionType: actionType || null,
+						sourceNodeId,
+						targetNodeId,
+						sequenceIndex: Number.isFinite(link?.sequenceIndex) ? link.sequenceIndex : null,
 					});
 					if (typeof onLinkClickRef.current === 'function') {
 						onLinkClickRef.current({ link, actionType });
@@ -1042,6 +1077,38 @@ const TrajectoryGraph = ({
 				.attr('x', -28)
 				.attr('y', 4)
 				.text((actionType) => actionType);
+		});
+
+		const linksByNodeId = new Map();
+		const linkActionsByNodeId = new Map();
+		const registerByNodeId = (collection, nodeId, value) => {
+			if (!nodeId) {
+				return;
+			}
+			if (!collection.has(nodeId)) {
+				collection.set(nodeId, []);
+			}
+			collection.get(nodeId).push(value);
+		};
+
+		linksMerged.each(function (link) {
+			const sourceNodeId = getLinkEndpointId(link?.source);
+			const targetNodeId = getLinkEndpointId(link?.target);
+			const value = { element: this, link };
+			registerByNodeId(linksByNodeId, sourceNodeId, value);
+			if (targetNodeId !== sourceNodeId) {
+				registerByNodeId(linksByNodeId, targetNodeId, value);
+			}
+		});
+
+		linkActionMerged.each(function (link) {
+			const sourceNodeId = getLinkEndpointId(link?.source);
+			const targetNodeId = getLinkEndpointId(link?.target);
+			const value = { element: this, link };
+			registerByNodeId(linkActionsByNodeId, sourceNodeId, value);
+			if (targetNodeId !== sourceNodeId) {
+				registerByNodeId(linkActionsByNodeId, targetNodeId, value);
+			}
 		});
 
 		const nodeSelection = nodesLayer
@@ -1249,11 +1316,22 @@ const TrajectoryGraph = ({
 				return;
 			}
 
-			if (!isNodeDraggingRef.current) {
-				linksMerged.attr('d', (link) => computeLinkPath(link));
-			}
+			const draggedNodeId = activeDraggedNodeIdRef.current;
+			const shouldUseIncrementalLinkRender = isNodeDraggingRef.current && draggedNodeId;
 
-			if (!isNodeDraggingRef.current) {
+			if (shouldUseIncrementalLinkRender) {
+				const connectedLinks = linksByNodeId.get(draggedNodeId) || [];
+				connectedLinks.forEach(({ element, link }) => {
+					select(element).attr('d', computeLinkPath(link));
+				});
+
+				const connectedLinkActions = linkActionsByNodeId.get(draggedNodeId) || [];
+				connectedLinkActions.forEach(({ element, link }) => {
+					const anchor = computeLinkActionAnchor(link);
+					select(element).attr('transform', `translate(${anchor.x}, ${anchor.y})`);
+				});
+			} else {
+				linksMerged.attr('d', (link) => computeLinkPath(link));
 				linkActionMerged.attr('transform', (link) => {
 					const anchor = computeLinkActionAnchor(link);
 					return `translate(${anchor.x}, ${anchor.y})`;
@@ -1277,7 +1355,7 @@ const TrajectoryGraph = ({
 		const tick = () => {
 			tickCount += 1;
 			const activeFrameSkip = isNodeDraggingRef.current
-				? Math.max(renderFrameSkip, NODE_DRAG_RENDER_FRAME_SKIP)
+				? Math.max(2, Math.min(renderFrameSkip, NODE_DRAG_RENDER_FRAME_SKIP))
 				: renderFrameSkip;
 
 			if (tickCount % activeFrameSkip !== 0) {
@@ -1461,6 +1539,16 @@ const TrajectoryGraph = ({
 				event.sourceEvent?.stopPropagation?.();
 				beginHeavyInteraction();
 				isNodeDraggingRef.current = true;
+				activeDraggedNodeIdRef.current = node?.id || null;
+				const startedAt = Date.now();
+				const currentZoom = zoomStateRef.current;
+				activeDragSessionRef.current = {
+					startedAt,
+					startX: Number(node?.x) || 0,
+					startY: Number(node?.y) || 0,
+					lastLoggedX: Number(node?.x) || 0,
+					lastLoggedY: Number(node?.y) || 0,
+				};
 				if (!event.active && simulationRef.current) {
 					simulationRef.current.alphaTarget(dragAlphaTarget).restart();
 				}
@@ -1472,26 +1560,44 @@ const TrajectoryGraph = ({
 					nodeId: node?.id || null,
 					x: Number(node?.x?.toFixed?.(2) || node?.x || 0),
 					y: Number(node?.y?.toFixed?.(2) || node?.y || 0),
+					zoomScale: Number(currentZoom?.k?.toFixed?.(4) || currentZoom?.k || 1),
+					pointerX: Number(event?.sourceEvent?.clientX || 0),
+					pointerY: Number(event?.sourceEvent?.clientY || 0),
 				});
 			})
 			.on('drag', (event, node) => {
 				node.fx = event.x;
 				node.fy = event.y;
+				activeDraggedNodeIdRef.current = node?.id || null;
 				scheduleRender();
 
 				const now = Date.now();
-				if (now - lastDragLoggedAtRef.current >= 180) {
+				if (now - lastDragLoggedAtRef.current >= NODE_DRAG_LOG_INTERVAL) {
+					const session = activeDragSessionRef.current;
+					const lastX = Number.isFinite(session?.lastLoggedX) ? session.lastLoggedX : Number(node?.x || 0);
+					const lastY = Number.isFinite(session?.lastLoggedY) ? session.lastLoggedY : Number(node?.y || 0);
+					const currentX = Number(event?.x || 0);
+					const currentY = Number(event?.y || 0);
+					if (session) {
+						session.lastLoggedX = currentX;
+						session.lastLoggedY = currentY;
+					}
+
 					lastDragLoggedAtRef.current = now;
 					emitInteraction({
 						type: 'node_drag',
 						nodeId: node?.id || null,
-						x: Number(event?.x?.toFixed?.(2) || event?.x || 0),
-						y: Number(event?.y?.toFixed?.(2) || event?.y || 0),
+						x: Number(currentX.toFixed(2)),
+						y: Number(currentY.toFixed(2)),
+						deltaX: Number((currentX - lastX).toFixed(2)),
+						deltaY: Number((currentY - lastY).toFixed(2)),
+						elapsedMs: session?.startedAt ? now - session.startedAt : null,
 					});
 				}
 			})
 			.on('end', (event, node) => {
 				isNodeDraggingRef.current = false;
+				activeDraggedNodeIdRef.current = null;
 				endHeavyInteraction();
 				if (!event.active && simulationRef.current) {
 					simulationRef.current.alphaTarget(0);
@@ -1508,12 +1614,21 @@ const TrajectoryGraph = ({
 					});
 				}
 
+				const session = activeDragSessionRef.current;
+				const dragDurationMs = session?.startedAt ? Date.now() - session.startedAt : null;
+				const totalDeltaX = session ? Number(((node?.x || 0) - session.startX).toFixed(2)) : null;
+				const totalDeltaY = session ? Number(((node?.y || 0) - session.startY).toFixed(2)) : null;
+				activeDragSessionRef.current = null;
+
 				emitInteraction({
 					type: 'node_drag_end',
 					nodeId: node?.id || null,
 					x: Number(node?.x?.toFixed?.(2) || node?.x || 0),
 					y: Number(node?.y?.toFixed?.(2) || node?.y || 0),
 					isPinned: Boolean(node?._pinned),
+					dragDurationMs,
+					totalDeltaX,
+					totalDeltaY,
 				});
 				renderScene();
 			});
@@ -1526,6 +1641,8 @@ const TrajectoryGraph = ({
 		const cleanupSimulation = () => {
 			isDisposed = true;
 			isNodeDraggingRef.current = false;
+			activeDraggedNodeIdRef.current = null;
+			activeDragSessionRef.current = null;
 			if (rafId !== null) {
 				window.cancelAnimationFrame(rafId);
 				rafId = null;

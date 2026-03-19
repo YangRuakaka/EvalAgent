@@ -10,9 +10,16 @@ import useResizeObserver from '../../hooks/useResizeObserver';
 import './TrajectoryVisualizer.css';
 
 const EMPTY_GRAPH = Object.freeze({ nodes: [], links: [], clusters: [], meta: {} });
+<<<<<<< Updated upstream
 const HASH_MIN_SIMILARITY_RATIO = 1.0; // Require exact hash matches for node merging when hashing is enabled
 const TRAJECTORY_GRAPH_CACHE_LIMIT = 12;
 const TRAJECTORY_GRAPH_JOB_CACHE_LIMIT = 24;
+=======
+const HASH_REFINEMENT_IDLE_TIMEOUT = 600;
+const HASH_SIMILARITY_THRESHOLD = 0;
+const TRAJECTORY_GRAPH_CACHE_LIMIT = 12;
+const IMAGE_REFRESH_PARAM = '__dagRefresh';
+>>>>>>> Stashed changes
 const trajectoryGraphCache = new Map();
 const trajectoryGraphJobCache = new Map();
 
@@ -150,6 +157,49 @@ const getEntryScreenshotHashes = (entry, screenshots) => {
 	}
 
 	return screenshots.map((shot, index) => firstNonEmptyText(hashes[index], getScreenshotItemHash(shot)));
+};
+
+const appendImageRefreshToken = (source, token) => {
+	if (typeof source !== 'string') {
+		return source;
+	}
+
+	const trimmed = source.trim();
+	if (!trimmed || trimmed.startsWith('data:')) {
+		return source;
+	}
+
+	const hashIndex = trimmed.indexOf('#');
+	const hashFragment = hashIndex >= 0 ? trimmed.slice(hashIndex) : '';
+	const urlWithoutHash = hashIndex >= 0 ? trimmed.slice(0, hashIndex) : trimmed;
+	const [basePath, queryString = ''] = urlWithoutHash.split('?');
+	const query = new URLSearchParams(queryString);
+	query.set(IMAGE_REFRESH_PARAM, String(token));
+	const nextQuery = query.toString();
+	return `${basePath}${nextQuery ? `?${nextQuery}` : ''}${hashFragment}`;
+};
+
+const applyImageRefreshNonceToGraph = (nextGraph, imageRefreshNonce) => {
+	if (!nextGraph || !Array.isArray(nextGraph.nodes) || nextGraph.nodes.length === 0) {
+		return nextGraph;
+	}
+
+	const patchedNodes = nextGraph.nodes.map((node) => {
+		if (!node || typeof node !== 'object') {
+			return node;
+		}
+
+		return {
+			...node,
+			src: appendImageRefreshToken(node.src, imageRefreshNonce),
+			previewSrc: appendImageRefreshToken(node.previewSrc, imageRefreshNonce),
+		};
+	});
+
+	return {
+		...nextGraph,
+		nodes: patchedNodes,
+	};
 };
 
 const PersonaPopUp = ({ entry, onClose }) => {
@@ -309,6 +359,7 @@ const TrajectoryVisualizer = ({
 	const [viewingPersonaEntry, setViewingPersonaEntry] = useState(null);
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [isRefiningGraph, setIsRefiningGraph] = useState(false);
+	const [manualRefreshNonce, setManualRefreshNonce] = useState(0);
 	const graphShellRef = useRef(null);
 	const containerRef = useRef(null);
 	const conditionsRef = useRef(Array.isArray(conditions) ? conditions : []);
@@ -392,6 +443,10 @@ const TrajectoryVisualizer = ({
 		return hasAnyScreenshot;
 	}, [trajectory, useImageHash]);
 	const shouldRenderNodeImages = true;
+	const effectiveImageRefreshNonce = useMemo(
+		() => `${refreshNonce}-${manualRefreshNonce}`,
+		[refreshNonce, manualRefreshNonce],
+	);
 	const conditionsSignature = useMemo(() => {
 		if (!Array.isArray(conditions) || !conditions.length) {
 			return 'empty';
@@ -430,8 +485,9 @@ const TrajectoryVisualizer = ({
 			conditionsSignature,
 			useImageHash ? 'hash:on' : 'hash:off',
 			shouldUsePreviewImage ? 'preview:on' : 'preview:off',
-			`refresh:${refreshNonce}`,
+			`refresh:${effectiveImageRefreshNonce}`,
 		].join('::');
+<<<<<<< Updated upstream
 	}, [hasTrajectory, runId, trajectorySummarySignature, conditionsSignature, useImageHash, shouldUsePreviewImage, refreshNonce]);
 	const effectiveGraph = useMemo(() => {
 		if (graph !== EMPTY_GRAPH) {
@@ -440,6 +496,9 @@ const TrajectoryVisualizer = ({
 
 		return peekCachedTrajectoryGraph(graphCacheKey) || graph;
 	}, [graph, graphCacheKey]);
+=======
+	}, [hasTrajectory, runId, trajectorySummarySignature, conditionsSignature, useImageHash, shouldUsePreviewImage, effectiveImageRefreshNonce]);
+>>>>>>> Stashed changes
 
 	useEffect(() => {
 		conditionsRef.current = Array.isArray(conditions) ? conditions : [];
@@ -481,6 +540,7 @@ const TrajectoryVisualizer = ({
 				return;
 			}
 
+<<<<<<< Updated upstream
 			setGraph((previousGraph) => {
 				const previousGraphComplete = graphHasCompleteHash(previousGraph);
 				const nextGraphComplete = graphHasCompleteHash(nextGraph);
@@ -491,6 +551,9 @@ const TrajectoryVisualizer = ({
 
 				return nextGraph;
 			});
+=======
+			setGraph(applyImageRefreshNonceToGraph(nextGraph, effectiveImageRefreshNonce));
+>>>>>>> Stashed changes
 		};
 
 		if (!hasTrajectory) {
@@ -534,10 +597,16 @@ const TrajectoryVisualizer = ({
 			&& (preferDirectHashBuild || !cachedGraph || !cachedGraphHasHash || !cachedGraphHashComplete);
 
 		if (cachedGraph) {
+<<<<<<< Updated upstream
 			setGraph(cachedGraph);
 		} else {
 			setGraph(EMPTY_GRAPH);
 		}
+=======
+			safeSetGraph(cachedGraph);
+			setError(null);
+			setIsProcessing(false);
+>>>>>>> Stashed changes
 
 		setIsProcessing(!cachedGraph && (shouldBuildPreviewGraph || shouldBuildTargetGraph));
 		setError(null);
@@ -641,8 +710,28 @@ const TrajectoryVisualizer = ({
 		return () => {
 			isMounted = false;
 		};
+<<<<<<< Updated upstream
 	}, [hasTrajectory, trajectory, graphCacheKey, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage]);
+=======
+	}, [hasTrajectory, trajectory, graphCacheKey, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage, effectiveImageRefreshNonce]);
+>>>>>>> Stashed changes
 
+	const handleManualRefresh = () => {
+		setManualRefreshNonce((previous) => {
+			const nextNonce = previous + 1;
+			if (typeof onDAGInteraction === 'function') {
+				onDAGInteraction({
+					scope: 'trajectory_dag',
+					type: 'graph_refresh',
+					trigger: 'manual_button',
+					runId: runId || null,
+					refreshNonce,
+					manualRefreshNonce: nextNonce,
+				});
+			}
+			return nextNonce;
+		});
+	};
 
 	const legendEntries = useMemo(() => {
 		const details = Array.isArray(trajectory?.details) ? trajectory.details : [];
@@ -978,6 +1067,21 @@ const TrajectoryVisualizer = ({
 						Refining graph…
 					</span>
 				)}
+
+				<button
+					type="button"
+					className="trajectory-refresh-toggle"
+					onClick={handleManualRefresh}
+					aria-label="Refresh DAG images"
+					title="Refresh DAG images"
+				>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+						<path d="M23 4v6h-6" />
+						<path d="M1 20v-6h6" />
+						<path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10" />
+						<path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14" />
+					</svg>
+				</button>
 
 				<button
 					type="button"

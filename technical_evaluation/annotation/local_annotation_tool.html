@@ -212,6 +212,77 @@
 
     .hidden { display: none; }
 
+    .reference-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      margin-bottom: 8px;
+      background: #fff;
+    }
+
+    .reference-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 1px 8px;
+      font-size: 12px;
+      background: #fff;
+      margin-right: 4px;
+    }
+
+    .tag-pass { border-color: var(--pass); color: var(--pass); background: #f0fdf4; }
+    .tag-partial { border-color: var(--partial); color: var(--partial); background: #fffbeb; }
+    .tag-fail { border-color: var(--fail); color: var(--fail); background: #fef2f2; }
+
+    .reference-evidence {
+      border-top: 1px dashed #d1d5db;
+      margin-top: 6px;
+      padding-top: 6px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .reference-evidence-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .inline-evidence {
+      border-radius: 4px;
+      padding: 0 2px;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
+
+    .inline-evidence-pass {
+      background: #dcfce7;
+    }
+
+    .inline-evidence-partial {
+      background: #fef3c7;
+    }
+
+    .inline-evidence-fail {
+      background: #fee2e2;
+    }
+
+    .inline-evidence::after {
+      content: ' [' attr(data-short) ']';
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
     @media (max-width: 980px) {
       .main-grid { grid-template-columns: 1fr; }
     }
@@ -251,6 +322,18 @@
           <input id="importInput" type="file" accept=".json" />
         </label>
       </div>
+
+      <div class="row" style="margin-bottom: 8px;">
+        <label>Select GPT evaluated folder (optional)
+          <input id="gptFolderInput" type="file" webkitdirectory directory multiple accept=".json" />
+        </label>
+        <label>Select DeepSeek evaluated folder (optional)
+          <input id="deepseekFolderInput" type="file" webkitdirectory directory multiple accept=".json" />
+        </label>
+        <button id="loadReferenceBtn">Load Model References</button>
+      </div>
+
+      <div class="status" id="referenceLoadStatus">Model references not loaded</div>
 
       <div class="status" id="globalStatus">Not initialized</div>
     </div>
@@ -303,6 +386,9 @@
 
           <div style="font-weight: 600; margin: 14px 0 8px;">Step Verdict Summary (current data)</div>
           <div id="stepLabelSummary" class="muted">No labels yet</div>
+
+          <div style="font-weight: 600; margin: 14px 0 8px;">Model Reference Status</div>
+          <div id="referencePanel" class="muted">Load model folders to enable inline evidence highlights</div>
         </div>
       </div>
 
@@ -340,7 +426,16 @@
       annotations: {},
       saveFileHandle: null,
       lastSelection: null,
-      lastSaveAt: null
+      lastSaveAt: null,
+      referenceByModel: {
+        GPT: {},
+        DeepSeek: {}
+      },
+      referenceLoadInfo: {
+        GPT: { files: 0, matched: 0, errors: 0 },
+        DeepSeek: { files: 0, matched: 0, errors: 0 },
+        criteriaId: 'criteria1'
+      }
     };
 
     const FIELDS = ['EVALUATION', 'MEMORY', 'TARGET OBJECTIVE', 'AI REASONING', 'ACTION'];
@@ -352,10 +447,14 @@
       sampleSize: document.getElementById('sampleSize'),
       folderInput: document.getElementById('folderInput'),
       importInput: document.getElementById('importInput'),
+      gptFolderInput: document.getElementById('gptFolderInput'),
+      deepseekFolderInput: document.getElementById('deepseekFolderInput'),
       initBtn: document.getElementById('initBtn'),
       restoreLocalBtn: document.getElementById('restoreLocalBtn'),
+      loadReferenceBtn: document.getElementById('loadReferenceBtn'),
       chooseSaveFileBtn: document.getElementById('chooseSaveFileBtn'),
       exportBtn: document.getElementById('exportBtn'),
+      referenceLoadStatus: document.getElementById('referenceLoadStatus'),
       globalStatus: document.getElementById('globalStatus'),
       setupPanel: document.getElementById('setupPanel'),
       workArea: document.getElementById('workArea'),
@@ -379,12 +478,22 @@
       jumpStepBtn: document.getElementById('jumpStepBtn'),
       prevDataBtn: document.getElementById('prevDataBtn'),
       nextDataBtn: document.getElementById('nextDataBtn'),
-      saveStatus: document.getElementById('saveStatus')
+      saveStatus: document.getElementById('saveStatus'),
+      referencePanel: document.getElementById('referencePanel')
     };
 
     function safeText(v) {
       if (v === null || v === undefined) return '';
       return String(v);
+    }
+
+    function escapeHtml(v) {
+      return safeText(v)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     function hashString(input) {
@@ -450,6 +559,314 @@
 
     function setSaveStatus(text) {
       els.saveStatus.textContent = text;
+    }
+
+    function setReferenceLoadStatus(text) {
+      els.referenceLoadStatus.textContent = text;
+    }
+
+    function getVerdictClass(verdict) {
+      if (verdict === 'pass') return 'tag-pass';
+      if (verdict === 'partial') return 'tag-partial';
+      if (verdict === 'fail') return 'tag-fail';
+      return '';
+    }
+
+    function normalizeVerdict(v) {
+      const x = safeText(v).toLowerCase().trim();
+      if (!BEHAVIORS.includes(x)) return '';
+      return x;
+    }
+
+    function extractCriteriaEvaluation(payload, criteriaId) {
+      if (!payload || typeof payload !== 'object') return null;
+
+      const direct = payload[`${criteriaId}_evaluation`];
+      if (direct && typeof direct === 'object') return direct;
+
+      const results = payload?.judge_evaluation?.criteria_results;
+      if (Array.isArray(results) && results.length > 0) {
+        const hit = results.find(x => safeText(x.source_key) === criteriaId || safeText(x.title) === criteriaId);
+        if (hit) return hit;
+        if (results.length === 1) return results[0];
+      }
+      return null;
+    }
+
+    function normalizeReferenceEntry(payload, criteriaId) {
+      if (!payload || !payload.data_id) return null;
+      const criteria = extractCriteriaEvaluation(payload, criteriaId);
+      if (!criteria) return null;
+
+      const involved = Array.isArray(criteria.involved_steps) ? criteria.involved_steps : [];
+      return {
+        data_id: payload.data_id,
+        criteria_id: criteriaId,
+        overall_assessment: normalizeVerdict(criteria.overall_assessment),
+        involved_steps: involved.map(step => ({
+          evaluateStatus: normalizeVerdict(step.evaluateStatus || step.verdict),
+          reasoning: safeText(step.reasoning),
+          steps: Array.isArray(step.steps) ? step.steps.map(x => Number(x)) : [],
+          highlighted_evidence: Array.isArray(step.highlighted_evidence)
+            ? step.highlighted_evidence.map(ev => ({
+                step_index: Number(ev.step_index),
+                source_field: safeText(ev.source_field),
+                highlighted_text: safeText(ev.highlighted_text),
+                reasoning: safeText(ev.reasoning),
+                verdict: normalizeVerdict(ev.verdict)
+              }))
+            : []
+        }))
+      };
+    }
+
+    async function readReferenceFiles(fileList, criteriaId) {
+      const files = Array.from(fileList || []).filter(f => f.name.toLowerCase().endsWith('.json'));
+      const map = {};
+      let matched = 0;
+      let errors = 0;
+
+      for (const file of files) {
+        try {
+          const txt = await file.text();
+          const obj = JSON.parse(txt);
+          const normalized = normalizeReferenceEntry(obj, criteriaId);
+          if (normalized) {
+            map[normalized.data_id] = normalized;
+            matched += 1;
+          }
+        } catch (e) {
+          errors += 1;
+        }
+      }
+
+      return {
+        map,
+        files: files.length,
+        matched,
+        errors
+      };
+    }
+
+    function includeStep(stepIndexes, currentStepIndex, currentStepId) {
+      if (!Array.isArray(stepIndexes) || stepIndexes.length === 0) return false;
+      return stepIndexes.some(v => Number(v) === Number(currentStepIndex) || Number(v) === Number(currentStepId));
+    }
+
+    function evidenceInCurrentStep(ev, currentStepIndex, currentStepId) {
+      if (!ev || Number.isNaN(Number(ev.step_index))) return false;
+      return Number(ev.step_index) === Number(currentStepIndex) || Number(ev.step_index) === Number(currentStepId);
+    }
+
+    function getModelStepReference(model, dataId, currentStepIndex, currentStepId) {
+      const byData = state.referenceByModel[model] || {};
+      const ref = byData[dataId];
+      if (!ref) return null;
+
+      const stepResults = [];
+      const evidences = [];
+      (ref.involved_steps || []).forEach(entry => {
+        const hitBySteps = includeStep(entry.steps, currentStepIndex, currentStepId);
+        const evs = Array.isArray(entry.highlighted_evidence) ? entry.highlighted_evidence : [];
+        const hitByEvidence = evs.some(ev => evidenceInCurrentStep(ev, currentStepIndex, currentStepId));
+        if (!hitBySteps && !hitByEvidence) return;
+
+        stepResults.push(entry);
+
+        evs.forEach(ev => {
+          if (evidenceInCurrentStep(ev, currentStepIndex, currentStepId) || Number.isNaN(Number(ev.step_index))) {
+            evidences.push(ev);
+          }
+        });
+      });
+
+      return {
+        model,
+        overall: ref.overall_assessment,
+        stepResults,
+        evidences
+      };
+    }
+
+    function normalizeEvidenceField(fieldName) {
+      const x = safeText(fieldName).toLowerCase().trim();
+      if (!x) return '';
+      const map = {
+        'evaluation': 'EVALUATION',
+        'memory': 'MEMORY',
+        'target objective': 'TARGET OBJECTIVE',
+        'next goal': 'TARGET OBJECTIVE',
+        'ai reasoning': 'AI REASONING',
+        'thinking process': 'AI REASONING',
+        'action': 'ACTION'
+      };
+      return map[x] || '';
+    }
+
+    function overlap(a, b) {
+      return a.start < b.end && b.start < a.end;
+    }
+
+    function severityRank(verdict) {
+      if (verdict === 'fail') return 3;
+      if (verdict === 'partial') return 2;
+      if (verdict === 'pass') return 1;
+      return 0;
+    }
+
+    function getSeverityClassFromEntries(entries) {
+      const verdicts = entries.map(x => normalizeVerdict(x.verdict)).filter(Boolean);
+      if (verdicts.length === 0) return '';
+      verdicts.sort((a, b) => severityRank(b) - severityRank(a));
+      return `inline-evidence-${verdicts[0]}`;
+    }
+
+    function getInlineReferencesByField(dataId, currentStepIndex, currentStepId) {
+      const byField = {
+        'EVALUATION': [],
+        'MEMORY': [],
+        'TARGET OBJECTIVE': [],
+        'AI REASONING': [],
+        'ACTION': []
+      };
+
+      ['GPT', 'DeepSeek'].forEach(model => {
+        const modelRef = getModelStepReference(model, dataId, currentStepIndex, currentStepId);
+        if (!modelRef) return;
+        modelRef.evidences.forEach(ev => {
+          const field = normalizeEvidenceField(ev.source_field);
+          const txt = safeText(ev.highlighted_text).trim();
+          if (!field || !txt) return;
+          byField[field].push({
+            model,
+            verdict: normalizeVerdict(ev.verdict),
+            text: txt,
+            reasoning: safeText(ev.reasoning)
+          });
+        });
+      });
+
+      return byField;
+    }
+
+    function renderFieldWithInlineEvidence(fieldText, evidences) {
+      const content = safeText(fieldText);
+      if (!content) return '';
+      if (!Array.isArray(evidences) || evidences.length === 0) return escapeHtml(content);
+
+      const lower = content.toLowerCase();
+      const candidateMap = new Map();
+
+      evidences.forEach(ev => {
+        const needle = safeText(ev.text).trim();
+        if (needle.length < 2) return;
+        const start = lower.indexOf(needle.toLowerCase());
+        if (start < 0) return;
+        const end = start + needle.length;
+        const key = `${start}:${end}`;
+        if (!candidateMap.has(key)) {
+          candidateMap.set(key, {
+            start,
+            end,
+            entries: []
+          });
+        }
+        candidateMap.get(key).entries.push(ev);
+      });
+
+      const candidates = Array.from(candidateMap.values()).sort((a, b) => {
+        const lenDiff = (b.end - b.start) - (a.end - a.start);
+        if (lenDiff !== 0) return lenDiff;
+        return a.start - b.start;
+      });
+
+      const selected = [];
+      candidates.forEach(c => {
+        if (!selected.some(x => overlap(x, c))) {
+          selected.push(c);
+        }
+      });
+      selected.sort((a, b) => a.start - b.start);
+
+      if (selected.length === 0) return escapeHtml(content);
+
+      let cursor = 0;
+      let html = '';
+      selected.forEach(seg => {
+        if (seg.start > cursor) {
+          html += escapeHtml(content.slice(cursor, seg.start));
+        }
+        const raw = content.slice(seg.start, seg.end);
+        const severityClass = getSeverityClassFromEntries(seg.entries);
+        const short = seg.entries
+          .map(e => `${e.model === 'DeepSeek' ? 'D' : 'G'}:${(normalizeVerdict(e.verdict) || 'NA').toUpperCase()}`)
+          .join(' | ');
+        const title = seg.entries
+          .map(e => `${e.model} ${((normalizeVerdict(e.verdict) || 'NA').toUpperCase())}: ${safeText(e.reasoning) || '-'}`)
+          .join('\n');
+        html += `<span class="inline-evidence ${severityClass}" data-short="${escapeHtml(short)}" title="${escapeHtml(title)}">${escapeHtml(raw)}</span>`;
+        cursor = seg.end;
+      });
+
+      if (cursor < content.length) {
+        html += escapeHtml(content.slice(cursor));
+      }
+      return html;
+    }
+
+    function renderReferencePanel() {
+      const item = getCurrentData();
+      const step = getCurrentStep();
+      if (!item || !step) {
+        els.referencePanel.textContent = 'No current data';
+        return;
+      }
+
+      const dataId = item.data_id;
+      const stepIndex = state.currentStepIndex;
+      const stepId = Number(step.step_id);
+
+      const gpt = getModelStepReference('GPT', dataId, stepIndex, stepId);
+      const deepseek = getModelStepReference('DeepSeek', dataId, stepIndex, stepId);
+
+      const gptCount = gpt ? gpt.evidences.length : 0;
+      const deepseekCount = deepseek ? deepseek.evidences.length : 0;
+      const gptOverall = gpt && gpt.overall
+        ? `<span class="tag ${getVerdictClass(gpt.overall)}">GPT overall ${gpt.overall.toUpperCase()}</span>`
+        : '<span class="tag">GPT overall N/A</span>';
+      const deepseekOverall = deepseek && deepseek.overall
+        ? `<span class="tag ${getVerdictClass(deepseek.overall)}">DeepSeek overall ${deepseek.overall.toUpperCase()}</span>`
+        : '<span class="tag">DeepSeek overall N/A</span>';
+
+      els.referencePanel.innerHTML = `
+        <div>${gptOverall} ${deepseekOverall}</div>
+        <div class="muted" style="margin-top: 6px;">Inline evidence on current step: GPT ${gptCount}, DeepSeek ${deepseekCount}. Hover highlighted text to view model reasoning.</div>
+      `;
+    }
+
+    async function loadModelReferences() {
+      state.criteriaId = els.criteriaId.value.trim() || 'criteria1';
+
+      const [gpt, deepseek] = await Promise.all([
+        readReferenceFiles(els.gptFolderInput.files, state.criteriaId),
+        readReferenceFiles(els.deepseekFolderInput.files, state.criteriaId)
+      ]);
+
+      state.referenceByModel.GPT = gpt.map;
+      state.referenceByModel.DeepSeek = deepseek.map;
+      state.referenceLoadInfo = {
+        GPT: { files: gpt.files, matched: gpt.matched, errors: gpt.errors },
+        DeepSeek: { files: deepseek.files, matched: deepseek.matched, errors: deepseek.errors },
+        criteriaId: state.criteriaId
+      };
+
+      setReferenceLoadStatus(
+        `References loaded (criteria=${state.criteriaId}) | GPT: ${gpt.matched}/${gpt.files} | DeepSeek: ${deepseek.matched}/${deepseek.files}`
+      );
+
+      if (hasUsableDataLoaded()) {
+        renderReferencePanel();
+      }
     }
 
     function getProgressPayload() {
@@ -622,6 +1039,8 @@
         return;
       }
 
+      const refsByField = getInlineReferencesByField(item.data_id, state.currentStepIndex, Number(step.step_id));
+
       FIELDS.forEach(field => {
         const card = document.createElement('div');
         card.className = 'field-card';
@@ -634,7 +1053,7 @@
         text.className = 'field-text';
         text.dataset.field = field;
         text.dataset.stepid = String(step.step_id);
-        text.textContent = safeText(step[field]);
+        text.innerHTML = renderFieldWithInlineEvidence(safeText(step[field]), refsByField[field] || []);
 
         card.appendChild(head);
         card.appendChild(text);
@@ -746,6 +1165,7 @@
       renderEvidenceList();
       renderStepLabelSummary();
       renderSelectionPreview();
+      renderReferencePanel();
       refreshGlobalStatus();
     }
 
@@ -939,6 +1359,11 @@
         return;
       }
 
+      if ((els.gptFolderInput.files && els.gptFolderInput.files.length > 0)
+        || (els.deepseekFolderInput.files && els.deepseekFolderInput.files.length > 0)) {
+        await loadModelReferences();
+      }
+
       initAssignment();
       clampIndexes();
       showWorkArea();
@@ -987,6 +1412,18 @@
       e.target.value = '';
     };
 
+    els.loadReferenceBtn.onclick = async () => {
+      if ((!els.gptFolderInput.files || els.gptFolderInput.files.length === 0)
+        && (!els.deepseekFolderInput.files || els.deepseekFolderInput.files.length === 0)) {
+        alert('Please select GPT and/or DeepSeek evaluated folder first.');
+        return;
+      }
+      await loadModelReferences();
+      if (hasUsableDataLoaded()) {
+        renderAll();
+      }
+    };
+
     els.exportBtn.onclick = () => {
       const payload = getProgressPayload();
       const base = `${state.annotatorId || 'annotator'}_${state.criteriaId || 'criteria1'}_annotations.json`;
@@ -1027,6 +1464,7 @@
     els.annotatorId.value = state.annotatorId;
     els.sampleSize.value = FIXED_SAMPLE_SIZE;
     setGlobalStatus('Select evaluator, choose raw_data folder, then click "Initialize Task"');
+    setReferenceLoadStatus('Model references not loaded');
     setSaveStatus('Not saved');
   </script>
 </body>

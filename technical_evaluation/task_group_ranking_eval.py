@@ -19,13 +19,23 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 ROOT_DIR = Path(__file__).resolve().parents[1]
 BACKEND_DIR = ROOT_DIR / "backend"
 TECH_EVAL_DIR = Path(__file__).resolve().parent
-DEFAULT_TASK_GROUP_DATASET_DIR = TECH_EVAL_DIR / "results" / "dataset_grouped_by_task_v2"
+DEFAULT_TASK_GROUP_DATASET_DIR = TECH_EVAL_DIR / "dataset" / "dataset_grouped_by_task"
 DEFAULT_TASK_GROUP_JSON_PATTERN = "**/*.json"
 DEFAULT_OPENAI_JUDGE_MODEL = "gpt-5"
 DEFAULT_DEEPSEEK_JUDGE_MODEL = "deepseek-chat"
 DEFAULT_JUDGE_MODELS: Tuple[str, ...] = (
     DEFAULT_OPENAI_JUDGE_MODEL,
     DEFAULT_DEEPSEEK_JUDGE_MODEL,
+)
+RANKING_MODE_CRITERIA2 = "criteria2"
+RANKING_MODE_BASELINE = "baseline"
+DEFAULT_RANKING_MODES: Tuple[str, ...] = (
+    RANKING_MODE_CRITERIA2,
+    RANKING_MODE_BASELINE,
+)
+BASELINE_SYSTEM_PROMPT = (
+    "You are a strict evaluator. Compare exactly two conditions and return ONLY valid JSON. "
+    "Do not include markdown, prose, or code fences."
 )
 
 
@@ -96,6 +106,7 @@ class DatasetItem:
     task_label: str
     task_normalized: str
     task_group_id: str
+    task_group_folder: str
     persona: str
     value: Optional[str]
     model: str
@@ -103,6 +114,13 @@ class DatasetItem:
 
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _truncate_text(value: Any, max_chars: int = 320) -> str:
+    text = _normalize_text(str(value or ""))
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3].rstrip() + "..."
 
 
 def _safe_token(raw: str, fallback: str = "group") -> str:
@@ -145,6 +163,45 @@ def _resolve_judge_models(single_model: Optional[str], multi_models: Optional[Se
     return list(DEFAULT_JUDGE_MODELS)
 
 
+def _normalize_ranking_mode(raw_mode: Optional[str]) -> Optional[str]:
+    token = str(raw_mode or "").strip().lower()
+    if not token:
+        return None
+
+    aliases = {
+        "criteria": RANKING_MODE_CRITERIA2,
+        "criteria2": RANKING_MODE_CRITERIA2,
+        "prompted": RANKING_MODE_CRITERIA2,
+        "baseline": RANKING_MODE_BASELINE,
+        "direct": RANKING_MODE_BASELINE,
+        "direct_compare": RANKING_MODE_BASELINE,
+        "no_prompt": RANKING_MODE_BASELINE,
+    }
+    return aliases.get(token)
+
+
+def _split_ranking_modes(raw_values: Optional[Sequence[str]]) -> List[str]:
+    modes: List[str] = []
+    seen: set[str] = set()
+
+    for raw in raw_values or []:
+        for token in re.split(r"[\s,]+", str(raw or "").strip()):
+            mode = _normalize_ranking_mode(token)
+            if not mode or mode in seen:
+                continue
+            seen.add(mode)
+            modes.append(mode)
+
+    return modes
+
+
+def _resolve_ranking_modes(raw_values: Optional[Sequence[str]]) -> List[str]:
+    parsed = _split_ranking_modes(raw_values)
+    if parsed:
+        return parsed
+    return list(DEFAULT_RANKING_MODES)
+
+
 def _judge_output_subdir_name(judge_model: Optional[str]) -> str:
     return _safe_token(judge_model or "default_judge", fallback="default_judge")
 
@@ -175,6 +232,21 @@ def _normalize_task_for_group(task_raw: str, fallback_name: str) -> Tuple[str, s
     return task_label, task_normalized, task_group_id
 
 
+def _folder_grouping(dataset_dir: Path, json_file: Path, fallback_group_id: str) -> Tuple[str, str]:
+    """Use folder as grouping key so each dataset subfolder becomes one pairwise group."""
+    try:
+        rel_parent = json_file.resolve().parent.relative_to(dataset_dir.resolve())
+    except ValueError:
+        rel_parent = json_file.resolve().parent
+
+    rel_parent_str = str(rel_parent).replace("\\", "/").strip()
+    if not rel_parent_str or rel_parent_str == ".":
+        return fallback_group_id, ""
+
+    folder_group_id = _safe_token(rel_parent_str.replace("/", "__"), fallback=fallback_group_id)
+    return folder_group_id, rel_parent_str
+
+
 def _infer_value_from_persona(persona: str) -> Optional[str]:
     text = str(persona or "")
     match = re.search(r"values?\s+([A-Za-z][A-Za-z_-]*)", text, re.IGNORECASE)
@@ -195,6 +267,7 @@ def _load_dataset_items(dataset_dir: Path, json_pattern: str) -> List[DatasetIte
         fallback_name = json_file.stem
         task_raw = str(source.get("task") or fallback_name)
         task_label, task_normalized, task_group_id = _normalize_task_for_group(task_raw, fallback_name)
+        folder_group_id, folder_relpath = _folder_grouping(dataset_dir, json_file, task_group_id)
 
         persona = str(source.get("persona") or "")
         value = _infer_value_from_persona(persona)
@@ -207,7 +280,8 @@ def _load_dataset_items(dataset_dir: Path, json_pattern: str) -> List[DatasetIte
                 task_raw=task_raw,
                 task_label=task_label,
                 task_normalized=task_normalized,
-                task_group_id=task_group_id,
+                task_group_id=folder_group_id,
+                task_group_folder=folder_relpath,
                 persona=persona,
                 value=value,
                 model=str(source.get("model") or ""),
@@ -233,6 +307,7 @@ def build_group_manifest(dataset_dir: Path, json_pattern: str) -> Dict[str, Any]
                 "group_id": group_id,
                 "task": representative.task_label,
                 "task_normalized": representative.task_normalized,
+                "group_folder": representative.task_group_folder,
                 "size": len(members),
                 "files": [
                     {
@@ -252,6 +327,7 @@ def build_group_manifest(dataset_dir: Path, json_pattern: str) -> Dict[str, Any]
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "dataset_dir": str(dataset_dir.resolve()),
         "json_pattern": json_pattern,
+        "grouping_mode": "folder",
         "total_files": len(items),
         "group_count": len(groups_output),
         "groups": groups_output,
@@ -312,6 +388,334 @@ def _build_model_outputs(raw_steps: Any) -> List[Dict[str, Any]]:
         )
 
     return model_outputs
+
+
+def _build_baseline_step_summaries(raw_steps: Any, max_steps: int = 12) -> List[Dict[str, Any]]:
+    if not isinstance(raw_steps, list):
+        return []
+
+    summaries: List[Dict[str, Any]] = []
+    for idx, step in enumerate(raw_steps):
+        if not isinstance(step, dict):
+            continue
+
+        step_id = step.get("step_id") if _is_number(step.get("step_id")) else idx + 1
+        summaries.append(
+            {
+                "step_id": int(step_id),
+                "evaluation": _truncate_text(step.get("EVALUATION") or step.get("evaluation_previous_goal") or "", 220),
+                "reasoning": _truncate_text(step.get("AI REASONING") or step.get("thinking") or step.get("thinking_process") or "", 360),
+                "memory": _truncate_text(step.get("MEMORY") or step.get("memory") or "", 220),
+                "next_goal": _truncate_text(step.get("TARGET OBJECTIVE") or step.get("next_goal") or "", 180),
+                "action": _truncate_text(step.get("ACTION") if "ACTION" in step else step.get("action"), 260),
+            }
+        )
+
+    if len(summaries) <= max_steps:
+        return summaries
+
+    kept = summaries[:max_steps]
+    kept.append(
+        {
+            "step_id": -1,
+            "note": f"truncated_{len(summaries) - max_steps}_steps",
+        }
+    )
+    return kept
+
+
+def _build_baseline_condition_input(
+    source_path: Path,
+    source_json: Dict[str, Any],
+    condition_id: str,
+    source_file: str,
+) -> Dict[str, Any]:
+    fallback_task_name = source_path.stem
+    task_name, _ = _extract_task_name_and_url(str(source_json.get("task") or ""), fallback_task_name)
+    persona = str(source_json.get("persona") or "")
+
+    return {
+        "condition_id": condition_id,
+        "source_file": source_file,
+        "task": task_name,
+        "persona": persona,
+        "value": _infer_value_from_persona(persona),
+        "model": str(source_json.get("model") or ""),
+        "final_result": _truncate_text(source_json.get("final_result") or "", 500),
+        "steps": _build_baseline_step_summaries(source_json.get("steps")),
+    }
+
+
+def _import_baseline_llm_modules() -> Tuple[Any, Any, Any]:
+    if str(BACKEND_DIR) not in sys.path:
+        sys.path.insert(0, str(BACKEND_DIR))
+
+    from app.services.llm_factory import get_chat_llm  # pylint: disable=import-error
+    from langchain_core.messages import HumanMessage, SystemMessage  # pylint: disable=import-error
+
+    return get_chat_llm, HumanMessage, SystemMessage
+
+
+def _build_baseline_pairwise_prompt(
+    group_task: str,
+    criterion_text: Optional[str],
+    baseline_conditions: Sequence[Dict[str, Any]],
+) -> str:
+    condition_ids = [str(item.get("condition_id") or "") for item in baseline_conditions]
+    criterion = _normalize_text(criterion_text or "")
+    if not criterion:
+        criterion = "Overall ranking quality: better task completion, stronger value alignment, and fewer unsupported assumptions."
+
+    serialized_conditions = "\n\n".join(
+        [
+            f"Condition {idx}:\n{json.dumps(item, indent=2, ensure_ascii=False)}"
+            for idx, item in enumerate(baseline_conditions, start=1)
+        ]
+    )
+
+    return (
+        f"Task: {_normalize_text(group_task)}\n"
+        f"Criterion: {criterion}\n"
+        f"Allowed condition_id values: {condition_ids}\n\n"
+        "Return ONLY one JSON object with this exact top-level schema:\n"
+        "{\n"
+        '  "comparison_summary": "string",\n'
+        '  "ranking": [\n'
+        '    {"condition_id": "string", "rank": 1, "summary": "string", "confidence": 0.0, "evidence": ["string"]},\n'
+        '    {"condition_id": "string", "rank": 2, "summary": "string", "confidence": 0.0, "evidence": ["string"]}\n'
+        "  ]\n"
+        "}\n\n"
+        "Rules:\n"
+        "1) Use each allowed condition_id exactly once.\n"
+        "2) rank must be exactly 1 and 2 (no ties).\n"
+        "3) confidence must be between 0 and 1.\n"
+        "4) evidence items must be concrete observations from provided steps.\n\n"
+        f"{serialized_conditions}\n"
+    )
+
+
+def _extract_llm_response_text(response: Any) -> str:
+    content = getattr(response, "content", response)
+
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("content") or item.get("output_text")
+                if isinstance(text, str):
+                    parts.append(text)
+                else:
+                    parts.append(str(item))
+                continue
+            parts.append(str(item))
+        return "\n".join(p for p in parts if p).strip()
+
+    return str(content).strip()
+
+
+def _extract_json_object_from_text(raw_text: str) -> Dict[str, Any]:
+    text = str(raw_text or "").strip()
+    if not text:
+        raise ValueError("empty_baseline_response")
+
+    candidates: List[str] = [text]
+    fenced_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+    candidates.extend(block.strip() for block in fenced_blocks if block.strip())
+
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        stripped = candidate.strip()
+        for idx, ch in enumerate(stripped):
+            if ch != "{":
+                continue
+            try:
+                parsed, _ = decoder.raw_decode(stripped[idx:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+
+    raise ValueError("baseline_response_not_json_object")
+
+
+def _normalize_baseline_ranking_rows(
+    raw_ranking: Any,
+    allowed_condition_ids: Sequence[str],
+    condition_metadata: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    allowed_ids = [str(item).strip() for item in allowed_condition_ids if str(item).strip()]
+    order_map = {cid: idx for idx, cid in enumerate(allowed_ids)}
+    rows_by_condition: Dict[str, Dict[str, Any]] = {}
+
+    for row in raw_ranking if isinstance(raw_ranking, list) else []:
+        if not isinstance(row, dict):
+            continue
+
+        condition_id = str(row.get("condition_id") or "").strip()
+        if not condition_id or condition_id not in order_map:
+            continue
+
+        raw_rank = row.get("rank")
+        rank_value: Optional[int] = None
+        if _is_number(raw_rank):
+            rank_value = int(raw_rank)
+        elif isinstance(raw_rank, str) and raw_rank.strip().isdigit():
+            rank_value = int(raw_rank.strip())
+
+        raw_confidence = row.get("confidence")
+        confidence = 0.5
+        if _is_number(raw_confidence):
+            confidence = max(0.0, min(1.0, float(raw_confidence)))
+
+        evidence_items: List[str] = []
+        raw_evidence = row.get("evidence")
+        if isinstance(raw_evidence, list):
+            evidence_items = [_normalize_text(str(item)) for item in raw_evidence if _normalize_text(str(item))]
+        elif raw_evidence is not None:
+            evidence_text = _normalize_text(str(raw_evidence))
+            if evidence_text:
+                evidence_items = [evidence_text]
+
+        meta = condition_metadata.get(condition_id, {})
+        rank_sort = rank_value if rank_value is not None else 1000 + order_map[condition_id]
+        rows_by_condition[condition_id] = {
+            "_rank_sort": rank_sort,
+            "condition_id": condition_id,
+            "overall_assessment": str(row.get("overall_assessment") or "pass"),
+            "confidence": confidence,
+            "summary": _normalize_text(str(row.get("summary") or row.get("reason") or ""))
+            or "Baseline direct prompt ranking.",
+            "persona": str(meta.get("persona") or ""),
+            "value": meta.get("value"),
+            "model": str(meta.get("model") or ""),
+            "run_index": int(meta.get("run_index") or 1),
+            "evidence": evidence_items,
+            "supporting_evidence": "\n".join(evidence_items) if evidence_items else None,
+        }
+
+    for condition_id in allowed_ids:
+        if condition_id in rows_by_condition:
+            continue
+        meta = condition_metadata.get(condition_id, {})
+        rows_by_condition[condition_id] = {
+            "_rank_sort": 2000 + order_map[condition_id],
+            "condition_id": condition_id,
+            "overall_assessment": "pass",
+            "confidence": 0.5,
+            "summary": "Fallback ranking due to missing or unparsable baseline response row.",
+            "persona": str(meta.get("persona") or ""),
+            "value": meta.get("value"),
+            "model": str(meta.get("model") or ""),
+            "run_index": int(meta.get("run_index") or 1),
+            "evidence": [],
+            "supporting_evidence": None,
+        }
+
+    ordered = sorted(rows_by_condition.values(), key=lambda item: (item.get("_rank_sort", 9999), item["condition_id"]))
+    normalized_rows: List[Dict[str, Any]] = []
+    for idx, row in enumerate(ordered, start=1):
+        row_copy = copy.deepcopy(row)
+        row_copy.pop("_rank_sort", None)
+        row_copy["rank"] = idx
+        normalized_rows.append(row_copy)
+
+    return normalized_rows
+
+
+async def _run_baseline_pairwise_ranking(
+    baseline_conditions: Sequence[Dict[str, Any]],
+    judge_model: Optional[str],
+    group_task: str,
+    criterion_text: Optional[str],
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    if len(baseline_conditions) != 2:
+        raise ValueError("baseline_requires_exactly_2_conditions")
+
+    get_chat_llm, HumanMessage, SystemMessage = _import_baseline_llm_modules()
+
+    resolved_model = _normalize_model_name(judge_model) or DEFAULT_OPENAI_JUDGE_MODEL
+    llm = get_chat_llm(model=resolved_model, temperature=0.0)
+    prompt = _build_baseline_pairwise_prompt(group_task, criterion_text, baseline_conditions)
+
+    response = await llm.ainvoke(
+        [
+            SystemMessage(content=BASELINE_SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ]
+    )
+
+    response_text = _extract_llm_response_text(response)
+    parsed_response: Dict[str, Any] = {}
+    try:
+        parsed_response = _extract_json_object_from_text(response_text)
+    except ValueError:
+        parsed_response = {}
+
+    allowed_condition_ids = [str(item.get("condition_id") or "") for item in baseline_conditions]
+    condition_metadata = {
+        str(item.get("condition_id") or ""): {
+            "persona": item.get("persona"),
+            "value": item.get("value"),
+            "model": item.get("model"),
+            "run_index": 1,
+        }
+        for item in baseline_conditions
+    }
+    ranking_rows = _normalize_baseline_ranking_rows(
+        raw_ranking=parsed_response.get("ranking"),
+        allowed_condition_ids=allowed_condition_ids,
+        condition_metadata=condition_metadata,
+    )
+
+    best_condition_id = ranking_rows[0]["condition_id"] if ranking_rows else ""
+    comparison_summary = _normalize_text(str(parsed_response.get("comparison_summary") or ""))
+    if not comparison_summary:
+        comparison_summary = "Baseline direct prompt comparison."
+
+    result_payload = {
+        "baseline_prompt_evaluation": {
+            "mode": "baseline_direct_prompt",
+            "judge_model": resolved_model,
+            "criterion": _normalize_text(criterion_text or "") or None,
+            "group_task": _normalize_text(group_task),
+            "condition_ids": allowed_condition_ids,
+            "raw_response_text": response_text,
+            "parsed_response": parsed_response,
+        },
+        "multi_condition_assessment": {
+            "comparison_timestamp": datetime.now().isoformat(),
+            "total_conditions": len(ranking_rows),
+            "criteria_comparisons": [
+                {
+                    "title": "baseline_direct_prompt",
+                    "assertion": _normalize_text(criterion_text or ""),
+                    "description": "Direct pairwise ranking baseline prompt.",
+                    "condition_comparison": {
+                        "best_condition_id": best_condition_id,
+                        "best_condition_rank": 1,
+                        "ranking": ranking_rows,
+                        "ranking_reasoning": comparison_summary,
+                        "comparison_summary": comparison_summary,
+                    },
+                }
+            ],
+        },
+    }
+
+    return result_payload, ranking_rows
 
 
 def _normalize_dataset_json_to_run_payload(source_file: Path, source_json: Dict[str, Any]) -> Dict[str, Any]:
@@ -421,13 +825,15 @@ def _prepare_group_run_payload(
     group: Dict[str, Any],
     normalized_dir: Path,
     criteria2_text: Optional[str],
+    ranking_mode: str,
     judge_model: Optional[str],
-) -> Tuple[Dict[str, Any], Dict[str, str], str]:
+) -> Tuple[Dict[str, Any], Dict[str, str], str, List[Dict[str, Any]]]:
     normalized_dir.mkdir(parents=True, exist_ok=True)
 
     conditions: List[Dict[str, str]] = []
     condition_to_source: Dict[str, str] = {}
     criteria2_candidates: set[str] = set()
+    baseline_conditions: List[Dict[str, Any]] = []
 
     for file_info in group.get("files", []):
         file_path_raw = str(file_info.get("file_path") or "")
@@ -456,8 +862,21 @@ def _prepare_group_run_payload(
         condition_id = str(normalized_path.resolve())
         conditions.append({"conditionID": condition_id})
         condition_to_source[condition_id] = file_name
+        baseline_conditions.append(
+            _build_baseline_condition_input(
+                source_path=source_path,
+                source_json=source_json,
+                condition_id=condition_id,
+                source_file=file_name,
+            )
+        )
 
     effective_criteria2 = _normalize_text(criteria2_text or "")
+    criterion_title = "criteria2"
+    criterion_assertion = ""
+    criterion_description = ""
+
+    # Baseline and criteria2 modes both use criteria2 as the ranking assertion.
     if not effective_criteria2:
         if len(criteria2_candidates) > 1:
             raise ValueError("multiple_criteria2_in_group")
@@ -467,20 +886,23 @@ def _prepare_group_run_payload(
     if not effective_criteria2:
         raise ValueError("missing_criteria2")
 
+    criterion_assertion = effective_criteria2
+    criterion_description = "User-provided criteria2 for same-task condition ranking."
+
     payload: Dict[str, Any] = {
         "conditions": conditions,
         "criteria": [
             {
-                "title": "criteria2",
-                "assertion": effective_criteria2,
-                "description": "User-provided criteria2 for same-task condition ranking.",
+                "title": criterion_title,
+                "assertion": criterion_assertion,
+                "description": criterion_description,
             }
         ],
     }
     if judge_model:
         payload["judge_model"] = judge_model
 
-    return payload, condition_to_source, effective_criteria2
+    return payload, condition_to_source, effective_criteria2, baseline_conditions
 
 
 def _load_manifest_or_build(dataset_dir: Path, json_pattern: str, groups_file: Optional[Path]) -> Dict[str, Any]:
@@ -771,6 +1193,7 @@ async def run_llm_group_ranking(
     groups_file: Optional[Path],
     output_dir: Path,
     criteria2_text: Optional[str],
+    ranking_mode: str,
     judge_model: Optional[str],
     min_group_size: int,
 ) -> Dict[str, Any]:
@@ -780,15 +1203,15 @@ async def run_llm_group_ranking(
         raise ValueError("groups manifest must include a groups list")
 
     batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_output_dir = output_dir / f"task_group_ranking_{batch_id}"
+    mode_token = _safe_token(ranking_mode, fallback="mode")
+    run_output_dir = output_dir / f"task_group_ranking_{mode_token}_{batch_id}"
     run_output_dir.mkdir(parents=True, exist_ok=True)
 
     normalized_root = run_output_dir / "_normalized"
     raw_root = run_output_dir / "raw"
     normalized_root.mkdir(parents=True, exist_ok=True)
     raw_root.mkdir(parents=True, exist_ok=True)
-
-    get_judge_services, evaluate_experiment, ExperimentEvaluationRequest = _import_judge_modules()
+    judge_module_bundle: Optional[Tuple[Any, Any, Any]] = None
 
     output_groups: List[Dict[str, Any]] = []
     skipped_groups: List[Dict[str, Any]] = []
@@ -801,6 +1224,17 @@ async def run_llm_group_ranking(
         task = str(group.get("task") or "").strip()
         files = group.get("files", [])
         if not group_id or not isinstance(files, list):
+            continue
+
+        if len(files) != 2:
+            skipped_groups.append(
+                {
+                    "group_id": group_id,
+                    "task": task,
+                    "reason": "group_size_ne_2",
+                    "size": len(files),
+                }
+            )
             continue
 
         if len(files) < max(2, int(min_group_size)):
@@ -816,10 +1250,11 @@ async def run_llm_group_ranking(
 
         group_norm_dir = normalized_root / group_id
         try:
-            payload, condition_to_source, group_criteria2 = _prepare_group_run_payload(
+            payload, condition_to_source, group_criteria2, baseline_conditions = _prepare_group_run_payload(
                 group=group,
                 normalized_dir=group_norm_dir,
                 criteria2_text=criteria2_text,
+                ranking_mode=ranking_mode,
                 judge_model=judge_model,
             )
         except ValueError as exc:
@@ -833,25 +1268,37 @@ async def run_llm_group_ranking(
             )
             continue
 
-        if len(payload.get("conditions", [])) < 2:
+        if len(payload.get("conditions", [])) != 2:
             skipped_groups.append(
                 {
                     "group_id": group_id,
                     "task": task,
-                    "reason": "usable_conditions_lt_2",
+                    "reason": "usable_conditions_ne_2",
                     "size": len(payload.get("conditions", [])),
                 }
             )
             continue
 
-        result_payload = await _run_single_llm_request(
-            request_payload=payload,
-            get_judge_services=get_judge_services,
-            evaluate_experiment=evaluate_experiment,
-            ExperimentEvaluationRequest=ExperimentEvaluationRequest,
-        )
+        if ranking_mode == RANKING_MODE_BASELINE:
+            result_payload, ranking_rows = await _run_baseline_pairwise_ranking(
+                baseline_conditions=baseline_conditions,
+                judge_model=judge_model,
+                group_task=task,
+                criterion_text=group_criteria2,
+            )
+        else:
+            if judge_module_bundle is None:
+                judge_module_bundle = _import_judge_modules()
+            get_judge_services, evaluate_experiment, ExperimentEvaluationRequest = judge_module_bundle
 
-        ranking_rows = _extract_primary_ranking(result_payload)
+            result_payload = await _run_single_llm_request(
+                request_payload=payload,
+                get_judge_services=get_judge_services,
+                evaluate_experiment=evaluate_experiment,
+                ExperimentEvaluationRequest=ExperimentEvaluationRequest,
+            )
+
+            ranking_rows = _extract_primary_ranking(result_payload)
         condition_file_map = _build_condition_to_file_map(group)
 
         transformed_ranking = []
@@ -869,6 +1316,7 @@ async def run_llm_group_ranking(
             {
                 "group_id": group_id,
                 "task": task,
+                "ranking_mode": ranking_mode,
                 "criteria2": group_criteria2,
                 "size": len(payload.get("conditions", [])),
                 "ranking": transformed_ranking,
@@ -880,6 +1328,8 @@ async def run_llm_group_ranking(
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "dataset_dir": str(dataset_dir.resolve()),
         "groups_file": str(groups_file.resolve()) if groups_file else None,
+        "ranking_mode": ranking_mode,
+        "pairwise_only": True,
         "criteria2": _normalize_text(criteria2_text or "") or None,
         "judge_model": judge_model,
         "group_count_total": len(groups),
@@ -900,6 +1350,7 @@ async def run_llm_group_ranking(
             {
                 "group_id": group["group_id"],
                 "task": group["task"],
+                "ranking_mode": group.get("ranking_mode"),
                 "criteria2": group.get("criteria2"),
                 "ranking": [row.get("source_file") for row in group.get("ranking", [])],
                 "items": [
@@ -929,7 +1380,7 @@ async def run_llm_group_ranking(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Group dataset JSON by task and evaluate LLM-vs-human ranking agreement on criteria2",
+        description="Run pairwise ranking for dataset subfolders (2 JSON files per folder)",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -937,12 +1388,12 @@ def _parse_args() -> argparse.Namespace:
     group_parser.add_argument(
         "--dataset-dir",
         default=str(DEFAULT_TASK_GROUP_DATASET_DIR),
-        help="Dataset directory (default: technical_evaluation/results/dataset_grouped_by_task_v2)",
+        help="Dataset root directory (default: technical_evaluation/dataset/dataset_grouped_by_task)",
     )
     group_parser.add_argument(
         "--json-pattern",
         default=DEFAULT_TASK_GROUP_JSON_PATTERN,
-        help="JSON glob pattern (default: **/*.json for grouped task folders)",
+        help="JSON glob pattern (default: **/*.json)",
     )
     group_parser.add_argument(
         "--output-file",
@@ -959,12 +1410,12 @@ def _parse_args() -> argparse.Namespace:
     llm_parser.add_argument(
         "--dataset-dir",
         default=str(DEFAULT_TASK_GROUP_DATASET_DIR),
-        help="Dataset directory (default: technical_evaluation/results/dataset_grouped_by_task_v2)",
+        help="Dataset directory (default: technical_evaluation/dataset/dataset_grouped_by_task)",
     )
     llm_parser.add_argument(
         "--json-pattern",
         default=DEFAULT_TASK_GROUP_JSON_PATTERN,
-        help="JSON glob pattern (default: **/*.json for grouped task folders)",
+        help="JSON glob pattern (default: **/*.json)",
     )
     llm_parser.add_argument("--groups-file", default=None, help="Optional existing group manifest JSON")
     llm_parser.add_argument(
@@ -988,6 +1439,12 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Optional list of judge models (supports space- or comma-separated values). Overrides --judge-model.",
     )
+    llm_parser.add_argument(
+        "--run-modes",
+        nargs="+",
+        default=None,
+        help="Ranking modes to run: criteria2, baseline (default runs both)",
+    )
     llm_parser.add_argument("--min-group-size", type=int, default=2, help="Minimum group size to evaluate")
 
     agreement_parser = subparsers.add_parser("inter-agreement", help="Compute inter-agreement between LLM and human rankings")
@@ -999,12 +1456,12 @@ def _parse_args() -> argparse.Namespace:
     full_parser.add_argument(
         "--dataset-dir",
         default=str(DEFAULT_TASK_GROUP_DATASET_DIR),
-        help="Dataset directory (default: technical_evaluation/results/dataset_grouped_by_task_v2)",
+        help="Dataset directory (default: technical_evaluation/dataset/dataset_grouped_by_task)",
     )
     full_parser.add_argument(
         "--json-pattern",
         default=DEFAULT_TASK_GROUP_JSON_PATTERN,
-        help="JSON glob pattern (default: **/*.json for grouped task folders)",
+        help="JSON glob pattern (default: **/*.json)",
     )
     full_parser.add_argument(
         "--output-dir",
@@ -1026,6 +1483,12 @@ def _parse_args() -> argparse.Namespace:
         nargs="+",
         default=None,
         help="Optional list of judge models (supports space- or comma-separated values). Overrides --judge-model.",
+    )
+    full_parser.add_argument(
+        "--run-modes",
+        nargs="+",
+        default=None,
+        help="Ranking modes to run: criteria2, baseline (default runs both)",
     )
     full_parser.add_argument("--min-group-size", type=int, default=2, help="Minimum group size to evaluate")
     full_parser.add_argument("--human-ranking-file", default=None, help="Optional human ranking file for agreement")
@@ -1072,32 +1535,43 @@ def main() -> int:
         output_dir = Path(args.output_dir).resolve()
 
         judge_models = _resolve_judge_models(args.judge_model, getattr(args, "judge_models", None))
+        ranking_modes = _resolve_ranking_modes(getattr(args, "run_modes", None))
         multi_model_mode = len(judge_models) > 1
+        multi_mode_run = len(ranking_modes) > 1
 
         for judge_model in judge_models:
             model_output_dir = output_dir
             if multi_model_mode:
                 model_output_dir = output_dir / _judge_output_subdir_name(judge_model)
 
-            result = asyncio.run(
-                run_llm_group_ranking(
-                    dataset_dir=dataset_dir,
-                    json_pattern=args.json_pattern,
-                    groups_file=groups_file,
-                    output_dir=model_output_dir,
-                    criteria2_text=args.criteria2_text,
-                    judge_model=judge_model,
-                    min_group_size=args.min_group_size,
-                )
-            )
+            for ranking_mode in ranking_modes:
+                run_output_root = model_output_dir
+                if multi_mode_run:
+                    run_output_root = model_output_dir / _safe_token(ranking_mode, fallback="mode")
 
-            print(f"[DONE] Judge model: {judge_model or 'default'}")
-            print(f"[DONE] LLM ranking output dir: {result['run_output_dir']}")
-            print(f"[DONE] LLM ranking summary: {result['llm_summary_file']}")
-            print(f"[DONE] Human template: {result['human_template_file']}")
+                result = asyncio.run(
+                    run_llm_group_ranking(
+                        dataset_dir=dataset_dir,
+                        json_pattern=args.json_pattern,
+                        groups_file=groups_file,
+                        output_dir=run_output_root,
+                        criteria2_text=args.criteria2_text,
+                        ranking_mode=ranking_mode,
+                        judge_model=judge_model,
+                        min_group_size=args.min_group_size,
+                    )
+                )
+
+                print(f"[DONE] Judge model: {judge_model or 'default'}")
+                print(f"[DONE] Ranking mode: {ranking_mode}")
+                print(f"[DONE] LLM ranking output dir: {result['run_output_dir']}")
+                print(f"[DONE] LLM ranking summary: {result['llm_summary_file']}")
+                print(f"[DONE] Human template: {result['human_template_file']}")
 
         if multi_model_mode:
             print(f"[DONE] Multi-model output root: {output_dir}")
+        if multi_mode_run:
+            print(f"[DONE] Multi-mode run completed: {', '.join(ranking_modes)}")
         return 0
 
     if args.command == "inter-agreement":
@@ -1128,50 +1602,61 @@ def main() -> int:
         output_dir = Path(args.output_dir).resolve()
 
         judge_models = _resolve_judge_models(args.judge_model, getattr(args, "judge_models", None))
+        ranking_modes = _resolve_ranking_modes(getattr(args, "run_modes", None))
         multi_model_mode = len(judge_models) > 1
+        multi_mode_run = len(ranking_modes) > 1
 
         for judge_model in judge_models:
             model_output_dir = output_dir
             if multi_model_mode:
                 model_output_dir = output_dir / _judge_output_subdir_name(judge_model)
 
-            llm_result = asyncio.run(
-                run_llm_group_ranking(
-                    dataset_dir=dataset_dir,
-                    json_pattern=args.json_pattern,
-                    groups_file=None,
-                    output_dir=model_output_dir,
-                    criteria2_text=args.criteria2_text,
-                    judge_model=judge_model,
-                    min_group_size=args.min_group_size,
-                )
-            )
+            for ranking_mode in ranking_modes:
+                run_output_root = model_output_dir
+                if multi_mode_run:
+                    run_output_root = model_output_dir / _safe_token(ranking_mode, fallback="mode")
 
-            print(f"[DONE] Judge model: {judge_model or 'default'}")
-            print(f"[DONE] LLM ranking summary: {llm_result['llm_summary_file']}")
-            print(f"[DONE] Human template: {llm_result['human_template_file']}")
-
-            human_ranking_raw = getattr(args, "human_ranking_file", None)
-            if human_ranking_raw:
-                human_file = Path(human_ranking_raw).resolve()
-                agreement_path = Path(llm_result["run_output_dir"]).resolve() / "inter_agreement.json"
-                report = compute_inter_agreement(
-                    llm_ranking_file=Path(llm_result["llm_summary_file"]).resolve(),
-                    human_ranking_file=human_file,
-                    output_file=agreement_path,
-                )
-                print(f"[DONE] Inter-agreement report: {agreement_path}")
-                print(
-                    "[DONE] groups_compared={} spearman_mean={} kendall_tau_b_mean={} top1_agreement_rate={}".format(
-                        report.get("groups_compared"),
-                        report.get("spearman_mean"),
-                        report.get("kendall_tau_b_mean"),
-                        report.get("top1_agreement_rate"),
+                llm_result = asyncio.run(
+                    run_llm_group_ranking(
+                        dataset_dir=dataset_dir,
+                        json_pattern=args.json_pattern,
+                        groups_file=None,
+                        output_dir=run_output_root,
+                        criteria2_text=args.criteria2_text,
+                        ranking_mode=ranking_mode,
+                        judge_model=judge_model,
+                        min_group_size=args.min_group_size,
                     )
                 )
 
+                print(f"[DONE] Judge model: {judge_model or 'default'}")
+                print(f"[DONE] Ranking mode: {ranking_mode}")
+                print(f"[DONE] LLM ranking summary: {llm_result['llm_summary_file']}")
+                print(f"[DONE] Human template: {llm_result['human_template_file']}")
+
+                human_ranking_raw = getattr(args, "human_ranking_file", None)
+                if human_ranking_raw:
+                    human_file = Path(human_ranking_raw).resolve()
+                    agreement_path = Path(llm_result["run_output_dir"]).resolve() / "inter_agreement.json"
+                    report = compute_inter_agreement(
+                        llm_ranking_file=Path(llm_result["llm_summary_file"]).resolve(),
+                        human_ranking_file=human_file,
+                        output_file=agreement_path,
+                    )
+                    print(f"[DONE] Inter-agreement report: {agreement_path}")
+                    print(
+                        "[DONE] groups_compared={} spearman_mean={} kendall_tau_b_mean={} top1_agreement_rate={}".format(
+                            report.get("groups_compared"),
+                            report.get("spearman_mean"),
+                            report.get("kendall_tau_b_mean"),
+                            report.get("top1_agreement_rate"),
+                        )
+                    )
+
         if multi_model_mode:
             print(f"[DONE] Multi-model output root: {output_dir}")
+        if multi_mode_run:
+            print(f"[DONE] Multi-mode run completed: {', '.join(ranking_modes)}")
 
         return 0
 

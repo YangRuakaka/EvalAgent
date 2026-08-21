@@ -22,6 +22,8 @@ export const useEnvironmentConfiguration = (
     const [isRunningEnvironment, setIsRunningEnvironment] = useState(false);
     const [environmentWaitSeconds, setEnvironmentWaitSeconds] = useState(0);
     const environmentWaitTimerRef = useRef(null);
+    const environmentLogFlushTimerRef = useRef(null);
+    const pendingEnvironmentLogsRef = useRef([]);
     const activeEnvironmentRunIdRef = useRef(null);
     const activeEnvironmentAbortRef = useRef(null);
 
@@ -64,6 +66,12 @@ export const useEnvironmentConfiguration = (
 			window.clearInterval(environmentWaitTimerRef.current);
 			environmentWaitTimerRef.current = null;
 		}
+
+		if (environmentLogFlushTimerRef.current) {
+			window.clearTimeout(environmentLogFlushTimerRef.current);
+			environmentLogFlushTimerRef.current = null;
+		}
+		pendingEnvironmentLogsRef.current = [];
 
 		if (activeEnvironmentAbortRef.current) {
 			activeEnvironmentAbortRef.current.abort();
@@ -245,6 +253,25 @@ export const useEnvironmentConfiguration = (
 		const abortController = new AbortController();
 		activeEnvironmentRunIdRef.current = runId;
 		activeEnvironmentAbortRef.current = abortController;
+		const flushPendingLogs = () => {
+			if (environmentLogFlushTimerRef.current) {
+				window.clearTimeout(environmentLogFlushTimerRef.current);
+				environmentLogFlushTimerRef.current = null;
+			}
+			const pendingLogs = pendingEnvironmentLogsRef.current;
+			if (!pendingLogs.length) {
+				return;
+			}
+			pendingEnvironmentLogsRef.current = [];
+			emitEnvironmentRunState({
+				runId,
+				taskName: taskNameForRun,
+				status: 'running',
+				isRunning: true,
+				appendLogs: pendingLogs,
+				error: null,
+			});
+		};
 		emitEnvironmentRunState({
 			runId,
 			taskName: taskNameForRun,
@@ -318,6 +345,9 @@ export const useEnvironmentConfiguration = (
 				const stream = streamBrowserAgentEvents(runId, {
 					onStatus: (data) => {
 						console.info('[browser-agent/events] Status:', data?.status);
+						if (['completed', 'failed', 'cancelled'].includes(data?.status)) {
+							flushPendingLogs();
+						}
 
 						emitEnvironmentRunState({
 							runId,
@@ -373,6 +403,7 @@ export const useEnvironmentConfiguration = (
 						}
 					},
 					onEnd: (data) => {
+						flushPendingLogs();
 						emitEnvironmentRunState({
 							runId,
 							taskName: taskNameForRun,
@@ -402,6 +433,7 @@ export const useEnvironmentConfiguration = (
 						resolve();
 					},
 					onError: (streamError) => {
+						flushPendingLogs();
 						if (settled) {
 							return;
 						}
@@ -436,14 +468,13 @@ export const useEnvironmentConfiguration = (
 							return;
 						}
 
-						emitEnvironmentRunState({
-							runId,
-							taskName: taskNameForRun,
-							status: 'running',
-							isRunning: true,
-							appendLogs: [line],
-							error: null,
-						});
+						pendingEnvironmentLogsRef.current.push(line);
+						if (!environmentLogFlushTimerRef.current) {
+							environmentLogFlushTimerRef.current = window.setTimeout(
+								flushPendingLogs,
+								120,
+							);
+						}
 					},
 				});
 
@@ -483,6 +514,7 @@ export const useEnvironmentConfiguration = (
 				error?.message || 'Failed to run the browser agent. Please try again later.',
 			);
 		} finally {
+			flushPendingLogs();
 			if (environmentWaitTimerRef.current) {
 				window.clearInterval(environmentWaitTimerRef.current);
 				environmentWaitTimerRef.current = null;

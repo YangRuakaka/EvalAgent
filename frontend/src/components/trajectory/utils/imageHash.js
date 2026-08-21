@@ -1,11 +1,33 @@
 const DEFAULT_HASH_SIZE = 16;
 const DEFAULT_BORDER_IGNORE_RATIO = 0.08;
+const HASH_CACHE_LIMIT = 1000;
 const hashCache = new Map();
 const WORKER_TIMEOUT_MS = 12000;
 
 let hashWorker = null;
 let workerRequestId = 0;
 const pendingWorkerRequests = new Map();
+
+const readHashCache = (key) => {
+	if (!hashCache.has(key)) {
+		return undefined;
+	}
+	const value = hashCache.get(key);
+	hashCache.delete(key);
+	hashCache.set(key, value);
+	return value;
+};
+
+const writeHashCache = (key, value) => {
+	if (hashCache.has(key)) {
+		hashCache.delete(key);
+	}
+	hashCache.set(key, value);
+	while (hashCache.size > HASH_CACHE_LIMIT) {
+		const oldestKey = hashCache.keys().next().value;
+		hashCache.delete(oldestKey);
+	}
+};
 
 const WORKER_SOURCE = `
 self.onmessage = async (event) => {
@@ -331,34 +353,34 @@ export const computeImageHash = async (src, options = {}) => {
 	const key = `${normalizedSrc}::${size}::${borderIgnoreRatio}`;
 
 	if (hashCache.has(key)) {
-		return hashCache.get(key);
+		return readHashCache(key);
 	}
 
 	try {
 		const hash = await computeImageHashViaWorker(normalizedSrc, size, borderIgnoreRatio);
-		hashCache.set(key, hash);
+		writeHashCache(key, hash);
 		return hash;
 	} catch (error) {
 		try {
 			const image = await loadImage(normalizedSrc);
 			const hash = computeAverageHash(image, size, borderIgnoreRatio);
-			hashCache.set(key, hash);
+			writeHashCache(key, hash);
 			return hash;
 		} catch (mainThreadError) {
 			const contentKey = `${normalizedSrc}::content-sha1`;
 			if (hashCache.has(contentKey)) {
-				return hashCache.get(contentKey);
+				return readHashCache(contentKey);
 			}
 
 			const fallbackContentHash = await hashBinaryContent(normalizedSrc);
 			if (!fallbackContentHash) {
-				hashCache.set(key, null);
+				writeHashCache(key, null);
 				return null;
 			}
 
 			const normalizedContentHash = `sha1-${fallbackContentHash}`;
-			hashCache.set(contentKey, normalizedContentHash);
-			hashCache.set(key, normalizedContentHash);
+			writeHashCache(contentKey, normalizedContentHash);
+			writeHashCache(key, normalizedContentHash);
 			return normalizedContentHash;
 		}
 	}

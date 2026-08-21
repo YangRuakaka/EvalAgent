@@ -85,7 +85,9 @@ def _get_loop_scoped_semaphore(
 
 def _map_verdict_to_status(verdict: str) -> EvaluateStatus:
     normalized = str(verdict or "").strip().lower()
-    if normalized in {"pass", "fail", "partial"}:
+    if normalized == "partial":
+        return EvaluateStatus.PASS
+    if normalized in {"pass", "fail"}:
         return EvaluateStatus(normalized)
     return EvaluateStatus.UNKNOWN
 
@@ -163,22 +165,24 @@ def _synthesize_step_status(
     counts = {
         EvaluateStatus.PASS: 0,
         EvaluateStatus.FAIL: 0,
-        EvaluateStatus.PARTIAL: 0,
     }
 
     for ev in ev_list:
-        if ev.verdict in counts:
-            counts[ev.verdict] += 1
+        evidence_verdict = (
+            EvaluateStatus.PASS if ev.verdict == EvaluateStatus.PARTIAL else ev.verdict
+        )
+        if evidence_verdict in counts:
+            counts[evidence_verdict] += 1
 
     total_votes = sum(counts.values())
     if total_votes == 0:
         return criterion_status
 
     if counts[EvaluateStatus.PASS] > 0 and counts[EvaluateStatus.FAIL] > 0:
-        evidence_status = EvaluateStatus.PARTIAL
+        evidence_status = EvaluateStatus.PASS
     else:
         evidence_status = max(
-            (EvaluateStatus.PASS, EvaluateStatus.FAIL, EvaluateStatus.PARTIAL),
+            (EvaluateStatus.PASS, EvaluateStatus.FAIL),
             key=lambda status: counts[status],
         )
 
@@ -187,9 +191,9 @@ def _synthesize_step_status(
     if evidence_status == criterion_status:
         return evidence_status
     if evidence_status == EvaluateStatus.PARTIAL or criterion_status == EvaluateStatus.PARTIAL:
-        return EvaluateStatus.PARTIAL
+        return EvaluateStatus.PASS
     if {evidence_status, criterion_status} == {EvaluateStatus.PASS, EvaluateStatus.FAIL}:
-        return EvaluateStatus.PARTIAL
+        return EvaluateStatus.PASS
     return evidence_status
 
 
@@ -268,11 +272,7 @@ async def _process_single_criterion(
         # Map to response format
         logger.info(f"Mapping evaluation result. Verdict: {eval_result.verdict}, Relevant steps: {eval_result.relevant_steps}")
 
-        normalized_overall_verdict = (
-            EvaluateStatus(eval_result.verdict.lower())
-            if eval_result.verdict.lower() in ["pass", "fail", "partial"]
-            else EvaluateStatus.UNKNOWN
-        )
+        normalized_overall_verdict = _map_verdict_to_status(eval_result.verdict)
         
         involved_steps_list = []
         
@@ -314,7 +314,9 @@ async def _process_single_criterion(
             for step_idx, ev_list in sorted(steps_evidence.items(), key=lambda item: item[0]):
                 llm_assessment = llm_step_assessments.get(step_idx, {}) if isinstance(llm_step_assessments, dict) else {}
                 llm_verdict = str(llm_assessment.get("verdict", "")).strip().lower()
-                if llm_verdict in {"pass", "fail", "partial", "unknown"}:
+                if llm_verdict == "partial":
+                    step_verdict = EvaluateStatus.PASS
+                elif llm_verdict in {"pass", "fail", "unknown"}:
                     step_verdict = EvaluateStatus(llm_verdict)
                 else:
                     step_verdict = _synthesize_step_status(

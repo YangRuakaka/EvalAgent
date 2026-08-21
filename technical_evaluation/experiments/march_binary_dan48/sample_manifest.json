@@ -1,0 +1,97 @@
+{
+  "experiment_id": "march_binary_dan48_gpt5",
+  "source_commit": "2881b03bc19ac4ee6c53c08ec94930348ab59465",
+  "label_policy": {
+    "agentic_allowed_labels": ["pass", "fail"],
+    "baseline_prompt_allowed_labels": ["pass", "fail", "unknown"],
+    "legacy_partial_mapping": "pass",
+    "prompt_allows_partial": false,
+    "unknown_policy": "Retain legitimate Baseline unknown outputs; do not selectively rerun."
+  },
+  "selection": {
+    "source": "Dan's 48 completed criteria1 annotations",
+    "rule": "All 48 Dan-assigned WebHarbor cases; seed the completed 10-case pilot and run only the remaining 38 cases.",
+    "case_count": 48,
+    "pilot_seed_count": 10,
+    "remaining_run_count": 38
+  },
+  "pilot_seed_case_ids": [
+    "HOT-03-B",
+    "INF-02-A",
+    "SPT-02-A",
+    "RET-01-B",
+    "MLM-02-B",
+    "EDU-03-C",
+    "REC-01-C",
+    "FLT-01-B",
+    "HOT-02-A",
+    "SPT-01-B"
+  ],
+  "cases": [
+    {"case_id": "HOT-03-B"},
+    {"case_id": "INF-02-A"},
+    {"case_id": "HOT-02-A"},
+    {"case_id": "EDU-03-C"},
+    {"case_id": "SPT-02-A"},
+    {"case_id": "REC-01-C"},
+    {"case_id": "HOT-01-C"},
+    {"case_id": "REC-01-A"},
+    {"case_id": "RET-01-B"},
+    {"case_id": "MLM-02-B"},
+    {"case_id": "REC-02-C"},
+    {"case_id": "RET-02-C"},
+    {"case_id": "FLT-01-B"},
+    {"case_id": "FLT-02-A"},
+    {"case_id": "INF-01-B"},
+    {"case_id": "SPT-01-B"},
+    {"case_id": "FLT-03-C"},
+    {"case_id": "MLM-01-C"},
+    {"case_id": "FLT-01-C"},
+    {"case_id": "EDU-02-A"},
+    {"case_id": "EDU-01-B"},
+    {"case_id": "REC-01-B"},
+    {"case_id": "HOT-01-A"},
+    {"case_id": "FLT-03-A"},
+    {"case_id": "RET-01-C"},
+    {"case_id": "FLT-03-B"},
+    {"case_id": "RET-03-A"},
+    {"case_id": "RET-02-B"},
+    {"case_id": "EDU-03-B"},
+    {"case_id": "SPT-03-B"},
+    {"case_id": "RET-02-A"},
+    {"case_id": "SPT-02-C"},
+    {"case_id": "INF-01-C"},
+    {"case_id": "HOT-01-B"},
+    {"case_id": "EDU-03-A"},
+    {"case_id": "REC-02-A"},
+    {"case_id": "MLM-02-C"},
+    {"case_id": "REC-02-B"},
+    {"case_id": "MLM-02-A"},
+    {"case_id": "MLM-03-B"},
+    {"case_id": "MLM-01-B"},
+    {"case_id": "HOT-03-A"},
+    {"case_id": "FLT-02-B"},
+    {"case_id": "INF-02-B"},
+    {"case_id": "HOT-03-C"},
+    {"case_id": "REC-03-C"},
+    {"case_id": "MLM-03-A"},
+    {"case_id": "EDU-02-C"}
+  ],
+  "systems": [
+    {"system_id": "agentic_gpt5", "method": "march_agentic", "judge_model": "gpt-5"},
+    {"system_id": "baseline_gpt5", "method": "march_one_shot_baseline", "judge_model": "gpt-5"}
+  ],
+  "run_parameters": {
+    "agentic": {
+      "max_attempts": 3,
+      "retry_delay_seconds": 5,
+      "resume": true
+    },
+    "baseline": {
+      "request_max_concurrency": 2,
+      "max_chars_per_field": 700,
+      "skip_existing": true,
+      "run_tag": "march_binary_dan10"
+    }
+  }
+}

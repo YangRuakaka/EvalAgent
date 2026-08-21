@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback } from 'react';
 import { normalizeLogEntries, mergeRunLogs } from '../utils/logUtils';
 
+const MAX_VISIBLE_RUN_LOGS = 2000;
+
 export const useEnvironmentRuns = (setActiveRunId) => {
     const [environmentRunTabs, setEnvironmentRunTabs] = useState({});
 
@@ -31,7 +33,7 @@ export const useEnvironmentRuns = (setActiveRunId) => {
                 existingLogs: existing?.logs || [],
                 snapshotLogs: incomingSnapshotLogs,
                 appendLogs: incomingAppendLogs,
-            });
+            }).slice(-MAX_VISIBLE_RUN_LOGS);
 
             const taskName = typeof nextState.taskName === 'string' && nextState.taskName.trim()
                 ? nextState.taskName.trim()

@@ -279,7 +279,9 @@ class JudgeEvaluatorService:
 
     def _normalize_verdict(self, verdict: Any) -> str:
         value = str(verdict or "").strip().upper()
-        if value in {"PASS", "FAIL", "PARTIAL", "UNABLE_TO_EVALUATE"}:
+        if value == "PARTIAL":
+            return "PASS"
+        if value in {"PASS", "FAIL", "UNABLE_TO_EVALUATE"}:
             return value
         if value in {"UNKNOWN", "N/A", "NONE", ""}:
             return "UNABLE_TO_EVALUATE"
@@ -287,7 +289,7 @@ class JudgeEvaluatorService:
         mapping = {
             "pass": "PASS",
             "fail": "FAIL",
-            "partial": "PARTIAL",
+            "partial": "PASS",
             "unable_to_evaluate": "UNABLE_TO_EVALUATE",
         }
         return mapping.get(lowered, "UNABLE_TO_EVALUATE")
@@ -306,7 +308,7 @@ class JudgeEvaluatorService:
         mapping = {
             "pass": "pass",
             "fail": "fail",
-            "partial": "partial",
+            "partial": "pass",
             "unknown": "unknown",
             "unable_to_evaluate": "unknown",
         }
@@ -713,7 +715,7 @@ class JudgeEvaluatorService:
         score_map = {
             "pass": 1.0,
             "fail": 0.0,
-            "partial": 0.45,
+            "partial": 1.0,
             "unable_to_evaluate": 0.4,
             "unknown": 0.4,
         }
@@ -1407,7 +1409,8 @@ class JudgeEvaluatorService:
         elif pass_count == 0 and fail_count == 0 and partial_count == 0 and unknown_count > 0:
             phase_verdict = "UNABLE_TO_EVALUATE"
         else:
-            phase_verdict = "PARTIAL"
+            # March binary experiment: the former mixed/PARTIAL branch is PASS.
+            phase_verdict = "PASS"
 
         if step_assessments:
             sorted_assessments = sorted(step_assessments, key=lambda item: item["step_index"])
@@ -1966,7 +1969,9 @@ class JudgeEvaluatorService:
                 if isinstance(evidence_item.get("source_field"), str):
                     evidence_item["source_field"] = self._normalize_source_field(evidence_item["source_field"])
                 if isinstance(evidence_item.get("verdict"), str):
-                    evidence_item["verdict"] = evidence_item["verdict"].lower()
+                    evidence_item["verdict"] = self._normalize_step_verdict(
+                        evidence_item["verdict"]
+                    )
                 highlighted_evidence.append(EvidenceCitation(**evidence_item))
             except Exception as exc:
                 logger.debug("Skip malformed evidence item: %s", exc)
@@ -2296,7 +2301,7 @@ class JudgeEvaluatorService:
         if failed > 0:
             final_verdict = "FAIL"
         elif partial > 0:
-            final_verdict = "PARTIAL"
+            final_verdict = "PASS"
         elif passed == total:
             final_verdict = "PASS"
         else:

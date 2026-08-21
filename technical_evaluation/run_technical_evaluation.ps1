@@ -21,7 +21,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Runner = Join-Path $ScriptDir "run_batch_evaluation.py"
+$Runner = Join-Path $ScriptDir "pipelines\run_batch_evaluation.py"
 
 if (-not (Test-Path $Runner)) {
     Write-Error "Cannot find script to run: $Runner"

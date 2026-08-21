@@ -10,16 +10,10 @@ import useResizeObserver from '../../hooks/useResizeObserver';
 import './TrajectoryVisualizer.css';
 
 const EMPTY_GRAPH = Object.freeze({ nodes: [], links: [], clusters: [], meta: {} });
-<<<<<<< Updated upstream
 const HASH_MIN_SIMILARITY_RATIO = 1.0; // Require exact hash matches for node merging when hashing is enabled
 const TRAJECTORY_GRAPH_CACHE_LIMIT = 12;
 const TRAJECTORY_GRAPH_JOB_CACHE_LIMIT = 24;
-=======
-const HASH_REFINEMENT_IDLE_TIMEOUT = 600;
-const HASH_SIMILARITY_THRESHOLD = 0;
-const TRAJECTORY_GRAPH_CACHE_LIMIT = 12;
 const IMAGE_REFRESH_PARAM = '__dagRefresh';
->>>>>>> Stashed changes
 const trajectoryGraphCache = new Map();
 const trajectoryGraphJobCache = new Map();
 
@@ -487,8 +481,7 @@ const TrajectoryVisualizer = ({
 			shouldUsePreviewImage ? 'preview:on' : 'preview:off',
 			`refresh:${effectiveImageRefreshNonce}`,
 		].join('::');
-<<<<<<< Updated upstream
-	}, [hasTrajectory, runId, trajectorySummarySignature, conditionsSignature, useImageHash, shouldUsePreviewImage, refreshNonce]);
+	}, [hasTrajectory, runId, trajectorySummarySignature, conditionsSignature, useImageHash, shouldUsePreviewImage, effectiveImageRefreshNonce]);
 	const effectiveGraph = useMemo(() => {
 		if (graph !== EMPTY_GRAPH) {
 			return graph;
@@ -496,9 +489,6 @@ const TrajectoryVisualizer = ({
 
 		return peekCachedTrajectoryGraph(graphCacheKey) || graph;
 	}, [graph, graphCacheKey]);
-=======
-	}, [hasTrajectory, runId, trajectorySummarySignature, conditionsSignature, useImageHash, shouldUsePreviewImage, effectiveImageRefreshNonce]);
->>>>>>> Stashed changes
 
 	useEffect(() => {
 		conditionsRef.current = Array.isArray(conditions) ? conditions : [];
@@ -540,7 +530,6 @@ const TrajectoryVisualizer = ({
 				return;
 			}
 
-<<<<<<< Updated upstream
 			setGraph((previousGraph) => {
 				const previousGraphComplete = graphHasCompleteHash(previousGraph);
 				const nextGraphComplete = graphHasCompleteHash(nextGraph);
@@ -549,11 +538,11 @@ const TrajectoryVisualizer = ({
 					return previousGraph;
 				}
 
-				return nextGraph;
+				return applyImageRefreshNonceToGraph(
+					nextGraph,
+					effectiveImageRefreshNonce,
+				);
 			});
-=======
-			setGraph(applyImageRefreshNonceToGraph(nextGraph, effectiveImageRefreshNonce));
->>>>>>> Stashed changes
 		};
 
 		if (!hasTrajectory) {
@@ -597,16 +586,10 @@ const TrajectoryVisualizer = ({
 			&& (preferDirectHashBuild || !cachedGraph || !cachedGraphHasHash || !cachedGraphHashComplete);
 
 		if (cachedGraph) {
-<<<<<<< Updated upstream
-			setGraph(cachedGraph);
+			safeApplyGraph(cachedGraph, 'cache');
 		} else {
 			setGraph(EMPTY_GRAPH);
 		}
-=======
-			safeSetGraph(cachedGraph);
-			setError(null);
-			setIsProcessing(false);
->>>>>>> Stashed changes
 
 		setIsProcessing(!cachedGraph && (shouldBuildPreviewGraph || shouldBuildTargetGraph));
 		setError(null);
@@ -710,11 +693,7 @@ const TrajectoryVisualizer = ({
 		return () => {
 			isMounted = false;
 		};
-<<<<<<< Updated upstream
-	}, [hasTrajectory, trajectory, graphCacheKey, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage]);
-=======
 	}, [hasTrajectory, trajectory, graphCacheKey, conditionsSignature, useImageHash, preferDirectHashBuild, shouldUsePreviewImage, effectiveImageRefreshNonce]);
->>>>>>> Stashed changes
 
 	const handleManualRefresh = () => {
 		setManualRefreshNonce((previous) => {

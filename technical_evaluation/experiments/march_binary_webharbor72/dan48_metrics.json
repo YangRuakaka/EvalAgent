@@ -1,0 +1,231 @@
+{
+  "experiment_id": "march_binary_webharbor72_dan48_projection",
+  "generated_at_utc": "2026-08-20T16:57:32.261446+00:00",
+  "human_file": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan48\\dan_criteria1_annotations.json",
+  "human_case_count": 48,
+  "human_evidence_items": 433,
+  "accuracy_policy": {
+    "primary": "correct final verdict / all 48 Dan cases; unknown counts as incorrect",
+    "secondary": "accuracy on evaluable pass/fail verdicts only"
+  },
+  "step_alignment": "strict one-to-one model step_index -> raw steps[index].step_id -> human step_id; normalized source field must match",
+  "systems": {
+    "agentic_gpt5": {
+      "projected_results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_webharbor72\\dan48_projection\\agentic_gpt5",
+      "dan_case_count": 48,
+      "evaluable_final_verdict_count": 48,
+      "unknown_final_verdict_count": 0,
+      "unknown_final_verdict_case_ids": [],
+      "correct_final_verdict_count": 41,
+      "accuracy_on_evaluable": 0.8541666666666666,
+      "accuracy_all_48_unknown_as_incorrect": 0.8541666666666666,
+      "macro_f1_on_evaluable": 0.8541033434650456,
+      "cohens_kappa_on_evaluable": 0.7083333333333333,
+      "human_distribution": {
+        "pass": 23,
+        "partial": 0,
+        "fail": 25
+      },
+      "model_distribution": {
+        "pass": 24,
+        "partial": 0,
+        "fail": 24
+      },
+      "confusion_matrix": {
+        "pass": {
+          "pass": 20,
+          "partial": 0,
+          "fail": 3
+        },
+        "partial": {
+          "pass": 0,
+          "partial": 0,
+          "fail": 0
+        },
+        "fail": {
+          "pass": 4,
+          "partial": 0,
+          "fail": 21
+        }
+      },
+      "grounding_accuracy": 0.9812834224598931,
+      "grounding_numerator": 367,
+      "grounding_denominator": 374,
+      "hit_rate": 0.3441108545034642,
+      "hit_numerator": 149,
+      "hit_denominator": 433,
+      "overlap_rate": 0.6657754010695187,
+      "overlap_numerator": 249,
+      "overlap_denominator": 374,
+      "strict_step_accuracy": 0.4767025089605735,
+      "strict_step_hits": 133,
+      "strict_step_denominator": 279,
+      "step_accuracy_given_overlap": 0.8580645161290322,
+      "step_overlap_denominator": 155
+    },
+    "baseline_gpt5": {
+      "projected_results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_webharbor72\\dan48_projection\\baseline_gpt5",
+      "dan_case_count": 48,
+      "evaluable_final_verdict_count": 46,
+      "unknown_final_verdict_count": 2,
+      "unknown_final_verdict_case_ids": [
+        "HOT-01-B",
+        "INF-01-C"
+      ],
+      "correct_final_verdict_count": 41,
+      "accuracy_on_evaluable": 0.8913043478260869,
+      "accuracy_all_48_unknown_as_incorrect": 0.8541666666666666,
+      "macro_f1_on_evaluable": 0.8912529550827424,
+      "cohens_kappa_on_evaluable": 0.783427495291902,
+      "human_distribution": {
+        "pass": 22,
+        "partial": 0,
+        "fail": 24
+      },
+      "model_distribution": {
+        "pass": 25,
+        "partial": 0,
+        "fail": 21
+      },
+      "confusion_matrix": {
+        "pass": {
+          "pass": 21,
+          "partial": 0,
+          "fail": 1
+        },
+        "partial": {
+          "pass": 0,
+          "partial": 0,
+          "fail": 0
+        },
+        "fail": {
+          "pass": 4,
+          "partial": 0,
+          "fail": 20
+        }
+      },
+      "grounding_accuracy": 0.7315436241610739,
+      "grounding_numerator": 109,
+      "grounding_denominator": 149,
+      "hit_rate": 0.12933025404157045,
+      "hit_numerator": 56,
+      "hit_denominator": 433,
+      "overlap_rate": 0.40268456375838924,
+      "overlap_numerator": 60,
+      "overlap_denominator": 149,
+      "strict_step_accuracy": 0.25089605734767023,
+      "strict_step_hits": 70,
+      "strict_step_denominator": 279,
+      "step_accuracy_given_overlap": 0.8641975308641975,
+      "step_overlap_denominator": 81
+    },
+    "agentic_deepseek": {
+      "projected_results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_webharbor72\\dan48_projection\\agentic_deepseek",
+      "dan_case_count": 48,
+      "evaluable_final_verdict_count": 48,
+      "unknown_final_verdict_count": 0,
+      "unknown_final_verdict_case_ids": [],
+      "correct_final_verdict_count": 40,
+      "accuracy_on_evaluable": 0.8333333333333334,
+      "accuracy_all_48_unknown_as_incorrect": 0.8333333333333334,
+      "macro_f1_on_evaluable": 0.8330434782608696,
+      "cohens_kappa_on_evaluable": 0.6660869565217392,
+      "human_distribution": {
+        "pass": 23,
+        "partial": 0,
+        "fail": 25
+      },
+      "model_distribution": {
+        "pass": 23,
+        "partial": 0,
+        "fail": 25
+      },
+      "confusion_matrix": {
+        "pass": {
+          "pass": 19,
+          "partial": 0,
+          "fail": 4
+        },
+        "partial": {
+          "pass": 0,
+          "partial": 0,
+          "fail": 0
+        },
+        "fail": {
+          "pass": 4,
+          "partial": 0,
+          "fail": 21
+        }
+      },
+      "grounding_accuracy": 1.0,
+      "grounding_numerator": 374,
+      "grounding_denominator": 374,
+      "hit_rate": 0.3625866050808314,
+      "hit_numerator": 157,
+      "hit_denominator": 433,
+      "overlap_rate": 0.6310160427807486,
+      "overlap_numerator": 236,
+      "overlap_denominator": 374,
+      "strict_step_accuracy": 0.46953405017921146,
+      "strict_step_hits": 131,
+      "strict_step_denominator": 279,
+      "step_accuracy_given_overlap": 0.8238993710691824,
+      "step_overlap_denominator": 159
+    },
+    "baseline_deepseek": {
+      "projected_results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_webharbor72\\dan48_projection\\baseline_deepseek",
+      "dan_case_count": 48,
+      "evaluable_final_verdict_count": 47,
+      "unknown_final_verdict_count": 1,
+      "unknown_final_verdict_case_ids": [
+        "REC-01-C"
+      ],
+      "correct_final_verdict_count": 41,
+      "accuracy_on_evaluable": 0.8723404255319149,
+      "accuracy_all_48_unknown_as_incorrect": 0.8541666666666666,
+      "macro_f1_on_evaluable": 0.8722826086956521,
+      "cohens_kappa_on_evaluable": 0.7450271247739603,
+      "human_distribution": {
+        "pass": 23,
+        "partial": 0,
+        "fail": 24
+      },
+      "model_distribution": {
+        "pass": 25,
+        "partial": 0,
+        "fail": 22
+      },
+      "confusion_matrix": {
+        "pass": {
+          "pass": 21,
+          "partial": 0,
+          "fail": 2
+        },
+        "partial": {
+          "pass": 0,
+          "partial": 0,
+          "fail": 0
+        },
+        "fail": {
+          "pass": 4,
+          "partial": 0,
+          "fail": 20
+        }
+      },
+      "grounding_accuracy": 0.6258992805755396,
+      "grounding_numerator": 87,
+      "grounding_denominator": 139,
+      "hit_rate": 0.09468822170900693,
+      "hit_numerator": 41,
+      "hit_denominator": 433,
+      "overlap_rate": 0.2949640287769784,
+      "overlap_numerator": 41,
+      "overlap_denominator": 139,
+      "strict_step_accuracy": 0.2114695340501792,
+      "strict_step_hits": 59,
+      "strict_step_denominator": 279,
+      "step_accuracy_given_overlap": 0.8676470588235294,
+      "step_overlap_denominator": 68
+    }
+  }
+}

@@ -1,5 +1,6 @@
 
 import { API_BASE_URL } from '../../config/runtimeConfig';
+import { debugLog } from '../../utils/logger';
 
 const sanitizeBaseUrl = (value) => {
   if (!value) {
@@ -93,7 +94,7 @@ export const createApiClient = (overrides = {}) => {
     const onRetry = typeof options.onRetry === 'function' ? options.onRetry : null;
 
     if (!config.enableNetwork) {
-      console.info('[api-client] Mocked request', { path, method });
+      debugLog('[api-client] Mocked request', { path, method });
       return mockResponse(path, method);
     }
 
@@ -108,7 +109,7 @@ export const createApiClient = (overrides = {}) => {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
-        console.log('[api-client] Sending request:', {
+        debugLog('[api-client] Sending request:', {
           url,
           method,
           headers: requestOptions.headers,
@@ -116,7 +117,7 @@ export const createApiClient = (overrides = {}) => {
         });
         const response = await fetch(url, requestOptions);
         const parsedResponse = await parseResponse(response);
-        console.log('[api-client] Received response:', { status: parsedResponse.status, ok: parsedResponse.ok });
+        debugLog('[api-client] Received response:', { status: parsedResponse.status, ok: parsedResponse.ok });
         return parsedResponse;
       } catch (error) {
         const canRetry =

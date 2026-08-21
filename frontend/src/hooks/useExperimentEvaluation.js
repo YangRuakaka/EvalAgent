@@ -8,7 +8,11 @@ const createDefaultExperimentState = () => ({
 });
 
 export const useExperimentEvaluation = (activeRunId) => {
-    const { state: { mappings, criterias, evaluationResponses }, updateEvaluationResponse } = useData();
+    const {
+        state: { mappings, criterias, evaluationResponses },
+        updateEvaluationResponse,
+        recordCriteriaRead,
+    } = useData();
     const [evaluateModel, setEvaluateModel] = useState('gpt-4o-mini');
     const [evaluationLoadingByRunId, setEvaluationLoadingByRunId] = useState({});
     const [experimentStates, setExperimentStates] = useState({});
@@ -135,5 +139,6 @@ export const useExperimentEvaluation = (activeRunId) => {
         handleEvaluate,
         criterias, // pass through
         mappings, // pass through
+        recordCriteriaRead,
     };
 };

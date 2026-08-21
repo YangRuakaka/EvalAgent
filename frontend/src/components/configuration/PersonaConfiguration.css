@@ -134,6 +134,20 @@
 	min-width: 0;
 }
 
+.config-value-variation__label-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.config-value-variation__label-hint {
+	color: #6b7280;
+	font-size: 0.72rem;
+	font-weight: 400;
+	text-align: right;
+}
+
 .config-value-variation__select-wrapper {
 	position: relative;
 	width: 100%;
@@ -258,19 +272,30 @@
 	border-radius: 8px;
 	background-color: #ffffff;
 	box-shadow: 0 8px 24px rgba(17, 17, 17, 0.12);
+	max-height: min(420px, 55vh);
+	overflow-y: auto;
 }
 
 .config-value-variation__option {
 	display: grid;
 	grid-template-columns: auto auto 1fr;
-	align-items: center;
+	align-items: start;
 	gap: 8px;
 	font-size: 0.8rem;
 	color: #111111;
+	padding: 7px 8px;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: background-color 0.15s ease;
+}
+
+.config-value-variation__option:hover,
+.config-value-variation__option--selected {
+	background-color: #f3f4f6;
 }
 
 .config-value-variation__option-input {
-	margin: 0;
+	margin: 2px 0 0;
 }
 
 .config-value-variation__option-color {
@@ -278,10 +303,25 @@
 	height: 12px;
 	border-radius: 50%;
 	border: 1px solid rgba(17, 17, 17, 0.15);
+	margin-top: 2px;
+}
+
+.config-value-variation__option-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
 }
 
 .config-value-variation__option-label {
 	line-height: 1.2;
+	font-weight: 600;
+}
+
+.config-value-variation__option-description {
+	color: #6b7280;
+	font-size: 0.72rem;
+	line-height: 1.35;
 }
 
 .config-value-variation__chips {

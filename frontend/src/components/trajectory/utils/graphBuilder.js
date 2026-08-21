@@ -172,36 +172,6 @@ const runWithConcurrencyLimit = async (items, concurrency, worker) => {
 	return results;
 };
 
-const preloadImageSource = (src) => new Promise((resolve) => {
-	if (typeof src !== 'string' || !src.trim()) {
-		resolve(false);
-		return;
-	}
-
-	const image = new Image();
-	let settled = false;
-	const finish = (ok) => {
-		if (settled) {
-			return;
-		}
-		settled = true;
-		resolve(ok);
-	};
-
-	image.crossOrigin = 'Anonymous';
-	image.decoding = 'async';
-	image.referrerPolicy = 'no-referrer';
-	image.onload = () => finish(true);
-	image.onerror = () => finish(false);
-
-	window.setTimeout(() => finish(false), 12000);
-	image.src = src;
-
-	if (image.complete && image.naturalWidth !== 0) {
-		finish(true);
-	}
-});
-
 const isLikelyBase64Image = (value) => {
 	if (!value || typeof value !== 'string') {
 		return false;
@@ -527,21 +497,6 @@ export const buildTrajectoryGraph = async (trajectory, options = {}) => {
 			});
 		}
 	});
-
-	if (useImageHash && hashTasks.length > 0) {
-		await runWithConcurrencyLimit(
-			hashTasks,
-			hashConcurrency,
-			async (task) => {
-				const src = coerceText(task?.screenshot?.src);
-				if (!src) {
-					return null;
-				}
-				await preloadImageSource(src);
-				return null;
-			},
-		);
-	}
 
 	const hashedTasks = await runWithConcurrencyLimit(
 		hashTasks,

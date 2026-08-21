@@ -19,6 +19,7 @@ const EvaluationPanel = ({
 	onCriteriaSelectionChange = () => {},
 	onConditionSelectionChange = () => {},
 	onManageCriteria,
+	onCriteriaViewed = () => {},
 	onEvaluate = () => {},
 	evaluationResponse = null,
 	isEvaluating = false,
@@ -91,9 +92,13 @@ const EvaluationPanel = ({
 	}, [selectedCriteriaForModal, evaluationResponse]);
 
 	const handleCriteriaCardClick = useCallback((criteria) => {
+		onCriteriaViewed(criteria.id, {
+			source: 'evaluation_panel',
+			action: 'detail_open',
+		});
 		setSelectedCriteriaIdForModal(criteria.id);
 		setShowCriteriaModal(true);
-	}, []);
+	}, [onCriteriaViewed]);
 
 	const handleConditionCardClick = useCallback((condition) => {
 		setSelectedConditionIdForModal(condition.id);
@@ -218,6 +223,9 @@ const EvaluationPanel = ({
 	}, [selectedCriteriaIds, selectedConditionIds, filteredConditions, criteriaList, onEvaluate, evaluateModel]);
 
 	const hasSelections = selectedCriteriaIds.length > 0 && selectedConditionIds.length > 0;
+	const sampleCriteriaCount = criteriaList.filter(
+		(criteria) => criteria.isSample || criteria.id?.startsWith('crit_default_'),
+	).length;
 
 	return (
 		<div className="evaluation-panel">
@@ -251,7 +259,17 @@ const EvaluationPanel = ({
 				{/* Criteria Section */}
 				<section className="evaluation-panel__section evaluation-panel__section--criteria">
 					<div className="evaluation-panel__section-title">
-						<span>Criteria</span>
+						<span className="evaluation-panel__section-heading">
+							<span>Criteria</span>
+							{sampleCriteriaCount > 0 && (
+								<span
+									className="evaluation-panel__sample-note"
+									title="Starter examples only. Use + to add or edit criteria for your evaluation."
+								>
+									{sampleCriteriaCount} samples · customizable
+								</span>
+							)}
+						</span>
 						<span className="evaluation-panel__count">
 							{selectedCriteriaIds.length}/{criteriaList.length}
 						</span>
@@ -481,6 +499,7 @@ EvaluationPanel.propTypes = {
 	onCriteriaSelectionChange: PropTypes.func,
 	onConditionSelectionChange: PropTypes.func,
 	onManageCriteria: PropTypes.func,
+	onCriteriaViewed: PropTypes.func,
 	onEvaluate: PropTypes.func,
 	isEvaluating: PropTypes.bool,
 };
@@ -496,6 +515,7 @@ EvaluationPanel.defaultProps = {
 	onCriteriaSelectionChange: () => {},
 	onConditionSelectionChange: () => {},
 	onManageCriteria: undefined,
+	onCriteriaViewed: () => {},
 	onEvaluate: () => {},
 	isEvaluating: false,
 };

@@ -1,0 +1,492 @@
+{
+  "experiment_id": "march_binary_dan10_preliminary",
+  "generated_at_utc": "2026-08-19T15:12:50.085255+00:00",
+  "source_commit": "2881b03bc19ac4ee6c53c08ec94930348ab59465",
+  "label_policy": {
+    "allowed_labels": [
+      "pass",
+      "fail"
+    ],
+    "legacy_partial_mapping": "pass",
+    "prompt_allows_partial": false
+  },
+  "case_ids": [
+    "HOT-03-B",
+    "INF-02-A",
+    "SPT-02-A",
+    "RET-01-B",
+    "MLM-02-B",
+    "EDU-03-C",
+    "REC-01-C",
+    "FLT-01-B",
+    "HOT-02-A",
+    "SPT-01-B"
+  ],
+  "human_case_count": 10,
+  "human_evidence_items": 89,
+  "metric_source": "D:\\Github\\EvalAgent\\technical_evaluation\\analysis\\compare_criteria1_agreement.py",
+  "systems": {
+    "agentic_gpt5": {
+      "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\agentic_gpt5\\evaluated",
+      "status": "complete",
+      "completed_cases": 10,
+      "expected_cases": 10,
+      "grounding_accuracy": 1.0,
+      "grounding_numerator": 75,
+      "grounding_denominator": 75,
+      "hit_rate": 0.3146067415730337,
+      "hit_numerator": 28,
+      "hit_denominator": 89,
+      "overlap_rate": 0.5866666666666667,
+      "overlap_numerator": 44,
+      "overlap_denominator": 75,
+      "incomplete_progress_metrics": null,
+      "ungrounded_model_evidence": 0,
+      "cases_covered": 10,
+      "label_audit": {
+        "evaluated_file_count": 10,
+        "overall_label_counts": {
+          "fail": 3,
+          "pass": 7
+        },
+        "partial_label_occurrences": 0,
+        "partial_label_paths": []
+      },
+      "grounding_details": {
+        "model": "agentic_gpt5",
+        "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\agentic_gpt5\\evaluated",
+        "available": true,
+        "method": "substring_match_against_original_step_field_text",
+        "evidence_items_total": 75,
+        "substring_grounded_items": 75,
+        "substring_grounding_accuracy": 1.0,
+        "cases_with_evidence": 10,
+        "cases_all_evidence_grounded": 10,
+        "case_all_grounded_rate": 1.0,
+        "ungrounded_examples": []
+      },
+      "hit_overlap_details": {
+        "model": "agentic_gpt5",
+        "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\agentic_gpt5\\evaluated",
+        "available": true,
+        "denominator": "human_evidence_items",
+        "grounded_evidence_required": true,
+        "ungrounded_evidence_skipped": 0,
+        "human_cases_total_with_evidence": 10,
+        "human_cases_covered": 10,
+        "human_cases_without_model_record": 0,
+        "evidence_items_compared": 89,
+        "evidence_hits": 28,
+        "evidence_human_label_hit_rate": 0.3146067415730337,
+        "model_evidence_items_total": 75,
+        "model_evidence_items_also_human_evidence": 44,
+        "model_evidence_items_also_human_and_grounded": 44,
+        "model_evidence_also_human_evidence_rate": 0.5866666666666667,
+        "model_evidence_also_human_and_grounded_rate": 0.5866666666666667,
+        "evidence_by_human_verdict": {
+          "pass": {
+            "total": 69,
+            "hit": 21,
+            "hit_rate": 0.30434782608695654
+          },
+          "partial": {
+            "total": 0,
+            "hit": 0,
+            "hit_rate": null
+          },
+          "fail": {
+            "total": 20,
+            "hit": 7,
+            "hit_rate": 0.35
+          }
+        },
+        "evidence_by_predicted_verdict": {
+          "pass": {
+            "total": 69,
+            "hit": 21,
+            "hit_rate": 0.30434782608695654
+          },
+          "partial": {
+            "total": 0,
+            "hit": 0,
+            "hit_rate": null
+          },
+          "fail": {
+            "total": 20,
+            "hit": 7,
+            "hit_rate": 0.35
+          }
+        }
+      }
+    },
+    "agentic_deepseek": {
+      "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\agentic_deepseek\\evaluated",
+      "status": "incomplete",
+      "completed_cases": 1,
+      "expected_cases": 10,
+      "grounding_accuracy": null,
+      "grounding_numerator": null,
+      "grounding_denominator": null,
+      "hit_rate": null,
+      "hit_numerator": null,
+      "hit_denominator": null,
+      "overlap_rate": null,
+      "overlap_numerator": null,
+      "overlap_denominator": null,
+      "incomplete_progress_metrics": {
+        "grounding_accuracy": 1.0,
+        "grounding_numerator": 11,
+        "grounding_denominator": 11,
+        "hit_rate": 0.033707865168539325,
+        "hit_numerator": 3,
+        "hit_denominator": 89,
+        "overlap_rate": 0.45454545454545453,
+        "overlap_numerator": 5,
+        "overlap_denominator": 11
+      },
+      "ungrounded_model_evidence": 0,
+      "cases_covered": 1,
+      "label_audit": {
+        "evaluated_file_count": 1,
+        "overall_label_counts": {
+          "pass": 1
+        },
+        "partial_label_occurrences": 0,
+        "partial_label_paths": []
+      },
+      "grounding_details": {
+        "model": "agentic_deepseek",
+        "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\agentic_deepseek\\evaluated",
+        "available": true,
+        "method": "substring_match_against_original_step_field_text",
+        "evidence_items_total": 11,
+        "substring_grounded_items": 11,
+        "substring_grounding_accuracy": 1.0,
+        "cases_with_evidence": 1,
+        "cases_all_evidence_grounded": 1,
+        "case_all_grounded_rate": 1.0,
+        "ungrounded_examples": []
+      },
+      "hit_overlap_details": {
+        "model": "agentic_deepseek",
+        "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\agentic_deepseek\\evaluated",
+        "available": true,
+        "denominator": "human_evidence_items",
+        "grounded_evidence_required": true,
+        "ungrounded_evidence_skipped": 0,
+        "human_cases_total_with_evidence": 10,
+        "human_cases_covered": 1,
+        "human_cases_without_model_record": 9,
+        "evidence_items_compared": 89,
+        "evidence_hits": 3,
+        "evidence_human_label_hit_rate": 0.033707865168539325,
+        "model_evidence_items_total": 11,
+        "model_evidence_items_also_human_evidence": 5,
+        "model_evidence_items_also_human_and_grounded": 5,
+        "model_evidence_also_human_evidence_rate": 0.45454545454545453,
+        "model_evidence_also_human_and_grounded_rate": 0.45454545454545453,
+        "evidence_by_human_verdict": {
+          "pass": {
+            "total": 69,
+            "hit": 3,
+            "hit_rate": 0.043478260869565216
+          },
+          "partial": {
+            "total": 0,
+            "hit": 0,
+            "hit_rate": null
+          },
+          "fail": {
+            "total": 20,
+            "hit": 0,
+            "hit_rate": 0.0
+          }
+        },
+        "evidence_by_predicted_verdict": {
+          "pass": {
+            "total": 69,
+            "hit": 3,
+            "hit_rate": 0.043478260869565216
+          },
+          "partial": {
+            "total": 0,
+            "hit": 0,
+            "hit_rate": null
+          },
+          "fail": {
+            "total": 20,
+            "hit": 0,
+            "hit_rate": 0.0
+          }
+        }
+      }
+    },
+    "baseline_gpt5": {
+      "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\baseline\\GPT",
+      "status": "complete",
+      "completed_cases": 10,
+      "expected_cases": 10,
+      "grounding_accuracy": 0.7096774193548387,
+      "grounding_numerator": 22,
+      "grounding_denominator": 31,
+      "hit_rate": 0.16853932584269662,
+      "hit_numerator": 15,
+      "hit_denominator": 89,
+      "overlap_rate": 0.4838709677419355,
+      "overlap_numerator": 15,
+      "overlap_denominator": 31,
+      "incomplete_progress_metrics": null,
+      "ungrounded_model_evidence": 9,
+      "cases_covered": 10,
+      "label_audit": {
+        "evaluated_file_count": 10,
+        "overall_label_counts": {
+          "fail": 3,
+          "pass": 7
+        },
+        "partial_label_occurrences": 0,
+        "partial_label_paths": []
+      },
+      "grounding_details": {
+        "model": "baseline_gpt5",
+        "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\baseline\\GPT",
+        "available": true,
+        "method": "substring_match_against_original_step_field_text",
+        "evidence_items_total": 31,
+        "substring_grounded_items": 22,
+        "substring_grounding_accuracy": 0.7096774193548387,
+        "cases_with_evidence": 10,
+        "cases_all_evidence_grounded": 4,
+        "case_all_grounded_rate": 0.4,
+        "ungrounded_examples": [
+          {
+            "data_id": "EDU-03-C",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_edu_03_c_20260730_042654_a3c1ec0f-b44d-4fb0-8032-d7f8d234185f.json",
+            "step_index": 4,
+            "source_field": "Action",
+            "text": "\"Two visible topics/skills covered:\" \"Understand AI capabilities and limitations\" and \"Build an AI strategy\""
+          },
+          {
+            "data_id": "FLT-01-B",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_flt_01_b_20260727_020908_acf56e76-15f8-491e-8b36-071482a61907.json",
+            "step_index": 7,
+            "source_field": "Memory",
+            "text": "Southwest nonstop at $1,187 is the best convenience option."
+          },
+          {
+            "data_id": "FLT-01-B",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_flt_01_b_20260727_020908_acf56e76-15f8-491e-8b36-071482a61907.json",
+            "step_index": 9,
+            "source_field": "Action",
+            "text": "Recommended: Southwest Airlines — Nonstop ... Fare: $1,187 round trip ... Why this recommendation: Nonstop — no connections ... Shortest duration"
+          },
+          {
+            "data_id": "HOT-03-B",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_hot_03_b_20260724_115329_87556803-5eab-4818-9e8c-abae69506ced.json",
+            "step_index": 5,
+            "source_field": "Memory",
+            "text": "Pensione Roma Centro ($61, 9.2 (Exceptional, 289 reviews)) ... Hotel Grifo Rome ($82, 9.2 (Exceptional, 231 reviews)) ... Hotel de Russie ($304, 8.6 (Superb, 1518 reviews))"
+          },
+          {
+            "data_id": "HOT-03-B",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_hot_03_b_20260724_115329_87556803-5eab-4818-9e8c-abae69506ced.json",
+            "step_index": 6,
+            "source_field": "Action",
+            "text": "Customer Rating/Review Information: 9.3/10 — Exceptional (based on 289 reviews)"
+          },
+          {
+            "data_id": "REC-01-C",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_rec_01_c_20260730_042206_8cdc1b6f-12f8-4ba0-bf3f-cdf5e5019c32.json",
+            "step_index": 3,
+            "source_field": "Thinking Process",
+            "text": "Visible Preparation Characteristic: \"Primary Seasoning: lemon and garlic\""
+          },
+          {
+            "data_id": "REC-01-C",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_rec_01_c_20260730_042206_8cdc1b6f-12f8-4ba0-bf3f-cdf5e5019c32.json",
+            "step_index": 2,
+            "source_field": "Memory",
+            "text": "Visible recipes include: Butter Chicken ... Mediterranean Chicken Quinoa ... Crispy Baked Lemon Chicken Thighs (435)"
+          },
+          {
+            "data_id": "RET-01-B",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_ret_01_b_20260724_113744_ec7b9000-3b93-44bb-a9db-b743f0e6be2e.json",
+            "step_index": 2,
+            "source_field": "Action",
+            "text": "Price | $479.99 ... Apple MacBook Air 13.6\" with M2 Chip ($999.00"
+          },
+          {
+            "data_id": "SPT-02-A",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_spt_02_a_20260802_154817_c2b1a2ea-9147-4463-80a1-64373fe929e7.json",
+            "step_index": 5,
+            "source_field": "Action",
+            "text": "Recommended team: Oklahoma City Thunder... Relevant transaction/ranking info: The Thunder recently signed Shai Gilgeous-Alexander to a contract extension (reported 2024-04-07)... tied with Denver for the top spot"
+          }
+        ]
+      },
+      "hit_overlap_details": {
+        "model": "baseline_gpt5",
+        "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\baseline\\GPT",
+        "available": true,
+        "denominator": "human_evidence_items",
+        "grounded_evidence_required": true,
+        "ungrounded_evidence_skipped": 9,
+        "human_cases_total_with_evidence": 10,
+        "human_cases_covered": 10,
+        "human_cases_without_model_record": 0,
+        "evidence_items_compared": 89,
+        "evidence_hits": 15,
+        "evidence_human_label_hit_rate": 0.16853932584269662,
+        "model_evidence_items_total": 31,
+        "model_evidence_items_also_human_evidence": 15,
+        "model_evidence_items_also_human_and_grounded": 15,
+        "model_evidence_also_human_evidence_rate": 0.4838709677419355,
+        "model_evidence_also_human_and_grounded_rate": 0.4838709677419355,
+        "evidence_by_human_verdict": {
+          "pass": {
+            "total": 69,
+            "hit": 8,
+            "hit_rate": 0.11594202898550725
+          },
+          "partial": {
+            "total": 0,
+            "hit": 0,
+            "hit_rate": null
+          },
+          "fail": {
+            "total": 20,
+            "hit": 7,
+            "hit_rate": 0.35
+          }
+        },
+        "evidence_by_predicted_verdict": {
+          "pass": {
+            "total": 69,
+            "hit": 8,
+            "hit_rate": 0.11594202898550725
+          },
+          "partial": {
+            "total": 0,
+            "hit": 0,
+            "hit_rate": null
+          },
+          "fail": {
+            "total": 20,
+            "hit": 7,
+            "hit_rate": 0.35
+          }
+        }
+      }
+    },
+    "baseline_deepseek": {
+      "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\baseline\\Deepseek",
+      "status": "incomplete",
+      "completed_cases": 1,
+      "expected_cases": 10,
+      "grounding_accuracy": null,
+      "grounding_numerator": null,
+      "grounding_denominator": null,
+      "hit_rate": null,
+      "hit_numerator": null,
+      "hit_denominator": null,
+      "overlap_rate": null,
+      "overlap_numerator": null,
+      "overlap_denominator": null,
+      "incomplete_progress_metrics": {
+        "grounding_accuracy": 0.75,
+        "grounding_numerator": 3,
+        "grounding_denominator": 4,
+        "hit_rate": 0.0,
+        "hit_numerator": 0,
+        "hit_denominator": 89,
+        "overlap_rate": 0.0,
+        "overlap_numerator": 0,
+        "overlap_denominator": 4
+      },
+      "ungrounded_model_evidence": 1,
+      "cases_covered": 1,
+      "label_audit": {
+        "evaluated_file_count": 1,
+        "overall_label_counts": {
+          "pass": 1
+        },
+        "partial_label_occurrences": 0,
+        "partial_label_paths": []
+      },
+      "grounding_details": {
+        "model": "baseline_deepseek",
+        "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\baseline\\Deepseek",
+        "available": true,
+        "method": "substring_match_against_original_step_field_text",
+        "evidence_items_total": 4,
+        "substring_grounded_items": 3,
+        "substring_grounding_accuracy": 0.75,
+        "cases_with_evidence": 1,
+        "cases_all_evidence_grounded": 0,
+        "case_all_grounded_rate": 0.0,
+        "ungrounded_examples": [
+          {
+            "data_id": "HOT-03-B",
+            "source_file": "D:\\Github\\EvalAgent\\browser_agent_runs_webharbor_v13_pilot\\webharbor_v13_hot_03_b_20260724_115329_87556803-5eab-4818-9e8c-abae69506ced.json",
+            "step_index": 4,
+            "source_field": "Memory",
+            "text": "Hotel Grifo Rome: $82/night, 9.2/10 (Exceptional, 231 reviews), amenities include Fitness center..."
+          }
+        ]
+      },
+      "hit_overlap_details": {
+        "model": "baseline_deepseek",
+        "results_dir": "D:\\Github\\EvalAgent\\technical_evaluation\\experiments\\march_binary_dan10\\results\\baseline\\Deepseek",
+        "available": true,
+        "denominator": "human_evidence_items",
+        "grounded_evidence_required": true,
+        "ungrounded_evidence_skipped": 1,
+        "human_cases_total_with_evidence": 10,
+        "human_cases_covered": 1,
+        "human_cases_without_model_record": 9,
+        "evidence_items_compared": 89,
+        "evidence_hits": 0,
+        "evidence_human_label_hit_rate": 0.0,
+        "model_evidence_items_total": 4,
+        "model_evidence_items_also_human_evidence": 0,
+        "model_evidence_items_also_human_and_grounded": 0,
+        "model_evidence_also_human_evidence_rate": 0.0,
+        "model_evidence_also_human_and_grounded_rate": 0.0,
+        "evidence_by_human_verdict": {
+          "pass": {
+            "total": 69,
+            "hit": 0,
+            "hit_rate": 0.0
+          },
+          "partial": {
+            "total": 0,
+            "hit": 0,
+            "hit_rate": null
+          },
+          "fail": {
+            "total": 20,
+            "hit": 0,
+            "hit_rate": 0.0
+          }
+        },
+        "evidence_by_predicted_verdict": {
+          "pass": {
+            "total": 69,
+            "hit": 0,
+            "hit_rate": 0.0
+          },
+          "partial": {
+            "total": 0,
+            "hit": 0,
+            "hit_rate": null
+          },
+          "fail": {
+            "total": 20,
+            "hit": 0,
+            "hit_rate": 0.0
+          }
+        }
+      }
+    }
+  }
+}

@@ -271,6 +271,7 @@ const VisualizationView = ({
 							onCriteriaSelectionChange={evaluationState.setSelectedCriteriaIds}
 							onConditionSelectionChange={evaluationState.setSelectedConditionIds}
 							onManageCriteria={onManageCriteria}
+							onCriteriaViewed={evaluationState.recordCriteriaRead}
 							evaluationResponse={evaluationState.evaluationResponse}
 							isEvaluating={evaluationState.isEvaluatingCurrentRun}
 							onEvaluate={evaluationState.handleEvaluate}

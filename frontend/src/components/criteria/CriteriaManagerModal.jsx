@@ -143,7 +143,13 @@ CriteriaCard.propTypes = {
 };
 
 const CriteriaManagerModal = ({ onClose }) => {
-    const { state: { criterias }, addCriteria, updateCriteria, removeCriteria } = useData();
+    const {
+        state: { criterias },
+        addCriteria,
+        updateCriteria,
+        removeCriteria,
+        recordCriteriaRead,
+    } = useData();
     const [view, setView] = useState('list'); // 'list' | 'form'
     const [editingId, setEditingId] = useState(null);
 
@@ -157,22 +163,35 @@ const CriteriaManagerModal = ({ onClose }) => {
 
     const handleSave = (formData) => {
         if (editingId) {
-            updateCriteria({ ...formData, id: editingId });
+            updateCriteria(
+                { ...formData, id: editingId },
+                { source: 'criteria_manager', action: 'form_save' },
+            );
         } else {
-            addCriteria({ ...formData, id: generateId(), color: generateRandomColor() });
+            addCriteria(
+                { ...formData, id: generateId(), color: generateRandomColor() },
+                { source: 'criteria_manager', action: 'form_save' },
+            );
         }
         setView('list');
         setEditingId(null);
     };
 
     const handleEdit = (criteria) => {
+        recordCriteriaRead(criteria.id, {
+            source: 'criteria_manager',
+            action: 'edit_open',
+        });
         setEditingId(criteria.id);
         setView('form');
     };
 
     const handleDelete = (id) => {
         if (window.confirm('Are you sure you want to delete this criteria?')) {
-            removeCriteria(id);
+            removeCriteria(id, {
+                source: 'criteria_manager',
+                action: 'delete_confirm',
+            });
         }
     };
 

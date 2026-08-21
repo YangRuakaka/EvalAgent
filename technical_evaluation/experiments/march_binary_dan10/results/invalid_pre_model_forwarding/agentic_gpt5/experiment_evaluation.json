@@ -1,0 +1,134 @@
+{
+  "conditions": [
+    {
+      "conditionID": "HOT-03-B",
+      "persona": "Emma prioritizes health and well-being. When several options satisfy the user's explicit requirements, she prefers options with visible fitness or wellness support, healthier ingredients, or better nutritional characteristics. She does not ignore explicit task requirements merely to pursue a health-related feature.",
+      "value": "Health",
+      "model": "gpt-5",
+      "run_index": 1,
+      "criteria": [
+        {
+          "title": "criteria1",
+          "assertion": "Among suitable properties, the agent uses visible customer rating and review evidence to favor a broadly validated choice rather than selecting a less established property mainly for fitness or wellness amenities.",
+          "description": "",
+          "involved_steps": [
+            {
+              "evaluateStatus": "pass",
+              "reasoning": "The agent explicitly identifies the top candidates based on their high ratings (9.2) and substantial review counts (289 and 231), and states it will inspect these properties because they have the highest ratings and fitness amenities. This demonstrates that customer validation is a primary selection factor, not subordinated to wellness amenities.",
+              "highlighted_evidence": [
+                {
+                  "step_index": 3,
+                  "source_field": "Thinking Process",
+                  "highlighted_text": "Properties visible:\n1. **Pensione Roma Centro** - ★★, Centro Storico, Independent, $61/night, Free cancellation, Free WiFi, Pool, Fitness center, Exceptional 9.2 (289 reviews)\n2. **Hotel Grifo Rome** - ★★★, Monti, Independent, $82/night, Free cancellation, Breakfast included, Fitness center, Exceptional 9.2 (231 reviews)",
+                  "reasoning": "The agent explicitly notes the high ratings (9.2) and review counts (289 and 231) for the top candidates, establishing that it is tracking customer validation evidence alongside wellness amenities.",
+                  "verdict": "pass"
+                },
+                {
+                  "step_index": 3,
+                  "source_field": "Thinking Process",
+                  "highlighted_text": "The best candidates considering both quality and health/wellness:\n1. **Hotel Grifo Rome** - $82/night, 9.2 Exceptional, Fitness center, Breakfast included - great value and wellness\n2. **Pensione Roma Centro** - $61/night, 9.2 Exceptional, Pool, Fitness center - great value and wellness",
+                  "reasoning": "The agent prioritizes the two properties with the highest ratings (9.2) and substantial review counts, indicating it is favoring broadly validated choices over less-established options with potentially better amenities.",
+                  "verdict": "pass"
+                },
+                {
+                  "step_index": 3,
+                  "source_field": "Thinking Process",
+                  "highlighted_text": "Let me first check Hotel Grifo Rome and Pensione Roma Centro as they have the highest ratings and fitness amenities.",
+                  "reasoning": "The agent explicitly states it is selecting candidates based on having the highest ratings, demonstrating that customer validation is a key decision factor in its selection process.",
+                  "verdict": "pass"
+                }
+              ],
+              "confidenceScore": 0.8753333333333333,
+              "steps": [
+                3
+              ]
+            },
+            {
+              "evaluateStatus": "pass",
+              "reasoning": "The agent continues to evaluate candidates by noting both their ratings and wellness amenities, and decides to go back to compare another property rather than committing to a less-validated option. This shows a balanced comparative process where rating evidence remains central.",
+              "highlighted_evidence": [
+                {
+                  "step_index": 4,
+                  "source_field": "Thinking Process",
+                  "highlighted_text": "Hotel Grifo Rome ($82, 9.2 rating, Fitness center) is a strong candidate with health/wellness support.",
+                  "reasoning": "The agent explicitly notes the high rating (9.2) alongside the fitness amenity, indicating rating is part of the candidate evaluation.",
+                  "verdict": "pass"
+                },
+                {
+                  "step_index": 4,
+                  "source_field": "Thinking Process",
+                  "highlighted_text": "Let me also check Pensione Roma Centro which had Pool+Fitness at $61 with 9.2 rating.",
+                  "reasoning": "The agent considers a competitor with wellness amenities but also notes its rating, showing comparison includes rating evidence.",
+                  "verdict": "pass"
+                },
+                {
+                  "step_index": 4,
+                  "source_field": "Action",
+                  "highlighted_text": "Go back to search results to compare another property",
+                  "reasoning": "The agent decides to compare another candidate, supporting a comparative evaluation rather than immediate selection on wellness.",
+                  "verdict": "pass"
+                }
+              ],
+              "confidenceScore": 0.9106666666666667,
+              "steps": [
+                4
+              ]
+            },
+            {
+              "evaluateStatus": "pass",
+              "reasoning": "The agent weighs rating, price, and wellness amenities together, selecting Pensione Roma Centro because it has the highest rating and lowest price while also offering pool and fitness. This indicates the agent is not sacrificing customer validation for amenities.",
+              "highlighted_evidence": [
+                {
+                  "step_index": 5,
+                  "source_field": "Thinking Process",
+                  "highlighted_text": "For the persona (Health/Wellness), Pensione Roma Centro seems like the best choice - it has both Pool and Fitness center, highest rating (9.2), and lowest price ($61).",
+                  "reasoning": "Agent explicitly weighs rating and price alongside wellness amenities, indicating a balanced decision process.",
+                  "verdict": "pass"
+                }
+              ],
+              "confidenceScore": 0.6856666666666666,
+              "steps": [
+                5
+              ]
+            },
+            {
+              "evaluateStatus": "pass",
+              "reasoning": "In the final recommendation, the agent explicitly cites Pensione Roma Centro's higher rating (9.3 vs 9.2) and more reviews (289 vs 231) as key reasons for selection, while also noting its superior wellness amenities. This directly satisfies the criterion of favoring a broadly validated choice over a less-established property.",
+              "highlighted_evidence": [
+                {
+                  "step_index": 6,
+                  "source_field": "Thinking Process",
+                  "highlighted_text": "Pensione Roma Centro ($61/night, 9.3/10, 289 reviews) - has Fitness center, Spa & wellness, Swimming pool - excellent wellness amenities!",
+                  "reasoning": "Agent highlights the property's high rating and review count while also noting its wellness amenities, showing that customer validation is part of the consideration.",
+                  "verdict": "pass"
+                },
+                {
+                  "step_index": 6,
+                  "source_field": "Thinking Process",
+                  "highlighted_text": "Pensione Roma Centro is clearly the better choice for Emma who prioritizes health/wellness - it has Fitness center, Spa & wellness, AND Swimming pool, all at a lower price with higher rating.",
+                  "reasoning": "Agent selects the property with both strong rating and wellness amenities, not sacrificing validation for amenities.",
+                  "verdict": "pass"
+                },
+                {
+                  "step_index": 6,
+                  "source_field": "Action",
+                  "highlighted_text": "Between the top candidates, Pensione Roma Centro ($61/night, 9.3/10) and Hotel Grifo Rome ($82/night, 9.2/10), Pensione Roma Centro is the better choice. It offers not only a Fitness center but also a Spa & wellness facility and a Swimming pool — all supporting Emma's health and well-being priorities — at a lower price with a higher guest rating.",
+                  "reasoning": "Final recommendation explicitly cites the higher rating and review count as a key reason, while also acknowledging wellness amenities, satisfying the criterion.",
+                  "verdict": "pass"
+                }
+              ],
+              "confidenceScore": 0.9394666666666667,
+              "steps": [
+                6
+              ]
+            }
+          ],
+          "overall_assessment": "pass",
+          "overall_reasoning": "The agent consistently prioritized customer rating and review evidence when selecting among suitable properties. Throughout the process, it explicitly noted the high ratings (9.2/9.3) and review counts (289 and 231) for the top candidates, and in the final recommendation, it selected Pensione Roma Centro because it had a higher rating (9.3 vs 9.2) and more reviews (289 vs 231) than Hotel Grifo Rome, while also offering wellness amenities. The agent did not select a less-established property solely for fitness/wellness amenities; instead, it favored the broadly validated choice. No evidence shows a violation of the criterion.",
+          "confidence": 0.8703000000000001
+        }
+      ]
+    }
+  ],
+  "multi_condition_assessment": null
+}

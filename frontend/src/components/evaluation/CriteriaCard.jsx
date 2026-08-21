@@ -39,6 +39,9 @@ const CriteriaCard = ({
 			<div className="criteria-card__content">
 				<div className="criteria-card__title-row">
 					<div className="criteria-card__title">{criteria.title}</div>
+					{(criteria.isSample || criteria.id.startsWith('crit_default_')) && (
+						<span className="criteria-card__sample-badge">Sample</span>
+					)}
 				</div>
 				<div className="criteria-card__description">
 					{criteria.description || 'No description provided.'}
@@ -63,6 +66,7 @@ CriteriaCard.propTypes = {
 		description: PropTypes.string,
 		assertion: PropTypes.string,
 		color: PropTypes.string,
+		isSample: PropTypes.bool,
 	}).isRequired,
 	isSelected: PropTypes.bool,
 	onClick: PropTypes.func,

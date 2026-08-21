@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EvalAgent Annotation · Judge Assist</title>
+  <style>
+    :root {
+      --bg: #f2f5f6;
+      --panel: #ffffff;
+      --soft: #f7f9fa;
+      --text: #18242d;
+      --muted: #667783;
+      --border: #dbe3e7;
+      --primary: #176b73;
+      --primary-dark: #10535a;
+      --primary-soft: #e7f4f3;
+      --pass: #17784c;
+      --pass-soft: #dff3e8;
+      --fail: #b83232;
+      --fail-soft: #fde5e3;
+      --judge: #7356b5;
+      --judge-soft: #f1ecfb;
+      --shadow: 0 10px 28px rgba(22, 42, 52, .07);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at 8% 0%, rgba(23,107,115,.09), transparent 27rem), var(--bg);
+    }
+    button, input, select { font: inherit; }
+    button { border: 1px solid #c7d1d8; border-radius: 8px; padding: 8px 11px; background: #fff; color: var(--text); font-weight: 700; cursor: pointer; }
+    button:hover:not(:disabled) { border-color: #879ba7; transform: translateY(-1px); }
+    button:disabled { opacity: .42; cursor: not-allowed; transform: none; }
+    button.primary { color: #fff; background: var(--primary); border-color: var(--primary); }
+    button.primary:hover:not(:disabled) { background: var(--primary-dark); }
+    button.small { padding: 6px 9px; font-size: 11px; }
+    button.quiet { color: var(--muted); background: var(--soft); }
+    input[type="text"], input[type="number"], select { min-width: 150px; padding: 8px 10px; border: 1px solid #c7d1d8; border-radius: 8px; background: #fff; }
+    input[type="file"] { max-width: 350px; font-size: 12px; }
+    .container { max-width: 1580px; margin: 0 auto; padding: 18px 22px 96px; }
+    .brand { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 15px; }
+    .brand-lockup { display: flex; align-items: center; gap: 11px; }
+    .brand-mark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; color: #fff; font-weight: 850; background: linear-gradient(145deg, var(--primary), #263f5d); box-shadow: var(--shadow); }
+    h1 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+    .subtitle { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .legend { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+    .legend-chip, .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; background: #fff; }
+    .swatch { width: 10px; height: 10px; border-radius: 3px; }
+    .swatch.pass { background: #86d5a9; }
+    .swatch.fail { background: #f2a09c; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 13px; padding: 16px; margin-bottom: 13px; box-shadow: var(--shadow); }
+    .panel-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 13px; }
+    .panel-title h2 { margin: 0; font-size: 15px; }
+    .panel-title p { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    label.control { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .status { margin-top: 10px; color: var(--muted); font-size: 11px; }
+    .status.good { color: var(--pass); }
+    .status.warn { color: #a35c00; }
+    .hidden { display: none !important; }
+    .setup-note { margin-top: 12px; padding: 10px 12px; border-radius: 9px; color: #51426f; background: var(--judge-soft); font-size: 12px; line-height: 1.5; }
+    .header-fixed { position: sticky; top: 0; z-index: 12; border-top: 3px solid var(--primary); box-shadow: 0 12px 30px rgba(22,42,52,.1); }
+    .header-main { display: flex; justify-content: space-between; gap: 18px; align-items: center; }
+    .case-kicker, .section-label { color: #5a6974; font-size: 10px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    #dataIdText { display: block; margin-top: 3px; font-size: 18px; font-weight: 820; }
+    .progress-cluster { min-width: 270px; }
+    .progress-meta { display: flex; justify-content: space-between; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
+    .progress-track { height: 7px; overflow: hidden; border-radius: 99px; background: #e5ebee; }
+    .progress-fill { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--primary), #4db2a7); transition: width .2s; }
+    .meta-grid { display: grid; grid-template-columns: 82px minmax(0,1fr); gap: 8px 12px; margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--border); font-size: 13px; }
+    .meta-grid .k { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+    .meta-grid > div:not(.k) { line-height: 1.5; }
+    .header-collapse-bar { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .header-collapse-summary { color: var(--muted); font-size: 12px; font-weight: 750; overflow-wrap: anywhere; }
+    .header-fixed.header-collapsed { padding: 8px 12px; }
+    .header-fixed.header-collapsed .header-collapse-bar { justify-content: space-between; margin-bottom: 0; }
+    .header-fixed.header-collapsed + .main-grid .side-column { top: 72px; max-height: calc(100vh - 88px); }
+    .meta-toggle-btn { min-width: 82px; }
+    .main-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(370px, .9fr); gap: 14px; align-items: start; }
+    .side-column { position: sticky; top: 174px; max-height: calc(100vh - 190px); overflow-y: auto; scrollbar-width: thin; }
+    .step-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .step-title strong { font-size: 16px; }
+    .step-title .step-progress { flex: 0 0 160px; }
+    .field-card { margin-bottom: 10px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+    .field-card.has-judge { border-color: #cbbde9; }
+    .field-card.judge-focus { animation: focusPulse 1.1s ease; }
+    @keyframes focusPulse { 0%,100% { box-shadow: none; } 35% { box-shadow: 0 0 0 4px rgba(115,86,181,.22); } }
+    .field-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 11px; color: #5e6e78; background: var(--soft); border-bottom: 1px solid var(--border); font-size: 10px; font-weight: 850; letter-spacing: .07em; }
+    .judge-count { padding: 2px 7px; border-radius: 999px; color: var(--judge); background: var(--judge-soft); letter-spacing: 0; }
+    .field-text { min-height: 46px; padding: 11px 12px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.62; font-size: 13px; user-select: text; }
+    .field-text::selection, .field-text *::selection { color: #102f32; background: #bce8e1; }
+    .judge-mark { padding: 1px 0; border-radius: 3px; box-decoration-break: clone; -webkit-box-decoration-break: clone; cursor: pointer; }
+    .judge-mark.pass { background: linear-gradient(transparent 12%, rgba(116,210,157,.52) 12%, rgba(116,210,157,.52) 90%, transparent 90%); }
+    .judge-mark.fail { background: linear-gradient(transparent 12%, rgba(242,133,128,.5) 12%, rgba(242,133,128,.5) 90%, transparent 90%); }
+    .judge-mark:hover { outline: 2px solid rgba(115,86,181,.35); }
+    .section-label { margin: 15px 0 8px; }
+    .section-label:first-child { margin-top: 0; }
+    .behavior-buttons { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+    .behavior-buttons .clear { grid-column: 1 / -1; justify-self: start; padding-left: 0; border: 0; color: var(--muted); background: transparent; }
+    .behavior-btn.active-pass { color: var(--pass); border-color: var(--pass); background: #eaf7f0; box-shadow: inset 0 0 0 1px var(--pass); }
+    .behavior-btn.active-fail { color: var(--fail); border-color: var(--fail); background: #fff0ef; box-shadow: inset 0 0 0 1px var(--fail); }
+    #selectionPreview { min-height: 58px; padding: 9px; border: 1px dashed #9bb8bd; border-radius: 9px; background: var(--primary-soft); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+    .list { max-height: 230px; overflow-y: auto; padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--soft); scrollbar-width: thin; }
+    .human-evidence { position: relative; margin-bottom: 7px; padding: 8px 30px 8px 9px; border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: 8px; background: #fff; font-size: 11px; line-height: 1.45; white-space: pre-wrap; }
+    .human-evidence .delete { position: absolute; top: 5px; right: 5px; width: 22px; height: 22px; padding: 0; border: 0; background: transparent; color: var(--fail); }
+    .judge-panel { margin-top: 14px; padding: 13px; border: 1px solid #d9ccef; border-radius: 11px; background: linear-gradient(180deg,#fbf9ff,#f7f3fd); }
+    .judge-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .judge-head h3 { margin: 0; font-size: 14px; color: #4f3b7d; }
+    .judge-head p { margin: 3px 0 0; color: #75678f; font-size: 11px; }
+    .judge-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+    .judge-toolbar button.active { color: #fff; border-color: var(--judge); background: var(--judge); }
+    .judge-stats { margin: 8px 0; color: #75678f; font-size: 11px; }
+    .judge-evidence-card { display: block; width: 100%; margin-bottom: 8px; padding: 9px; text-align: left; border: 1px solid #d8ccef; border-radius: 9px; background: #fff; font-weight: 400; transform: none !important; }
+    .judge-evidence-card:hover { border-color: var(--judge) !important; }
+    .judge-evidence-card.focused { box-shadow: 0 0 0 3px rgba(115,86,181,.17); border-color: var(--judge); }
+    .judge-evidence-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .verdict { padding: 2px 6px; border-radius: 999px; font-size: 9px; font-weight: 900; letter-spacing: .05em; }
+    .verdict.pass { color: var(--pass); background: var(--pass-soft); }
+    .verdict.fail { color: var(--fail); background: var(--fail-soft); }
+    .match { margin-left: auto; color: var(--muted); font-size: 9px; }
+    .quote { color: #2d3640; font-size: 11px; line-height: 1.45; white-space: pre-wrap; }
+    .why { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #e1d9ef; color: #675b79; font-size: 10px; line-height: 1.45; }
+    .judge-verdict-box { margin-top: 9px; padding: 9px; border-radius: 8px; background: #fff; color: #5c506d; font-size: 11px; line-height: 1.5; }
+    .bottom-nav { position: fixed; right: 0; bottom: 0; left: 0; z-index: 14; padding: 10px 22px; border-top: 1px solid var(--border); background: rgba(242,245,246,.94); backdrop-filter: blur(10px); }
+    .bottom-nav-inner { display: flex; justify-content: space-between; align-items: center; gap: 12px; max-width: 1536px; margin: 0 auto; }
+    .muted { color: var(--muted); }
+    @media (max-width: 1000px) {
+      .container { padding: 12px 12px 110px; }
+      .main-grid { grid-template-columns: 1fr; }
+      .side-column { position: static; max-height: none; }
+      .brand, .header-main { align-items: flex-start; flex-direction: column; }
+      .progress-cluster { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="brand">
+      <div class="brand-lockup">
+        <div class="brand-mark">EA</div>
+        <div><h1>Behavior Annotation · Judge Assist</h1><p class="subtitle">人工标注为主，Judge 高亮只作为可追溯的证据提示</p></div>
+      </div>
+      <div class="legend">
+        <span class="legend-chip"><span class="swatch pass"></span>Judge PASS evidence</span>
+        <span class="legend-chip"><span class="swatch fail"></span>Judge FAIL evidence</span>
+      </div>
+    </div>
+
+    <section class="panel" id="setupPanel">
+      <div class="panel-title">
+        <div><h2>载入标注数据</h2><p>原始轨迹用于人工标注；Judge 文件只添加辅助证据层。</p></div>
+      </div>
+      <div class="row">
+        <label class="control">Annotator
+          <select id="annotatorId"><option>Yukun</option><option>Simret</option><option>Dan</option></select>
+        </label>
+        <label class="control">Criteria ID <input id="criteriaId" type="text" value="criteria1" /></label>
+        <label class="control">① raw_data 文件夹 <input id="folderInput" type="file" webkitdirectory directory multiple accept=".json" /></label>
+        <label class="control">② Judge visualization_data.json <input id="judgeInput" type="file" accept=".json" /></label>
+      </div>
+      <div class="row" style="margin-top:11px">
+        <button class="primary" id="initBtn">载入并开始</button>
+        <button id="restoreBtn">恢复本机进度</button>
+        <button id="exportBtn">导出人工标注 JSON</button>
+        <label class="control">导入人工标注 <input id="importInput" type="file" accept=".json" /></label>
+      </div>
+      <div class="setup-note">Judge 的 evidence verdict 与解释会显示；Judge 的 step / overall verdict 默认隐藏。点击“显示 Judge verdict”才会揭示，且不会自动写入人工标签。</div>
+      <div id="globalStatus" class="status">尚未载入</div>
+    </section>
+
+    <main id="workArea" class="hidden">
+      <section class="panel header-fixed" id="caseHeader">
+        <div class="header-collapse-bar">
+          <span class="header-collapse-summary hidden" id="collapsedHeaderSummary">Current sample · 0 / 0 · -</span>
+          <button class="small quiet meta-toggle-btn" id="toggleMetaBtn" type="button" aria-expanded="true">折叠顶部</button>
+        </div>
+        <div id="headerDetails">
+          <div class="header-main">
+            <div><div class="case-kicker">Current sample · <span id="dataIndexText">0 / 0</span></div><span id="dataIdText">-</span></div>
+            <div class="progress-cluster">
+              <div class="progress-meta"><span id="completionText">0 completed</span><span id="completionPct">0%</span></div>
+              <div class="progress-track"><div id="completionFill" class="progress-fill"></div></div>
+              <div class="row" style="justify-content:flex-end;margin-top:9px">
+                <button class="small" id="prevDataBtn">← Previous</button>
+                <button class="small" id="nextUnlabeledBtn">Next unlabeled</button>
+                <button class="small primary" id="nextDataBtn">Next →</button>
+              </div>
+            </div>
+          </div>
+          <div class="meta-grid" id="metaGrid">
+            <div class="k">task</div><div id="taskText">-</div>
+            <div class="k">persona</div><div id="personaText">-</div>
+            <div class="k">criterion</div><div id="criteriaText">-</div>
+          </div>
+        </div>
+      </section>
+
+      <div class="main-grid">
+        <section class="panel">
+          <div class="step-title">
+            <div><div class="case-kicker">Trajectory</div><strong>Step <span id="stepIdText">-</span> · <span id="stepIndexText">0 / 0</span></strong></div>
+            <div class="step-progress"><div class="progress-track"><div id="stepProgressFill" class="progress-fill"></div></div></div>
+          </div>
+          <div id="fieldsContainer"></div>
+        </section>
+
+        <aside class="panel side-column">
+          <div class="section-label">1 · Human step verdict</div>
+          <div id="stepButtons" class="behavior-buttons"></div>
+          <div class="section-label">2 · Human overall assessment</div>
+          <div id="overallButtons" class="behavior-buttons"></div>
+          <div class="section-label">3 · Selected human evidence</div>
+          <div id="selectionPreview" class="muted">在左侧轨迹中选择文字</div>
+          <div class="section-label">4 · Evidence verdict</div>
+          <div id="evidenceButtons" class="behavior-buttons"></div>
+          <div class="section-label">Saved human evidence</div>
+          <div id="humanEvidenceList" class="list muted">尚无人工 evidence</div>
+
+          <div class="judge-panel">
+            <div class="judge-head">
+              <div><h3>Judge evidence assistant</h3><p id="judgeMeta">尚未载入 Judge 文件</p></div>
+              <button class="small quiet" id="toggleHighlightsBtn">隐藏高亮</button>
+            </div>
+            <div class="judge-toolbar">
+              <button class="small active" data-filter="all">全部</button>
+              <button class="small" data-filter="pass">PASS</button>
+              <button class="small" data-filter="fail">FAIL</button>
+              <button class="small quiet" id="revealVerdictsBtn">显示 Judge verdict</button>
+            </div>
+            <div id="judgeStats" class="judge-stats">当前 step 没有 Judge evidence</div>
+            <div id="judgeEvidenceList"></div>
+            <div id="judgeVerdictBox" class="judge-verdict-box hidden"></div>
+          </div>
+          <div id="saveStatus" class="status">尚未保存</div>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <div id="bottomNav" class="bottom-nav hidden">
+    <div class="bottom-nav-inner">
+      <div class="row">
+        <button id="prevStepBtn">← Previous step</button>
+        <button class="primary" id="nextStepBtn">Next step →</button>
+        <label class="control">Jump <input id="jumpInput" type="number" min="1" value="1" style="width:70px;min-width:70px" /></label>
+        <button id="jumpBtn">Go</button>
+      </div>
+      <span class="status">快捷键：1 Pass · 2 Fail · [ ] 切换 step · Shift + ← → 切换 case</span>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'evalagent_annotation_judge_assist_v1';
+    const META_COLLAPSED_KEY = 'evalagent_annotation_judge_assist_meta_collapsed_v1';
+    const FIELDS = ['EVALUATION', 'MEMORY', 'TARGET OBJECTIVE', 'AI REASONING', 'ACTION'];
+    const LABELS = ['pass', 'fail'];
+    const SOURCE_TO_FIELD = {
+      'thinking process': 'AI REASONING', 'reasoning': 'AI REASONING',
+      'evaluation': 'EVALUATION', 'evaluation previous goal': 'EVALUATION',
+      'memory': 'MEMORY', 'next goal': 'TARGET OBJECTIVE',
+      'target objective': 'TARGET OBJECTIVE', 'action': 'ACTION'
+    };
+    const state = {
+      rawItems: [], assignment: [], judgeCases: new Map(), judgeMeta: {},
+      annotations: {}, currentDataIndex: 0, currentStepIndex: 0,
+      annotatorId: 'Yukun', criteriaId: 'criteria1', lastSelection: null,
+      highlightsVisible: true, judgeFilter: 'all', verdictsRevealed: false,
+      evidenceMatches: new Map()
+    };
+    const $ = id => document.getElementById(id);
+    const els = {
+      annotatorId:$('annotatorId'), criteriaId:$('criteriaId'), folderInput:$('folderInput'), judgeInput:$('judgeInput'),
+      initBtn:$('initBtn'), restoreBtn:$('restoreBtn'), exportBtn:$('exportBtn'), importInput:$('importInput'),
+      globalStatus:$('globalStatus'), workArea:$('workArea'), bottomNav:$('bottomNav'), dataIndexText:$('dataIndexText'),
+      dataIdText:$('dataIdText'), caseHeader:$('caseHeader'), headerDetails:$('headerDetails'), collapsedHeaderSummary:$('collapsedHeaderSummary'), metaGrid:$('metaGrid'), toggleMetaBtn:$('toggleMetaBtn'), taskText:$('taskText'), personaText:$('personaText'), criteriaText:$('criteriaText'),
+      completionText:$('completionText'), completionPct:$('completionPct'), completionFill:$('completionFill'),
+      prevDataBtn:$('prevDataBtn'), nextDataBtn:$('nextDataBtn'), nextUnlabeledBtn:$('nextUnlabeledBtn'),
+      stepIdText:$('stepIdText'), stepIndexText:$('stepIndexText'), stepProgressFill:$('stepProgressFill'), fieldsContainer:$('fieldsContainer'),
+      stepButtons:$('stepButtons'), overallButtons:$('overallButtons'), evidenceButtons:$('evidenceButtons'),
+      selectionPreview:$('selectionPreview'), humanEvidenceList:$('humanEvidenceList'),
+      judgeMeta:$('judgeMeta'), judgeStats:$('judgeStats'), judgeEvidenceList:$('judgeEvidenceList'), judgeVerdictBox:$('judgeVerdictBox'),
+      toggleHighlightsBtn:$('toggleHighlightsBtn'), revealVerdictsBtn:$('revealVerdictsBtn'), saveStatus:$('saveStatus'),
+      prevStepBtn:$('prevStepBtn'), nextStepBtn:$('nextStepBtn'), jumpInput:$('jumpInput'), jumpBtn:$('jumpBtn')
+    };
+
+    function setMetaCollapsed(collapsed) {
+      els.headerDetails.classList.toggle('hidden', collapsed);
+      els.collapsedHeaderSummary.classList.toggle('hidden', !collapsed);
+      els.caseHeader.classList.toggle('header-collapsed', collapsed);
+      els.toggleMetaBtn.textContent = collapsed ? '展开顶部' : '折叠顶部';
+      els.toggleMetaBtn.setAttribute('aria-expanded', String(!collapsed));
+      localStorage.setItem(META_COLLAPSED_KEY, String(collapsed));
+    }
+
+    function safe(v) { return v == null ? '' : String(v); }
+    function key(v) { return safe(v).trim().toUpperCase(); }
+    function currentItem() { const id = state.assignment[state.currentDataIndex]; return state.rawItems.find(x => key(x.data_id) === key(id)) || null; }
+    function currentStep() { const item = currentItem(); return item?.steps?.[Math.max(0, Math.min(state.currentStepIndex, item.steps.length - 1))] || null; }
+    function currentJudge() { const item = currentItem(); return item ? state.judgeCases.get(key(item.data_id)) || null : null; }
+    function fieldForSource(source) { return SOURCE_TO_FIELD[safe(source).trim().toLowerCase()] || safe(source).trim().toUpperCase(); }
+    function formatAction(value) {
+      const raw = safe(value);
+      try {
+        const obj = JSON.parse(raw);
+        const one = Array.isArray(obj) && obj.length === 1 ? obj[0] : null;
+        if (one?.done && typeof one.done.text === 'string') return one.done.text;
+        if (one?.done && typeof one.done === 'string') return one.done;
+        return JSON.stringify(obj, null, 2);
+      } catch (_) { return raw; }
+    }
+    function displayField(step, field) { return field === 'ACTION' ? formatAction(step?.[field]) : safe(step?.[field]); }
+
+    function ensureAnnotation(id) {
+      if (!state.annotations[id]) state.annotations[id] = { data_id:id, criteria_id:state.criteriaId, step_labels:{}, overall_assessment:'', evidences:[], updated_at:new Date().toISOString() };
+      const a = state.annotations[id];
+      a.step_labels ||= {}; a.evidences ||= []; a.overall_assessment ||= '';
+      return a;
+    }
+    function progressPayload() {
+      return {
+        version: 2,
+        meta: { annotator_id:state.annotatorId, criteria_id:state.criteriaId, assigned_count:state.assignment.length, judge_assist:true, judge_model:state.judgeMeta.judge_model || '', judge_version:state.judgeMeta.judge_version || '', last_save_at:new Date().toISOString() },
+        assignment: state.assignment,
+        current: { data_index:state.currentDataIndex, step_index:state.currentStepIndex },
+        annotations: state.annotations
+      };
+    }
+    function persist() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(progressPayload()));
+      els.saveStatus.textContent = `已自动保存到本机 · ${new Date().toLocaleTimeString()}`;
+    }
+    let saveTimer;
+    function saveSoon() { clearTimeout(saveTimer); saveTimer = setTimeout(persist, 220); }
+
+    async function readRawFiles(files) {
+      const result = [];
+      for (const file of Array.from(files || []).filter(f => f.name.toLowerCase().endsWith('.json'))) {
+        try { const obj = JSON.parse(await file.text()); if (obj?.data_id && Array.isArray(obj.steps)) result.push(obj); } catch (_) {}
+      }
+      return result.sort((a,b) => safe(a.data_id).localeCompare(safe(b.data_id)));
+    }
+    async function readJudgeFile(file) {
+      if (!file) return { cases:[], meta:{} };
+      const obj = JSON.parse(await file.text());
+      const cases = Array.isArray(obj.cases) ? obj.cases : [];
+      return { cases, meta:{ judge_model:obj.judge_model || '', judge_version:obj.judge_version || '', generated_at_utc:obj.generated_at_utc || '', filename:file.name } };
+    }
+
+    function canonicalWithMap(text) {
+      let out = ''; const map = []; let priorSpace = false;
+      for (let i=0;i<text.length;i++) {
+        let ch = text[i];
+        if ('*`_'.includes(ch)) continue;
+        if (ch === '’' || ch === '‘') ch = "'";
+        if (ch === '“' || ch === '”') ch = '"';
+        if (/\s/.test(ch)) {
+          if (!priorSpace) { out += ' '; map.push(i); priorSpace = true; }
+        } else { out += ch.toLowerCase(); map.push(i); priorSpace = false; }
+      }
+      return { text:out, map };
+    }
+    function locateQuote(text, quote) {
+      const q = safe(quote).trim();
+      if (!q) return null;
+      const unescaped = q.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\"/g, '"');
+      const candidates = unescaped === q ? [q] : [q, unescaped];
+      for (const candidate of candidates) {
+        let at = text.indexOf(candidate);
+        if (at >= 0) return { start:at, end:at+candidate.length, mode:candidate===q?'exact':'unescaped' };
+        at = text.toLowerCase().indexOf(candidate.toLowerCase());
+        if (at >= 0) return { start:at, end:at+candidate.length, mode:'case-folded' };
+        const source = canonicalWithMap(text), needle = canonicalWithMap(candidate).text.trim();
+        at = source.text.indexOf(needle);
+        if (at >= 0 && source.map[at] != null && source.map[at + needle.length - 1] != null) {
+          return { start:source.map[at], end:source.map[at + needle.length - 1] + 1, mode:'normalized' };
+        }
+      }
+      return null;
+    }
+    function judgeEvidenceForStep(judgeCase, stepId) {
+      const evidence = judgeCase?.judge?.evidence;
+      if (!Array.isArray(evidence)) return [];
+      return evidence.map((ev,index) => ({...ev, _id:`${key(judgeCase.case_id)}::${index}`, _index:index, _field:fieldForSource(ev.source_field)}))
+        .filter(ev => Number(ev.step_index) === Number(stepId));
+    }
+    function filteredEvidence(items) { return state.judgeFilter === 'all' ? items : items.filter(ev => safe(ev.verdict).toLowerCase() === state.judgeFilter); }
+
+    function renderHighlightedText(container, text, evidences) {
+      container.textContent = '';
+      const located = [];
+      for (const ev of evidences) {
+        const loc = locateQuote(text, ev.highlighted_text);
+        state.evidenceMatches.set(ev._id, loc ? loc.mode : 'unmatched');
+        if (loc) located.push({...loc, ev});
+      }
+      if (!state.highlightsVisible || !located.length) { container.appendChild(document.createTextNode(text)); return; }
+      const points = new Set([0,text.length]);
+      located.forEach(x => { points.add(x.start); points.add(x.end); });
+      const boundaries = [...points].sort((a,b)=>a-b);
+      for (let i=0;i<boundaries.length-1;i++) {
+        const start=boundaries[i], end=boundaries[i+1];
+        if (end <= start) continue;
+        const active = located.filter(x => x.start < end && x.end > start);
+        if (!active.length) { container.appendChild(document.createTextNode(text.slice(start,end))); continue; }
+        const span = document.createElement('span');
+        span.className = `judge-mark ${active.some(x => safe(x.ev.verdict).toLowerCase()==='fail') ? 'fail':'pass'}`;
+        span.dataset.evidenceIds = active.map(x=>x.ev._id).join('|');
+        span.title = `${active.length} Judge evidence · 点击查看解释`;
+        span.textContent = text.slice(start,end);
+        span.onclick = e => { e.stopPropagation(); focusJudgeEvidence(active[0].ev._id); };
+        container.appendChild(span);
+      }
+    }
+
+    function renderFields() {
+      els.fieldsContainer.textContent = ''; state.evidenceMatches.clear();
+      const step=currentStep(), judge=currentJudge();
+      if (!step) { els.fieldsContainer.textContent='当前 case 没有 steps'; return; }
+      const all = judgeEvidenceForStep(judge, step.step_id), visible = filteredEvidence(all);
+      for (const field of FIELDS) {
+        const evs = visible.filter(ev => ev._field === field);
+        const card=document.createElement('div'); card.className=`field-card${evs.length?' has-judge':''}`; card.dataset.field=field;
+        const head=document.createElement('div'); head.className='field-head';
+        const name=document.createElement('span'); name.textContent=field; head.appendChild(name);
+        if (evs.length) { const count=document.createElement('span'); count.className='judge-count'; count.textContent=`Judge × ${evs.length}`; head.appendChild(count); }
+        const body=document.createElement('div'); body.className='field-text'; body.dataset.field=field; body.dataset.stepid=String(step.step_id);
+        renderHighlightedText(body, displayField(step,field), evs);
+        card.append(head,body); els.fieldsContainer.appendChild(card);
+      }
+    }
+
+    function labelButtons(container,current,onSet,clearText) {
+      container.textContent='';
+      LABELS.forEach(label => {
+        const b=document.createElement('button'); b.className=`behavior-btn${current===label?` active-${label}`:''}`; b.textContent=label.toUpperCase(); b.onclick=()=>onSet(label); container.appendChild(b);
+      });
+      const clear=document.createElement('button'); clear.className='clear small'; clear.textContent=clearText; clear.onclick=()=>onSet(''); container.appendChild(clear);
+    }
+    function renderHumanControls() {
+      const item=currentItem(), step=currentStep(); if (!item || !step) return;
+      const ann=ensureAnnotation(item.data_id), stepKey=String(step.step_id);
+      labelButtons(els.stepButtons,ann.step_labels[stepKey]||'',label=>{ if(label) ann.step_labels[stepKey]=label; else delete ann.step_labels[stepKey]; ann.updated_at=new Date().toISOString(); renderHumanControls(); renderHeader(); saveSoon(); },'Clear step label');
+      labelButtons(els.overallButtons,ann.overall_assessment||'',label=>{ ann.overall_assessment=label; ann.updated_at=new Date().toISOString(); renderHumanControls(); renderHeader(); saveSoon(); },'Clear overall');
+      labelButtons(els.evidenceButtons,'',label=>{ if(label) addHumanEvidence(label); },'');
+      els.evidenceButtons.lastElementChild?.remove();
+      renderHumanEvidence();
+      els.selectionPreview.textContent = state.lastSelection ? `Step ${state.lastSelection.step_id} · ${state.lastSelection.field}\n“${state.lastSelection.text}”` : '在左侧轨迹中选择文字';
+    }
+    function renderHumanEvidence() {
+      const item=currentItem(); if (!item) return;
+      const ann=ensureAnnotation(item.data_id), list=ann.evidences||[];
+      els.humanEvidenceList.textContent='';
+      if (!list.length) { els.humanEvidenceList.textContent='尚无人工 evidence'; return; }
+      list.forEach((ev,index)=>{
+        const card=document.createElement('div'); card.className='human-evidence';
+        const title=document.createElement('strong'); title.textContent=`#${index+1} · ${safe(ev.verdict).toUpperCase()} · step ${ev.step_id} · ${ev.field}`;
+        const text=document.createElement('div'); text.textContent=`“${safe(ev.text)}”`;
+        const del=document.createElement('button'); del.className='delete'; del.textContent='×'; del.title='删除'; del.onclick=()=>{ ann.evidences.splice(index,1); renderHumanEvidence(); saveSoon(); };
+        card.append(title,text,del); els.humanEvidenceList.appendChild(card);
+      });
+    }
+    function addHumanEvidence(verdict) {
+      const item=currentItem(), step=currentStep();
+      if (!item || !step || !state.lastSelection) { alert('请先在当前 step 左侧选择文字。'); return; }
+      if (Number(state.lastSelection.step_id)!==Number(step.step_id)) { alert('所选文字不属于当前 step，请重新选择。'); return; }
+      const ann=ensureAnnotation(item.data_id), same=ann.evidences.find(ev=>Number(ev.step_id)===Number(step.step_id)&&ev.field===state.lastSelection.field&&safe(ev.text).trim()===safe(state.lastSelection.text).trim());
+      if (same) same.verdict=verdict; else ann.evidences.push({ id:`${Date.now()}_${Math.random().toString(36).slice(2,8)}`, step_id:Number(step.step_id), field:state.lastSelection.field, verdict, text:state.lastSelection.text, created_at:new Date().toISOString() });
+      state.lastSelection=null; window.getSelection()?.removeAllRanges(); renderHumanControls(); saveSoon();
+    }
+
+    function renderJudgePanel() {
+      const item=currentItem(), step=currentStep(), judge=currentJudge();
+      if (!item || !step) return;
+      els.judgeMeta.textContent = judge ? `${judge.judge?.model || state.judgeMeta.judge_model || 'model unknown'} · ${judge.judge?.version || state.judgeMeta.judge_version || 'version unknown'}` : '这个 case 没有匹配的 Judge annotation';
+      const all=judgeEvidenceForStep(judge,step.step_id), shown=filteredEvidence(all);
+      els.judgeEvidenceList.textContent='';
+      const mapped=shown.filter(ev=>state.evidenceMatches.get(ev._id)!=='unmatched').length;
+      els.judgeStats.textContent=`当前 step：${shown.length} 条 evidence · ${mapped} 条映射到原文${shown.length-mapped?` · ${shown.length-mapped} 条未匹配`:''}`;
+      if (!shown.length) { const none=document.createElement('div'); none.className='muted'; none.style.fontSize='11px'; none.textContent='当前筛选下没有 Judge evidence。'; els.judgeEvidenceList.appendChild(none); }
+      shown.forEach(ev=>{
+        const card=document.createElement('button'); card.className='judge-evidence-card'; card.dataset.evidenceId=ev._id;
+        const top=document.createElement('div'); top.className='judge-evidence-top';
+        const verdict=document.createElement('span'); verdict.className=`verdict ${safe(ev.verdict).toLowerCase()}`; verdict.textContent=safe(ev.verdict).toUpperCase();
+        const field=document.createElement('span'); field.className='chip'; field.textContent=ev._field;
+        const match=document.createElement('span'); match.className='match'; const mode=state.evidenceMatches.get(ev._id)||'unmatched'; match.textContent=mode==='unmatched'?'未映射':mode;
+        const quote=document.createElement('div'); quote.className='quote'; quote.textContent=`“${safe(ev.highlighted_text)}”`;
+        const why=document.createElement('div'); why.className='why'; why.textContent=safe(ev.reasoning)||'Judge 未提供解释';
+        top.append(verdict,field,match); card.append(top,quote,why); card.onclick=()=>focusJudgeEvidence(ev._id); els.judgeEvidenceList.appendChild(card);
+      });
+      els.judgeVerdictBox.classList.toggle('hidden',!state.verdictsRevealed);
+      if (state.verdictsRevealed) {
+        const stepVerdict=judge?.judge?.step_verdicts?.[String(step.step_id)] || 'N/A';
+        els.judgeVerdictBox.textContent=`Judge step verdict: ${safe(stepVerdict).toUpperCase()}\nJudge overall verdict: ${safe(judge?.judge?.verdict || 'N/A').toUpperCase()}\n\nOverall reasoning: ${safe(judge?.judge?.reasoning || 'N/A')}`;
+        els.judgeVerdictBox.style.whiteSpace='pre-wrap';
+      }
+    }
+    function focusJudgeEvidence(id) {
+      const item=currentItem(), judge=currentJudge(); if (!item || !judge) return;
+      const ev=judgeEvidenceForStep(judge,currentStep()?.step_id).find(x=>x._id===id); if (!ev) return;
+      document.querySelectorAll('.judge-evidence-card').forEach(x=>x.classList.toggle('focused',x.dataset.evidenceId===id));
+      const card=[...document.querySelectorAll('.field-card')].find(x=>x.dataset.field===ev._field);
+      if (card) { card.scrollIntoView({behavior:'smooth',block:'center'}); card.classList.remove('judge-focus'); void card.offsetWidth; card.classList.add('judge-focus'); }
+      const mark=[...document.querySelectorAll('.judge-mark')].find(x=>safe(x.dataset.evidenceIds).split('|').includes(id));
+      if (mark) mark.scrollIntoView({behavior:'smooth',block:'center'});
+    }
+
+    function renderHeader() {
+      const item=currentItem(), step=currentStep(); if (!item || !step) return;
+      els.dataIndexText.textContent=`${state.currentDataIndex+1} / ${state.assignment.length}`; els.dataIdText.textContent=item.data_id;
+      els.collapsedHeaderSummary.textContent=`Current sample · ${state.currentDataIndex+1} / ${state.assignment.length} · ${item.data_id}`;
+      els.taskText.textContent=safe(item.task); els.personaText.textContent=safe(item.persona); els.criteriaText.textContent=safe(item[state.criteriaId] || item.criteria1);
+      const complete=state.assignment.filter(id=>!!state.annotations[id]?.overall_assessment).length, pct=state.assignment.length?Math.round(100*complete/state.assignment.length):0;
+      els.completionText.textContent=`${complete} completed`; els.completionPct.textContent=`${pct}%`; els.completionFill.style.width=`${pct}%`;
+      els.prevDataBtn.disabled=state.currentDataIndex===0; els.nextDataBtn.disabled=state.currentDataIndex>=state.assignment.length-1;
+      els.stepIdText.textContent=step.step_id; els.stepIndexText.textContent=`${state.currentStepIndex+1} / ${item.steps.length}`; els.stepProgressFill.style.width=`${100*(state.currentStepIndex+1)/item.steps.length}%`;
+      els.prevStepBtn.disabled=state.currentStepIndex===0; els.nextStepBtn.disabled=state.currentStepIndex>=item.steps.length-1; els.jumpInput.value=state.currentStepIndex+1;
+    }
+    function renderAll() { renderHeader(); renderFields(); renderHumanControls(); renderJudgePanel(); }
+    function switchStep(delta) { const item=currentItem(); if(!item)return; state.currentStepIndex=Math.max(0,Math.min(item.steps.length-1,state.currentStepIndex+delta)); state.lastSelection=null; renderAll(); }
+    function switchData(delta) { state.currentDataIndex=Math.max(0,Math.min(state.assignment.length-1,state.currentDataIndex+delta)); state.currentStepIndex=0; state.lastSelection=null; state.verdictsRevealed=false; renderAll(); saveSoon(); window.scrollTo({top:0,behavior:'smooth'}); }
+    function nextUnlabeled() { for(let n=1;n<=state.assignment.length;n++){ const i=(state.currentDataIndex+n)%state.assignment.length; if(!state.annotations[state.assignment[i]]?.overall_assessment){ state.currentDataIndex=i; state.currentStepIndex=0; state.verdictsRevealed=false; renderAll(); return; } } alert('所有 case 都已有 overall assessment。'); }
+    function downloadJson() { const blob=new Blob([JSON.stringify(progressPayload(),null,2)],{type:'application/json'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=`${state.annotatorId}_${state.criteriaId}_judge_assisted_annotations.json`; a.click(); URL.revokeObjectURL(url); }
+    function applyProgress(payload) {
+      if(!payload || typeof payload!=='object') return;
+      state.annotatorId=payload.meta?.annotator_id||state.annotatorId; state.criteriaId=payload.meta?.criteria_id||state.criteriaId;
+      state.annotations=payload.annotations||{}; if(Array.isArray(payload.assignment)&&payload.assignment.length) state.assignment=payload.assignment.filter(id=>state.rawItems.some(x=>key(x.data_id)===key(id)));
+      state.currentDataIndex=Number(payload.current?.data_index||0); state.currentStepIndex=Number(payload.current?.step_index||0);
+      state.currentDataIndex=Math.max(0,Math.min(state.assignment.length-1,state.currentDataIndex));
+      els.annotatorId.value=state.annotatorId; els.criteriaId.value=state.criteriaId;
+    }
+
+    els.initBtn.onclick=async()=>{
+      state.annotatorId=els.annotatorId.value; state.criteriaId=els.criteriaId.value.trim()||'criteria1';
+      state.rawItems=await readRawFiles(els.folderInput.files);
+      if(!state.rawItems.length){ alert('请选择包含 case JSON 的 raw_data 文件夹。'); return; }
+      try {
+        const parsed=await readJudgeFile(els.judgeInput.files?.[0]); state.judgeMeta=parsed.meta; state.judgeCases=new Map(parsed.cases.map(c=>[key(c.case_id),c]));
+      } catch(e) { alert(`Judge 文件无法读取：${e.message}`); return; }
+      state.assignment=state.rawItems.map(x=>x.data_id); state.currentDataIndex=0; state.currentStepIndex=0;
+      els.workArea.classList.remove('hidden'); els.bottomNav.classList.remove('hidden');
+      const matched=state.assignment.filter(id=>state.judgeCases.has(key(id))).length;
+      els.globalStatus.className=`status ${matched===state.assignment.length?'good':'warn'}`; els.globalStatus.textContent=`已载入 ${state.rawItems.length} 个 case；Judge annotation 匹配 ${matched}/${state.assignment.length}。`;
+      renderAll(); persist();
+    };
+    els.restoreBtn.onclick=()=>{ if(!state.rawItems.length){ alert('请先选择 raw_data 与 Judge 文件并点击“载入并开始”。'); return; } const raw=localStorage.getItem(STORAGE_KEY); if(!raw){ alert('没有找到本机进度。'); return; } applyProgress(JSON.parse(raw)); renderAll(); els.globalStatus.textContent+=' 已恢复本机人工标注进度。'; };
+    els.exportBtn.onclick=downloadJson;
+    els.importInput.onchange=async e=>{ try { const payload=JSON.parse(await e.target.files[0].text()); applyProgress(payload); if(state.rawItems.length){ els.workArea.classList.remove('hidden'); els.bottomNav.classList.remove('hidden'); renderAll(); } } catch(err){ alert(`导入失败：${err.message}`); } };
+    els.prevDataBtn.onclick=()=>switchData(-1); els.nextDataBtn.onclick=()=>switchData(1); els.nextUnlabeledBtn.onclick=nextUnlabeled;
+    els.toggleMetaBtn.onclick=()=>setMetaCollapsed(!els.caseHeader.classList.contains('header-collapsed'));
+    setMetaCollapsed(localStorage.getItem(META_COLLAPSED_KEY)==='true');
+    els.prevStepBtn.onclick=()=>switchStep(-1); els.nextStepBtn.onclick=()=>switchStep(1); els.jumpBtn.onclick=()=>{ const item=currentItem(); if(!item)return; state.currentStepIndex=Math.max(0,Math.min(item.steps.length-1,Number(els.jumpInput.value||1)-1)); renderAll(); };
+    els.toggleHighlightsBtn.onclick=()=>{ state.highlightsVisible=!state.highlightsVisible; els.toggleHighlightsBtn.textContent=state.highlightsVisible?'隐藏高亮':'显示高亮'; renderAll(); };
+    els.revealVerdictsBtn.onclick=()=>{ state.verdictsRevealed=!state.verdictsRevealed; els.revealVerdictsBtn.textContent=state.verdictsRevealed?'隐藏 Judge verdict':'显示 Judge verdict'; renderJudgePanel(); };
+    document.querySelectorAll('[data-filter]').forEach(btn=>btn.onclick=()=>{ state.judgeFilter=btn.dataset.filter; document.querySelectorAll('[data-filter]').forEach(x=>x.classList.toggle('active',x===btn)); renderFields(); renderJudgePanel(); });
+    document.addEventListener('mouseup',()=>{
+      const selection=window.getSelection(); if(!selection || selection.rangeCount===0 || !selection.toString().trim()) return;
+      let node=selection.getRangeAt(0).commonAncestorContainer; if(node.nodeType===Node.TEXT_NODE) node=node.parentElement;
+      const field=node?.closest?.('.field-text'); if(!field) return;
+      state.lastSelection={ text:selection.toString().trim(), field:field.dataset.field, step_id:Number(field.dataset.stepid) }; renderHumanControls();
+    });
+    document.addEventListener('keydown',e=>{
+      if(['INPUT','SELECT','TEXTAREA'].includes(e.target?.tagName)) return;
+      if(e.key==='[') switchStep(-1); else if(e.key===']') switchStep(1); else if(e.shiftKey&&e.key==='ArrowLeft') switchData(-1); else if(e.shiftKey&&e.key==='ArrowRight') switchData(1);
+      else if((e.key==='1'||e.key==='2')&&currentItem()&&currentStep()){ const label=LABELS[Number(e.key)-1], ann=ensureAnnotation(currentItem().data_id); ann.step_labels[String(currentStep().step_id)]=label; renderHumanControls(); saveSoon(); }
+    });
+  </script>
+</body>
+</html>

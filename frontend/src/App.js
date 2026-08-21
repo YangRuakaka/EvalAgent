@@ -52,7 +52,11 @@ const SYSTEM_VARIANT_OPTIONS = [
 ];
 
 const App = () => {
-	const { state: { experiments }, addExperiment, removeExperiment } = useData();
+	const {
+		state: { experiments, criteriaHistory },
+		addExperiment,
+		removeExperiment,
+	} = useData();
 	const experimentEntries = useMemo(() => Object.values(experiments), [experiments]);
 	const historyEntryCount = experimentEntries.length;
 
@@ -71,7 +75,10 @@ const App = () => {
 
 	// Custom Hooks
 	const { sizes, containerRef, beginDrag } = usePanelResizer(50);
-	const { dagInteractions, handleDAGInteraction, handleExportDAGInteractions } = useDagInteractions(activeRunId);
+	const { dagInteractions, handleDAGInteraction, handleExportDAGInteractions } = useDagInteractions(
+		activeRunId,
+		criteriaHistory,
+	);
 	const { 
 		environmentRunTabs, 
 		environmentRunTabEntries, 
@@ -271,7 +278,7 @@ const App = () => {
 						title="Eval Agent"
 						variant="page"
 						onExportData={handleExportDAGInteractions}
-						isExportDisabled={!dagInteractions.length}
+						isExportDisabled={!dagInteractions.length && !criteriaHistory.length}
 						onCleanupServer={handleCleanupServerFiles}
 						onRestartBackend={handleRestartBackend}
 						onGetCacheData={handleGetCacheData}

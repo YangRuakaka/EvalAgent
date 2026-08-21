@@ -6,7 +6,7 @@ import {
     buildDAGInteractionSummary 
 } from '../utils/dagUtils';
 
-export const useDagInteractions = (activeRunId) => {
+export const useDagInteractions = (activeRunId, criteriaHistory = []) => {
     const [dagInteractions, setDagInteractions] = useState([]);
     const dagInteractionCounterRef = useRef(0);
     const dagInteractionLastRecordedAtRef = useRef(new Map());
@@ -55,26 +55,28 @@ export const useDagInteractions = (activeRunId) => {
     }, [activeRunId]);
 
     const handleExportDAGInteractions = useCallback(() => {
-        if (!dagInteractions.length) {
-            alert('No DAG interaction data to export.');
+        if (!dagInteractions.length && !criteriaHistory.length) {
+            alert('No interaction data to export.');
             return;
         }
 
         const timestamp = new Date();
         const summary = buildDAGInteractionSummary(dagInteractions);
         const payload = {
-            exportVersion: 'dag_interactions_detailed_v3',
+            exportVersion: 'study_interactions_v1',
             granularity: 'detailed',
             exportedAt: timestamp.toISOString(),
             count: dagInteractions.length,
+            criteriaEventCount: criteriaHistory.length,
             summary,
             samplingPolicy: {
                 focusEventTypes: Array.from(DAG_FOCUS_EVENT_TYPES),
                 minIntervalMsByType: DAG_EVENT_MIN_INTERVAL_BY_TYPE,
             },
             interactions: dagInteractions,
+            criteriaHistory,
         };
-        const fileName = `dag_interactions_${timestamp.toISOString().replace(/[:.]/g, '-')}.json`;
+        const fileName = `study_interactions_${timestamp.toISOString().replace(/[:.]/g, '-')}.json`;
 
         let objectUrl = null;
         try {
@@ -92,7 +94,7 @@ export const useDagInteractions = (activeRunId) => {
             dagInteractionLastRecordedAtRef.current.clear();
             dagZoomScaleByRunRef.current.clear();
             dagZoomTranslateByRunRef.current.clear();
-            alert(`Exported ${payload.count} detailed DAG interactions.`);
+            alert(`Exported ${payload.count} DAG interactions and ${payload.criteriaEventCount} criteria events.`);
         } catch (error) {
             alert(`Failed to export DAG interactions: ${error?.message || 'unknown error'}`);
         } finally {
@@ -100,7 +102,7 @@ export const useDagInteractions = (activeRunId) => {
                 URL.revokeObjectURL(objectUrl);
             }
         }
-    }, [dagInteractions]);
+    }, [criteriaHistory, dagInteractions]);
 
     return {
         dagInteractions,

@@ -1,6 +1,7 @@
 import { createApiClient } from './client';
 import { API_ENDPOINTS } from './endpoints';
 import { API_BASE_URL } from '../../config/runtimeConfig';
+import { debugLog } from '../../utils/logger';
 
 const defaultClient = createApiClient();
 
@@ -17,9 +18,9 @@ const buildEventStreamUrl = (path) => {
 };
 
 export const generatePersona = (demographic, model, client = defaultClient) => {
-	console.log('[API] generatePersona - Request:', { demographic, model });
+	debugLog('[API] generatePersona - Request:', { demographic, model });
 	return client.post(API_ENDPOINTS.persona.generate, { demographic, model }).then(response => {
-		console.log('[API] generatePersona - Response:', response);
+		debugLog('[API] generatePersona - Response:', response);
 		return response;
 	});
 };
@@ -30,9 +31,9 @@ export const generatePersonaVariation = (personaContent, values, model, client =
 		values,
 		model,
 	};
-	console.log('[API] generatePersonaVariation - Request:', { personaContent, values, model });
+	debugLog('[API] generatePersonaVariation - Request:', { personaContent, values, model });
 	return client.post(API_ENDPOINTS.personaVariation.generate, payload).then(response => {
-		console.log('[API] generatePersonaVariation - Response:', response);
+		debugLog('[API] generatePersonaVariation - Response:', response);
 		return response;
 	});
 };
@@ -68,12 +69,12 @@ export const fetchHistoryLogs = (optionsOrClient = {}, maybeClient) => {
 	const query = params.length > 0 ? `?${params.join('&')}` : '';
 	const path = `${API_ENDPOINTS.historyLogs.root}${query}`;
 
-	console.log('[API] fetchHistoryLogs - Request:', {
+	debugLog('[API] fetchHistoryLogs - Request:', {
 		dataSource: dataSource || null,
 		screenshotMode: screenshotMode || null,
 	});
 	return client.get(path).then(response => {
-		console.log('[API] fetchHistoryLogs - Response:', response);
+		debugLog('[API] fetchHistoryLogs - Response:', response);
 		return response;
 	});
 };
@@ -91,7 +92,7 @@ export const runBrowserAgent = (payload, optionsOrClient, maybeClient) => {
 		}
 	}
 
-	console.log('[API] runBrowserAgent - Request:', payload);
+	debugLog('[API] runBrowserAgent - Request:', payload);
 	const retryOnNetworkError = typeof requestOptions.retryOnNetworkError === 'boolean'
 		? requestOptions.retryOnNetworkError
 		: false;
@@ -108,18 +109,18 @@ export const runBrowserAgent = (payload, optionsOrClient, maybeClient) => {
 		signal: requestOptions.signal,
 		...(requestOptions.headers ? { headers: requestOptions.headers } : {}),
 	}).then(response => {
-		console.log('[API] runBrowserAgent - Response:', response);
+		debugLog('[API] runBrowserAgent - Response:', response);
 		return response;
 	});
 };
 
 export const stopBrowserAgentRun = (runId, client = defaultClient) => {
-	console.log('[API] stopBrowserAgentRun - Request:', { runId });
+	debugLog('[API] stopBrowserAgentRun - Request:', { runId });
 	return client.post(API_ENDPOINTS.browserAgent.stop, { run_id: runId }, {
 		retryOnNetworkError: false,
 		maxRetries: 0,
 	}).then(response => {
-		console.log('[API] stopBrowserAgentRun - Response:', response);
+		debugLog('[API] stopBrowserAgentRun - Response:', response);
 		return response;
 	});
 };
@@ -240,17 +241,17 @@ export const streamBrowserAgentEvents = (
 };
 
 export const cleanupServerFiles = (client = defaultClient) => {
-	console.log('[API] cleanupServerFiles - Request');
+	debugLog('[API] cleanupServerFiles - Request');
 	return client.post(API_ENDPOINTS.maintenance.cleanupFiles, {}).then(response => {
-		console.log('[API] cleanupServerFiles - Response:', response);
+		debugLog('[API] cleanupServerFiles - Response:', response);
 		return response;
 	});
 };
 
 export const restartBackendService = (client = defaultClient) => {
-	console.log('[API] restartBackendService - Request');
+	debugLog('[API] restartBackendService - Request');
 	return client.post(API_ENDPOINTS.maintenance.restartService, {}).then(response => {
-		console.log('[API] restartBackendService - Response:', response);
+		debugLog('[API] restartBackendService - Response:', response);
 		return response;
 	});
 };
@@ -262,9 +263,9 @@ export const generateCriteria = (taskName, taskUrl, personas, models, client = d
 		personas,
 		models,
 	};
-	console.log('[API] generateCriteria - Request:', { taskName, taskUrl, personas, models });
+	debugLog('[API] generateCriteria - Request:', { taskName, taskUrl, personas, models });
 	return client.post(API_ENDPOINTS.criteria.generate, payload).then(response => {
-		console.log('[API] generateCriteria - Response:', response);
+		debugLog('[API] generateCriteria - Response:', response);
 		return response;
 	});
 };
@@ -308,9 +309,9 @@ export const evaluateExperiment = (conditionIds, criteria, judgeModel = null, cl
 		payload.judge_model = judgeModel;
 	}
 
-	console.log('[API] evaluateExperiment - Request:', { payload, judgeModel });
+	debugLog('[API] evaluateExperiment - Request:', { payload, judgeModel });
 	return client.post(API_ENDPOINTS.judge.evaluateExperiment, payload).then(response => {
-		console.log('[API] evaluateExperiment - Response:', response);
+		debugLog('[API] evaluateExperiment - Response:', response);
 		return response;
 	}).catch(error => {
 		console.error('[API] evaluateExperiment - Error:', error);

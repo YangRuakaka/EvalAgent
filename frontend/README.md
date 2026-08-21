@@ -11,10 +11,18 @@
 
 - `.env.development`
    - `REACT_APP_API_BASE_URL=http://127.0.0.1:8000/api/v1`
-   - `REACT_APP_TARGET_BASE_URL=http://localhost:3000`
+   - `REACT_APP_WEBHARBOR_HOST=http://localhost`
 - `.env.production`
-   - `REACT_APP_API_BASE_URL=https://eval-agent-backend-588077581214.us-central1.run.app/api/v1`
-   - `REACT_APP_TARGET_BASE_URL=http://34.55.136.249:3000`
+   - `REACT_APP_API_BASE_URL=http://127.0.0.1:8000/api/v1`
+   - `REACT_APP_WEBHARBOR_HOST=http://localhost`
+
+   WebHarbor runs one site per local port. EvalAgent's target picker expands
+   this host into ports `40000`–`40014` (Allrecipes, Amazon, Apple, ArXiv,
+   BBC News, Booking, GitHub, Google Flights, Google Maps, Google Search,
+   Hugging Face, WolframAlpha, Cambridge Dictionary, Coursera, and ESPN).
+   The backend that runs Browser Use must be on the same machine/network
+   namespace as WebHarbor; a remote backend cannot reach the user's
+   `localhost`.
 
 如需改地址，只改对应环境文件即可。
 

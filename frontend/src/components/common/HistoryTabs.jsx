@@ -46,6 +46,17 @@ const HistoryTabs = ({ items, activeId, onSelect, onClose, closable, fullWidth }
     return null;
   }
 
+  const getStatusMeta = (item) => {
+    const status = String(item.status || '').toLowerCase();
+    if (item.isRunning || status === 'running' || status === 'queued') {
+      return { key: 'running', label: status === 'queued' ? 'Queued' : 'Running' };
+    }
+    if (status === 'completed') return { key: 'completed', label: 'Completed' };
+    if (status === 'failed') return { key: 'failed', label: 'Failed' };
+    if (status === 'cancelled') return { key: 'cancelled', label: 'Cancelled' };
+    return null;
+  };
+
   const requestClose = (id) => {
     if (closingTabs[id]) {
       return;
@@ -119,6 +130,7 @@ const HistoryTabs = ({ items, activeId, onSelect, onClose, closable, fullWidth }
       <ul className="history-tabs__list">
         {processedItems.map((item) => {
           const isActive = item.id === activeId;
+          const statusMeta = getStatusMeta(item);
           const closingInfo = closingTabs[item.id];
           const itemStyle = closingInfo
             ? {
@@ -158,7 +170,24 @@ const HistoryTabs = ({ items, activeId, onSelect, onClose, closable, fullWidth }
                   onSelect(item.id);
                 }}
               >
-                <span className="history-tabs__label" title={item.label}>{item.displayLabel}</span>
+                {statusMeta && (
+                  <span
+                    className={`history-tabs__status history-tabs__status--${statusMeta.key}`}
+                    title={statusMeta.label}
+                    aria-label={statusMeta.label}
+                    role="status"
+                  >
+                    {statusMeta.key === 'completed' && '✓'}
+                    {statusMeta.key === 'failed' && '×'}
+                    {statusMeta.key === 'cancelled' && '–'}
+                  </span>
+                )}
+                <span
+                  className="history-tabs__label"
+                  title={statusMeta ? `${item.label} · ${statusMeta.label}` : item.label}
+                >
+                  {item.displayLabel}
+                </span>
                 {item.description && (
                   <span className="history-tabs__description">{item.description}</span>
                 )}

@@ -272,11 +272,15 @@ const EnvironmentSetting = ({
                   value={environmentTaskUrl}
                   onChange={(e) => handleTaskUrlChange(e.target.value)}
                   list="task-url-options"
-                  placeholder={`${TARGET_BASE_URL}/...`}
+                  placeholder={`${TARGET_BASE_URL}:40001`}
                 />
                 <datalist id="task-url-options">
                   {TARGET_URL_OPTIONS.map((option) => (
-                    <option key={option.path} value={option.value} label={option.label} />
+                    <option
+                      key={option.id}
+                      value={option.value}
+                      label={`${option.label} — localhost:${option.port}`}
+                    />
                   ))}
                 </datalist>
               </div>

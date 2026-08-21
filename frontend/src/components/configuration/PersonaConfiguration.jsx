@@ -309,7 +309,10 @@ const PersonaConfiguration = ({
             </div>
           </div>
           <div className="config-value-variation__controls">
-            <span className="config-value-variation__label">Select Values to generate variations</span>
+            <div className="config-value-variation__label-row">
+              <span className="config-value-variation__label">Select Values to generate variations</span>
+              <span className="config-value-variation__label-hint">Each value changes what the persona prioritizes</span>
+            </div>
             <div className={`config-value-variation__dropdown${isValueDropdownOpen ? ' config-value-variation__dropdown--open' : ''}`}>
               <button
                 type="button"
@@ -327,7 +330,10 @@ const PersonaConfiguration = ({
                   {valueOptions.map((option) => {
                     const isChecked = selectedVariationValues.includes(option.value);
                     return (
-                      <label key={option.value} className="config-value-variation__option">
+                      <label
+                        key={option.value}
+                        className={`config-value-variation__option${isChecked ? ' config-value-variation__option--selected' : ''}`}
+                      >
                         <input
                           type="checkbox"
                           className="config-value-variation__option-input"
@@ -335,7 +341,12 @@ const PersonaConfiguration = ({
                           onChange={() => handleValueToggle(option.value)}
                         />
                         <span className="config-value-variation__option-color" style={{ backgroundColor: option.color }} />
-                        <span className="config-value-variation__option-label">{option.label}</span>
+                        <span className="config-value-variation__option-copy">
+                          <span className="config-value-variation__option-label">{option.label}</span>
+                          {option.description && (
+                            <span className="config-value-variation__option-description">{option.description}</span>
+                          )}
+                        </span>
                       </label>
                     );
                   })}

@@ -1,0 +1,34 @@
+{
+  "experiment_id": "march_binary_dan10_preliminary",
+  "source_commit": "2881b03bc19ac4ee6c53c08ec94930348ab59465",
+  "label_policy": {
+    "allowed_labels": ["pass", "fail"],
+    "legacy_partial_mapping": "pass",
+    "prompt_allows_partial": false
+  },
+  "selection": {
+    "source": "Dan's 48 completed criteria1 annotations",
+    "rule": "Deterministic balanced preliminary sample: 5 Dan PASS and 5 Dan FAIL, covering all eight WebHarbor task-family prefixes.",
+    "case_count": 10,
+    "dan_pass_count": 5,
+    "dan_fail_count": 5
+  },
+  "cases": [
+    {"case_id": "HOT-03-B", "dan_overall": "pass"},
+    {"case_id": "INF-02-A", "dan_overall": "pass"},
+    {"case_id": "SPT-02-A", "dan_overall": "pass"},
+    {"case_id": "RET-01-B", "dan_overall": "pass"},
+    {"case_id": "MLM-02-B", "dan_overall": "pass"},
+    {"case_id": "EDU-03-C", "dan_overall": "fail"},
+    {"case_id": "REC-01-C", "dan_overall": "fail"},
+    {"case_id": "FLT-01-B", "dan_overall": "fail"},
+    {"case_id": "HOT-02-A", "dan_overall": "fail"},
+    {"case_id": "SPT-01-B", "dan_overall": "fail"}
+  ],
+  "systems": [
+    {"system_id": "agentic_gpt5", "method": "march_agentic", "judge_model": "gpt-5"},
+    {"system_id": "agentic_deepseek", "method": "march_agentic", "judge_model": "deepseek-chat"},
+    {"system_id": "baseline_gpt5", "method": "march_one_shot_baseline", "judge_model": "gpt-5"},
+    {"system_id": "baseline_deepseek", "method": "march_one_shot_baseline", "judge_model": "deepseek-chat"}
+  ]
+}

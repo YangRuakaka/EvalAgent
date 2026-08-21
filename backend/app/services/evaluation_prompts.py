@@ -134,7 +134,7 @@ Your job:
 7) Keep snippets compact and atomic (roughly 4-320 chars each); no ellipses.
 8) If no high-signal evidence exists for a step or field, allow medium-signal contextual snippets that clarify intent-action-outcome transitions.
 9) Assign a provisional verdict to each evidence item based only on what the snippet itself supports.
-10) If a snippet is ambiguous or weakly informative, prefer partial rather than fail.
+10) Use PASS for ambiguous, mixed, weakly supportive, or partially satisfying evidence; use FAIL only for clear criterion-violating evidence.
 11) It is acceptable to include planning or intent snippets (next_goal/thinking_process/memory) as supportive evidence when they are consistent with nearby actions/outcomes.
 
 Epistemic rules:
@@ -153,12 +153,12 @@ Hard constraints:
 - highlighted_text MUST be an exact substring of the raw step field text
 - Do not use ellipses
 - source_field must be one of: evaluation|memory|thinking_process|next_goal|action
-- verdict must be one of: pass|fail|partial
+- verdict must be one of: pass|fail. Never output partial.
 
 Verdict semantics:
 - pass = the snippet supports behavior that satisfies this criterion
+- pass also includes mixed/ambiguous or partially satisfying evidence that would otherwise be labeled partial
 - fail = the snippet supports behavior that does not satisfy this criterion
-- partial = the snippet is mixed/ambiguous or only partially supports criterion satisfaction
 
 Output ONLY one JSON object:
 {{
@@ -167,7 +167,7 @@ Output ONLY one JSON object:
       "step_index": 0,
       "source_field": "thinking_process",
       "highlighted_text": "exact text",
-      "verdict": "pass|fail|partial",
+      "verdict": "pass|fail",
       "reasoning": "..."
     }}
   ]
@@ -213,22 +213,22 @@ Your job:
 2) Base the verdict on BOTH the local evidence and the phase-level behavior context (phase_summary and criterion_intent).
 3) Treat any per-evidence verdict in verified_evidence_json as a provisional polarity signal, not a binding final answer.
 4) Do not copy a single evidence item's reasoning verbatim as the full step reasoning; synthesize across items when multiple exist.
-5) Reconcile conflicts: if evidence for a step is mixed or contradictory, prefer partial.
+5) Reconcile conflicts: if evidence for a step is mixed or contradictory, choose pass unless there is clear criterion-violating evidence.
 6) Do not invent new step indices; only output steps present in verified_evidence_json.
 7) Weigh both positive and negative evidence by severity and grounding quality; do not default to fail when evidence is mixed or low-confidence.
-8) Reserve fail for clear criterion-violating behavior or strong contradictory evidence; otherwise use partial for uncertainty.
+8) Reserve fail for clear criterion-violating behavior or strong contradictory evidence; otherwise use pass for uncertainty or partial satisfaction.
 
 Verdict space:
 - pass = this step's behavior satisfies the criterion
+- pass also includes mixed/uncertain or partially satisfying behavior that would otherwise be labeled partial
 - fail = this step's behavior does not satisfy the criterion
-- partial = this step is mixed/uncertain or only partially satisfies the criterion
 
 Output ONLY one JSON object:
 {{
   "step_assessments": [
     {{
       "step_index": 0,
-      "verdict": "pass|fail|partial",
+      "verdict": "pass|fail",
       "reasoning": "...",
       "confidence_score": 0.0
     }}
@@ -270,9 +270,9 @@ Aggregated verified evidence (selected high-signal snippets across all phases):
 CRITICAL — Evidence primacy rules (these override all job rules below):
 A) Your ground truth is the actual evidence content in aggregated_evidence_json. Phase-level summaries/notes are context, not final labels.
 B) If any phase-level verdict-like text appears in context, treat it as a non-binding heuristic and re-derive from evidence content.
-C) If aggregated_evidence_json items are predominantly pass or partial AND no snippet explicitly demonstrates criterion-violating behavior, output PASS. Predominant pass/partial evidence with no explicit violation is sufficient to justify PASS.
+C) If aggregated_evidence_json items are predominantly pass AND no snippet explicitly demonstrates criterion-violating behavior, output PASS. Mixed, ambiguous, or partially satisfying evidence is represented as pass in this binary experiment.
 D) A FAIL verdict requires at least one clearly criterion-violating snippet in aggregated_evidence_json. Context-level labels or vague negative tone are NOT sufficient on their own.
-E) Evidence with partial polarity should be treated as weak-to-moderate supportive signal unless contradicted by explicit violating snippets.
+E) Weak-to-moderate supportive evidence should favor PASS unless contradicted by explicit violating snippets.
 
 Your job:
 1) Integrate phase context and aggregated evidence into one criterion-level verdict, applying the CRITICAL rules above first and prioritizing evidence content.
@@ -328,7 +328,7 @@ Condition summaries:
 Your job:
 1) Rank all conditions from best to worst for this criterion.
 2) Use ONLY these two dimensions for ranking:
-   - overall_assessment (primary: pass > partial > fail > unknown)
+   - overall_assessment (primary: pass > fail > unknown)
    - grounded evidence quality/strength (secondary tie-breaker)
 3) Do NOT use confidence_score/confidence as a ranking basis.
 4) Keep condition_id exactly as provided; do not invent, rename, or omit IDs.

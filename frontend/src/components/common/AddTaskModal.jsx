@@ -2,9 +2,7 @@ import React, { useState } from 'react';
 import './AddTaskModal.css';
 import { TARGET_URL_OPTIONS } from '../../config/runtimeConfig';
 
-const QUICK_TASK_TARGETS = TARGET_URL_OPTIONS.filter((option) => (
-  option.path === '/riverbuy' || option.path === '/zoomcar' || option.path === '/dwellio'
-));
+const QUICK_TASK_TARGETS = TARGET_URL_OPTIONS;
 
 const AddTaskModal = ({ open, onSave, onCancel, existingTasks = [] }) => {
   const [taskName, setTaskName] = useState('');
@@ -113,7 +111,9 @@ const AddTaskModal = ({ open, onSave, onCancel, existingTasks = [] }) => {
             >
               <option value="">Select a target</option>
               {QUICK_TASK_TARGETS.map((option) => (
-                <option key={option.path} value={option.value}>{option.label}</option>
+                <option key={option.id} value={option.value}>
+                  {option.label} — localhost:{option.port}
+                </option>
               ))}
             </select>
             {errors.targetUrl && (

@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 
 import { createApiClient } from '../services/api/client';
 import { API_ENDPOINTS } from '../services/api/endpoints';
+import { debugLog } from '../utils/logger';
 
 /**
  * React hook that provides action creators for interacting with the shared application state.
@@ -10,15 +11,15 @@ import { API_ENDPOINTS } from '../services/api/endpoints';
  */
 export const useAppActions = (dispatch) => {
   // Create API client instance for this hook (enables testing, dynamic config, etc.)
-  const apiClient = createApiClient();
+  const apiClient = useMemo(() => createApiClient(), []);
 
   // ============ Configuration & Criteria Fetching ============
   const createFetchAction = useCallback((endpoint, actionType) => async () => {
     try {
       dispatch({ type: `${actionType}/loading` });
-      console.log(`[API] ${actionType} - Request from endpoint:`, endpoint);
+      debugLog(`[API] ${actionType} - Request from endpoint:`, endpoint);
       const response = await apiClient.get(endpoint);
-      console.log(`[API] ${actionType} - Response:`, response);
+      debugLog(`[API] ${actionType} - Response:`, response);
       if (response.ok) {
         dispatch({ type: `${actionType}/loaded`, payload: response.data });
       } else {
@@ -54,9 +55,9 @@ export const useAppActions = (dispatch) => {
   const createCriteria = useCallback(async (criteriaData) => {
     try {
       dispatch({ type: 'criteria/creating' });
-      console.log('[API] createCriteria - Request:', criteriaData);
+      debugLog('[API] createCriteria - Request:', criteriaData);
       const response = await apiClient.post(API_ENDPOINTS.criteria.create, criteriaData);
-      console.log('[API] createCriteria - Response:', response);
+      debugLog('[API] createCriteria - Response:', response);
       if (response.ok) {
         dispatch({ type: 'criteria/created', payload: response.data });
         return response.data;
@@ -69,17 +70,17 @@ export const useAppActions = (dispatch) => {
       dispatch({ type: 'criteria/error', payload: error.message });
       return null;
     }
-  }, [dispatch]);
+  }, [apiClient, dispatch]);
 
   const updateCriteria = useCallback(async (criteriaId, criteriaData) => {
     try {
       dispatch({ type: 'criteria/updating' });
-      console.log('[API] updateCriteria - Request:', { criteriaId, criteriaData });
+      debugLog('[API] updateCriteria - Request:', { criteriaId, criteriaData });
       const response = await apiClient.put(
         API_ENDPOINTS.criteria.update(criteriaId),
         criteriaData,
       );
-      console.log('[API] updateCriteria - Response:', response);
+      debugLog('[API] updateCriteria - Response:', response);
       if (response.ok) {
         dispatch({ type: 'criteria/updated', payload: response.data });
         return response.data;
@@ -92,14 +93,14 @@ export const useAppActions = (dispatch) => {
       dispatch({ type: 'criteria/error', payload: error.message });
       return null;
     }
-  }, [dispatch]);
+  }, [apiClient, dispatch]);
 
   const deleteCriteria = useCallback(async (criteriaId) => {
     try {
       dispatch({ type: 'criteria/deleting' });
-      console.log('[API] deleteCriteria - Request:', { criteriaId });
+      debugLog('[API] deleteCriteria - Request:', { criteriaId });
       const response = await apiClient.delete(API_ENDPOINTS.criteria.delete(criteriaId));
-      console.log('[API] deleteCriteria - Response:', response);
+      debugLog('[API] deleteCriteria - Response:', response);
       if (response.ok) {
         dispatch({ type: 'criteria/deleted', payload: criteriaId });
         return true;
@@ -112,7 +113,7 @@ export const useAppActions = (dispatch) => {
       dispatch({ type: 'criteria/error', payload: error.message });
       return false;
     }
-  }, [dispatch]);
+  }, [apiClient, dispatch]);
 
   // ============ Other Actions ============
   const selectExperiment = useCallback((experimentId) => {

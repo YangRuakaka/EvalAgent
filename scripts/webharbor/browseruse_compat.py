@@ -27,6 +27,10 @@ os.environ.setdefault(
 os.environ.setdefault(
     "XDG_CACHE_HOME", str(REPO_ROOT / ".browseruse-latest-test" / "cache")
 )
+os.environ.setdefault(
+    "PLAYWRIGHT_BROWSERS_PATH",
+    str(REPO_ROOT / ".browseruse-latest-test" / "ms-playwright"),
+)
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
 os.environ.setdefault("TIMEOUT_BrowserStartEvent", "120")
 os.environ.setdefault("TIMEOUT_BrowserLaunchEvent", "120")
@@ -121,6 +125,50 @@ def _check_webharbor() -> None:
     with urllib.request.urlopen(TASK["url"], timeout=15) as response:
         if response.status >= 400:
             raise RuntimeError(f"WebHarbor site check failed with HTTP {response.status}")
+
+
+def _find_browser_executable() -> Path | None:
+    """Find a system browser or the repository-isolated Playwright browser."""
+
+    static_candidates = [
+        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+        Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+        Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+    ]
+    playwright_root = Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"])
+    isolated_candidates = [
+        *sorted(
+            playwright_root.glob(
+                "chromium-*/chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+            ),
+            reverse=True,
+        ),
+        *sorted(
+            playwright_root.glob(
+                "chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium"
+            ),
+            reverse=True,
+        ),
+        *sorted(
+            playwright_root.glob(
+                "chromium_headless_shell-*/chrome-headless-shell-mac*/chrome-headless-shell"
+            ),
+            reverse=True,
+        ),
+        *sorted(
+            playwright_root.glob("chromium-*/chrome-linux*/chrome"), reverse=True
+        ),
+        *sorted(
+            playwright_root.glob("chromium-*/chrome-win*/chrome.exe"), reverse=True
+        ),
+    ]
+    return next(
+        (path for path in [*static_candidates, *isolated_candidates] if path.is_file()),
+        None,
+    )
 
 
 def _safe_call(obj: Any, name: str) -> Any:
@@ -285,6 +333,14 @@ def _build_prompt() -> str:
         "- Keep a compact evidence table in memory. Before leaving a candidate "
         "page, record every requested field that is visibly available. Do not "
         "write or read local files unless the task explicitly requests a file.\n"
+        "- On every candidate detail page, call `extract` exactly once with a "
+        "compact query covering all task-requested fields. Copy the returned field "
+        "strings verbatim into memory before leaving the page. In the final table, "
+        "reuse those exact strings: never round, normalize, replace, or reconstruct "
+        "ratings, counts, times, sizes, dates, metrics, or other extracted values. "
+        "Do not claim that an attribute, topic, label, metric, or capability was "
+        "visible unless that exact claim is supported by an extracted field. If a "
+        "field was not extracted, write `not visible` rather than guessing.\n"
         "- Treat fields qualified by \"if visible\" as optional. Check the current "
         "task-relevant page once; if the field is absent, report \"not visible\". "
         "Do not open files, source/config pages, or unrelated tabs solely to find "
@@ -294,8 +350,9 @@ def _build_prompt() -> str:
         "after the choice and all requested fields are supported.\n"
         "- Use the supplied site's visible navigation, search, filters, and sort "
         "controls. Stay on the supplied website. Do not guess external or direct "
-        "URLs, and do not open PDFs, downloads, checkout, enrollment, reservation, "
-        "or other prohibited flows.\n"
+        "URLs: seeing a title is not permission to construct its path. Open every "
+        "candidate by clicking a currently visible link. Do not open PDFs, downloads, "
+        "checkout, enrollment, reservation, or other prohibited flows.\n"
         "- Never use the browser's generic `search` action: it opens an external "
         "search engine. Perform site search only through visible inputs and buttons "
         "on the supplied website. Do not use `evaluate` to bypass ordinary form "
@@ -335,7 +392,9 @@ def _build_prompt() -> str:
         "or exploratory navigation: answer from grounded evidence already seen. "
         "Reserve the final step for a concise answer and call done. If a requested "
         "field is not visible, say so instead of continuing an open-ended search "
-        "or inventing it.\n\n"
+        "or inventing it. Put the full value immediately after each required final "
+        "label on the same physical line; never put a label on one line and its value "
+        "on the next.\n\n"
         "Base relevant choices only on the stated persona. "
         "Do not invent additional values. "
         "Treat the website as an ordinary consumer-facing website. "
@@ -448,7 +507,15 @@ def _build_llm(model: str) -> Any:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is missing")
-    kwargs: dict[str, Any] = {"model": model, "api_key": api_key, "temperature": 0.0}
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "api_key": api_key,
+        "temperature": 0.0,
+        "max_completion_tokens": 16384,
+        "timeout": 180.0,
+    }
+    if model.lower().startswith(("gpt-5", "o1", "o3", "o4")):
+        kwargs["reasoning_effort"] = "minimal"
     base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL")
     if base_url:
         kwargs["base_url"] = base_url
@@ -499,12 +566,7 @@ async def _run_agent(model: str, max_steps: int, headless: bool, output_dir: Pat
                 "--no-first-run",
             ],
         }
-        chrome_candidates = [
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
-        ]
-        executable_path = next((path for path in chrome_candidates if path.is_file()), None)
+        executable_path = _find_browser_executable()
         if executable_path is not None:
             browser_kwargs["executable_path"] = str(executable_path)
 
@@ -534,6 +596,7 @@ async def _run_agent(model: str, max_steps: int, headless: bool, output_dir: Pat
             extend_system_message=structured_output_guard,
             enable_planning=False,
             max_failures=8,
+            llm_timeout=180,
         )
         history = await agent.run(max_steps=max_steps)
         elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()

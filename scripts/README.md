@@ -15,6 +15,13 @@ Run commands from the repository root unless stated otherwise.
 - `run_webharbor_v13_pilot_background.ps1` starts the pilot in a hidden
   background process and records PID/stdout/stderr under the canonical run
   directory.
+- `user_study_prerun_catalog.py` defines the CHI extension's three fixed tasks
+  and four task-specific personas per new domain.
+- `run_user_study_preruns.py` runs those 12 trajectories into an isolated
+  `data1`/`data2`/`data3` staging tree without changing the UI's existing data.
+- `audit_user_study_preruns.py` requires successful legacy-format runs, visible
+  evidence markers, four distinct action trajectories per task, and at least
+  three distinct recommendations per task.
 
 Examples:
 
@@ -22,6 +29,18 @@ Examples:
 .\.venv-browseruse-0136\Scripts\python.exe scripts\webharbor\run_webharbor_v13_pilot.py --help
 .\scripts\webharbor\run_webharbor_v13_pilot_background.ps1
 ```
+
+macOS/Linux CHI user-study pre-run examples:
+
+```bash
+.venv-browseruse-0136/bin/python scripts/webharbor/run_user_study_preruns.py --plan-only
+.venv-browseruse-0136/bin/python scripts/webharbor/run_user_study_preruns.py --preflight
+.venv-browseruse-0136/bin/python scripts/webharbor/run_user_study_preruns.py
+.venv-browseruse-0136/bin/python scripts/webharbor/audit_user_study_preruns.py
+```
+
+For a remote WebHarbor deployment that exposes the same service ports, add
+`--webharbor-host <external-ip-or-hostname>` to both preflight and run commands.
 
 ## `experiments/`
 

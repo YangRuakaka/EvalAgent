@@ -749,10 +749,16 @@ const TrajectoryVisualizer = ({
 		}
 		return details.map((item, index) => {
 			const model = item.model || '';
-			const personaValue = item.value || item.metadata?.value || item.persona?.value || '';
+			const personaValue = item.value
+				|| item.configuration?.value
+				|| item.metadata?.value
+				|| item.metadata?.configuration?.value
+				|| item.persona?.value
+				|| item.metadata?.persona?.value
+				|| '';
 			const taskName = item.task?.name || item.metadata?.task?.name || '';
 			const runIndex = item.run_index !== undefined ? item.run_index : index;
-			const label = `#${runIndex} ${model}${personaValue ? ' (' + personaValue + ')' : ''}`;
+			const label = `#${runIndex} ${model || 'Unknown model'} · Value: ${personaValue || 'Unknown'}`;
 			const color = colorMap.get(index) || '#1e3a8a';
 			const nodePath = (nodePathMap.get(index) || []).slice().sort((a, b) => a.position - b.position);
 			let linkPath = [];

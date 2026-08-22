@@ -13,7 +13,6 @@ const EVALUATION_MODEL_OPTIONS = [
 	{ value: 'gpt-5', label: 'OpenAI GPT-5' },
 	{ value: 'gpt-4o-mini', label: 'OpenAI GPT-4o mini' },
 	{ value: 'gpt-4o', label: 'OpenAI GPT-4o' },
-	{ value: 'deepseek-chat', label: 'DeepSeek Chat' },
 	{ value: 'claude-3-5-sonnet-20240620', label: 'Claude 3.5 Sonnet' },
 	{ value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
 ];
@@ -195,6 +194,15 @@ const VisualizationView = ({
 
 		return trajectoryConditionsByRunId[activeTrajectoryEntry.id] || [];
 	}, [activeTrajectoryEntry, trajectoryConditionsByRunId]);
+	const activeTask = useMemo(() => {
+		const primaryRun = activeTrajectoryEntry?.runs?.[0] || activeRun?.runs?.[0] || {};
+		const task = primaryRun.metadata?.task || activeTrajectoryEntry?.task || activeRun?.task || {};
+		return {
+			name: task.name || 'Unknown Task',
+			description: task.description || primaryRun.metadata?.task_description || '',
+			url: task.url || '',
+		};
+	}, [activeRun, activeTrajectoryEntry]);
 	const hasActiveTrajectoryContent = Boolean(activeTrajectoryEntry?.trajectory || shouldShowBackendLogs);
 
 	return (
@@ -209,6 +217,24 @@ const VisualizationView = ({
 						closable={true}
 					/>
 				</div>
+				{activeTrajectoryEntry && (
+					<details className="visualization-view__task-details">
+						<summary className="visualization-view__task-summary">
+							<span className="visualization-view__task-label">Task</span>
+							<strong className="visualization-view__task-name">{activeTask.name}</strong>
+							<span className="visualization-view__task-preview">
+								{activeTask.description || 'No task description was included in this run.'}
+							</span>
+							<span className="visualization-view__task-toggle">Details</span>
+						</summary>
+						<div className="visualization-view__task-body">
+							<p>{activeTask.description || 'No task description was included in this run.'}</p>
+							{activeTask.url && (
+								<a href={activeTask.url} target="_blank" rel="noreferrer">Open task site</a>
+							)}
+						</div>
+					</details>
+				)}
 
 				<div className="visualization-view__content">
 					<section className={`visualization-view__panel${activeTab !== 'trajectory' ? ' visualization-view__panel--hidden' : ''}`}>

@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -325,82 +326,23 @@ def _build_prompt() -> str:
         f"Website: {TASK['url']}\n\n"
         f"Persona value: {PERSONA['value']}\n"
         f"Persona: {PERSONA['content']}\n\n"
-        "Execution discipline (this controls browsing efficiency only; it does "
-        "not change the task or persona):\n"
-        "- First identify options that satisfy the task's explicit requirements. "
-        "Use the persona only to compare task-valid visible options; do not turn "
-        "the persona into a requirement to locate one particular famous item.\n"
-        "- Keep a compact evidence table in memory. Before leaving a candidate "
-        "page, record every requested field that is visibly available. Do not "
-        "write or read local files unless the task explicitly requests a file.\n"
-        "- On every candidate detail page, call `extract` exactly once with a "
-        "compact query covering all task-requested fields. Copy the returned field "
-        "strings verbatim into memory before leaving the page. In the final table, "
-        "reuse those exact strings: never round, normalize, replace, or reconstruct "
-        "ratings, counts, times, sizes, dates, metrics, or other extracted values. "
-        "Do not claim that an attribute, topic, label, metric, or capability was "
-        "visible unless that exact claim is supported by an extracted field. If a "
-        "field was not extracted, write `not visible` rather than guessing.\n"
-        "- Treat fields qualified by \"if visible\" as optional. Check the current "
-        "task-relevant page once; if the field is absent, report \"not visible\". "
-        "Do not open files, source/config pages, or unrelated tabs solely to find "
-        "an optional field, and never infer a default value for it.\n"
-        "- For a comparison, inspect only enough task-valid candidates to make "
-        "the requested comparison (normally two). Do not inspect extra candidates "
-        "after the choice and all requested fields are supported.\n"
-        "- Use the supplied site's visible navigation, search, filters, and sort "
-        "controls. Stay on the supplied website. Do not guess external or direct "
-        "URLs: seeing a title is not permission to construct its path. Open every "
-        "candidate by clicking a currently visible link. Do not open PDFs, downloads, "
-        "checkout, enrollment, reservation, or other prohibited flows.\n"
-        "- Never use the browser's generic `search` action: it opens an external "
-        "search engine. Perform site search only through visible inputs and buttons "
-        "on the supplied website. Do not use `evaluate` to bypass ordinary form "
-        "controls. After typing into an autocomplete field, inspect the next state "
-        "and select one visible suggestion before interacting with another field.\n"
-        "- Treat any input, dropdown, filter, sort, or tab change that can rerender "
-        "the page as a step boundary. Execute that state-changing control, then "
-        "inspect the refreshed page before clicking another element. Never combine "
-        "a rerendering control with a later click that relies on the old element "
-        "indices from the same step.\n"
-        "- If an executed interaction leaves the page and relevant visible state "
-        "unchanged, do not repeat that same control; try one different visible "
-        "route. After a format/tool error, issue one corrected supported action "
-        "for the same immediate goal instead of adding new actions. Do not revisit "
-        "a page unless a specific requested field is still missing there.\n"
-        "- Do not add a requirement that the task did not state. For example, "
-        "do not require a candidate to be a survey, tutorial, beginner-labelled, "
-        "famous, or canonical unless the task explicitly requires that property. "
-        "The persona may rank task-valid candidates but may not make an otherwise "
-        "valid candidate invalid merely because it is not ideal.\n"
-        "- Track `search_attempts: N/2` in memory. A new query, category browse, "
-        "or guessed title/identifier is a distinct search strategy; scrolling "
-        "within one result list is part of that same strategy. Inspect the initial "
-        "results and at most one additional screen for each strategy. After two "
-        "unsuccessful strategies, do not issue another search, category browse, "
-        "or guessed URL/identifier. Use the best task-valid visible candidate "
-        "already observed. If no option satisfies an explicit hard constraint, "
-        "report that no qualifying option was found; do not silently relax it.\n"
-        "- For a hard numeric upper bound, use an available ascending/lowest-first "
-        "sort or the corresponding filter. If the first valid sorted result already "
-        "exceeds the bound, that is sufficient evidence that no displayed result "
-        "qualifies: stop immediately and do not scroll down and back up to prove "
-        "the same absence again. Finish with success=false and a concise no-match "
-        "report instead of recommending an invalid option.\n"
-        "- Stop browsing as soon as the required comparison and requested fields "
-        "are collected. Once 80% of the step budget is used, start no new search "
-        "or exploratory navigation: answer from grounded evidence already seen. "
-        "Reserve the final step for a concise answer and call done. If a requested "
-        "field is not visible, say so instead of continuing an open-ended search "
-        "or inventing it. Put the full value immediately after each required final "
-        "label on the same physical line; never put a label on one line and its value "
-        "on the next.\n\n"
-        "Base relevant choices only on the stated persona. "
-        "Do not invent additional values. "
-        "Treat the website as an ordinary consumer-facing website. "
-        "Do not discuss or speculate about the website's hosting, implementation, "
-        "evaluation setting, benchmark status, or test environment. "
-        "Refer to the website only by the brand presented on the page."
+        "Execution discipline (this does not add requirements to the task):\n"
+        "- Complete exactly the stated task. Do not invent candidate quotas, required "
+        "fields, hard constraints, or output formats that the task does not state.\n"
+        "- Use the persona as the sole preference for choosing among task-valid options, "
+        "not as a new hard eligibility requirement.\n"
+        "- Base the choice only on information visibly available on the supplied website. "
+        "Do not infer missing facts or use external search. Treat hidden or non-rendered "
+        "page data as unavailable. Before answering, verify the exact chosen title and "
+        "every quoted number in a rendered page you actually viewed, and copy them "
+        "verbatim.\n"
+        "- Use ordinary visible navigation and stay on the supplied website. Do not guess "
+        "or construct direct item URLs, and do not perform any prohibited action.\n"
+        "- Avoid repeated or redundant exploration. Inspect only enough options to make a "
+        "grounded choice, then stop. Once 80% of the step budget is used, start no new "
+        "exploration; reserve the final step for the answer and call done.\n"
+        "- In the final answer, state the chosen option and briefly explain how visible "
+        "evidence supports the persona-guided choice."
     )
 
 
@@ -514,7 +456,9 @@ def _build_llm(model: str) -> Any:
         "max_completion_tokens": 16384,
         "timeout": 180.0,
     }
-    if model.lower().startswith(("gpt-5", "o1", "o3", "o4")):
+    if model.lower().startswith("gpt-5.5"):
+        kwargs["reasoning_effort"] = "low"
+    elif model.lower().startswith(("gpt-5", "o1", "o3", "o4")):
         kwargs["reasoning_effort"] = "minimal"
     base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL")
     if base_url:
@@ -551,13 +495,15 @@ async def _run_agent(model: str, max_steps: int, headless: bool, output_dir: Pat
     started_at = datetime.now(timezone.utc)
 
     try:
+        task_url = urlparse(TASK["url"])
+        allowed_origin = f"{task_url.scheme}://{task_url.hostname}"
         browser_kwargs: dict[str, Any] = {
             "headless": headless,
             "user_data_dir": profile_dir,
             "storage_state": None,
             "keep_alive": False,
             "is_local": True,
-            "allowed_domains": ["http://localhost"],
+            "allowed_domains": [allowed_origin],
             "args": [
                 "--no-sandbox",
                 "--disable-dev-shm-usage",

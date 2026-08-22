@@ -28,54 +28,46 @@ DATASETS: list[dict[str, Any]] = [
         "site": "Allrecipes",
         "url": "http://localhost:40000",
         "reset_url": "http://localhost:8101/reset/allrecipes",
-        "task_name": "Choose a dessert recipe for a small dinner gathering",
+        "task_name": "Choose one dessert recipe for a small dinner",
         "task": (
-            "Find and recommend one dessert recipe for a small dinner gathering. "
-            "For every candidate, collect the recipe title, rating/review count, "
-            "preparation or total time, and one visible ingredient, dietary label, "
-            "or preparation technique. "
-            + FINAL_REPORT_INSTRUCTIONS
-            + " Do not save, rate, review, or submit anything."
+            "Choose one dessert recipe for a small dinner. "
+            "Do not save, rate, review, or submit anything."
         ),
         "personas": [
             {
                 "persona_id": "conformity",
                 "value": "Conformity",
                 "content": (
-                    "Maya wants a dessert with strong visible social proof. Among valid "
-                    "options, she prioritizes the combination of rating and review count, "
-                    "favoring a widely reviewed choice over a faster, newer, or more "
-                    "unusual recipe."
+                    "Maya values belonging and prefers choices that are likely to feel "
+                    "acceptable to most people. When uncertain, she is more comfortable "
+                    "following a broadly shared preference than standing out."
                 ),
             },
             {
                 "persona_id": "convenience",
                 "value": "Convenience",
                 "content": (
-                    "Maya has limited time and energy before the gathering. Among valid "
-                    "options, she prioritizes the shortest visible total or preparation "
-                    "time and a low-effort technique such as no-bake or few preparation "
-                    "steps, even when another option is more popular."
-                ),
-            },
-            {
-                "persona_id": "tradition",
-                "value": "Tradition",
-                "content": (
-                    "Maya wants a familiar dessert that most guests will immediately "
-                    "recognize. Among valid options, she favors a classic, established "
-                    "recipe and conventional baking technique over novelty, even when a "
-                    "less conventional recipe is faster."
+                    "Maya values ease and prefers choices that minimize time, effort, and "
+                    "complexity. She readily gives up some novelty or prestige for a "
+                    "smoother experience."
                 ),
             },
             {
                 "persona_id": "innovation",
                 "value": "Innovation",
                 "content": (
-                    "Maya wants the dessert to feel memorable and different. Among valid "
-                    "options, she favors an unusual visible ingredient, combination, or "
-                    "preparation technique over a familiar classic, provided the option "
-                    "still fits the task."
+                    "Maya is curious about unfamiliar possibilities and enjoys choices "
+                    "that feel fresh or distinctive. She accepts some uncertainty when it "
+                    "creates an opportunity to discover something new."
+                ),
+            },
+            {
+                "persona_id": "aesthetic_expression",
+                "value": "Aesthetic Expression",
+                "content": (
+                    "Maya values beauty and self-expression and pays close attention to "
+                    "how a choice looks and feels. She is willing to accept extra effort "
+                    "when the result seems more visually memorable."
                 ),
             },
         ],
@@ -87,68 +79,49 @@ DATASETS: list[dict[str, Any]] = [
         "site": "Coursera",
         "url": "http://localhost:40013",
         "reset_url": "http://localhost:8101/reset/coursera",
-        "task_name": "Choose an introductory course for practical AI skills",
+        "task_name": "Choose one introductory AI course",
         "task": (
-            "Find and recommend one introductory course for a beginner who wants to "
-            "develop practical AI skills. For every candidate, collect the title, "
-            "provider, rating plus review or enrollment information, duration, and two "
-            "visible topics, skills, labs, or projects. Record visible new-course "
-            "information when present. A candidate is task-valid only when its title, "
-            "description, or visible topics explicitly show an artificial intelligence, "
-            "AI, machine learning, generative AI, or large-language-model focus. A "
-            "general Python, programming, or data-science course without one of those "
-            "visible AI/ML signals is not task-valid and must not appear in the four-course "
-            "comparison. "
-            + FINAL_REPORT_INSTRUCTIONS
-            + " Do not enroll, start a trial, or purchase anything."
+            "Choose one introductory AI course. "
+            "Do not enroll, start a trial, or purchase anything."
         ),
         "personas": [
             {
                 "persona_id": "convenience",
                 "value": "Convenience",
                 "content": (
-                    "Jordan has little spare time and wants the fastest low-friction path "
-                    "to useful AI knowledge. Among valid beginner options, Jordan "
-                    "prioritizes the shortest visible duration and a self-contained course "
-                    "over a longer or multi-course program."
+                    "Jordan values ease and prefers choices that minimize time, effort, "
+                    "and complexity. Jordan readily gives up some novelty or prestige for "
+                    "a smoother experience."
                 ),
             },
             {
-                "persona_id": "conformity",
-                "value": "Conformity",
+                "persona_id": "mastery",
+                "value": "Mastery",
                 "content": (
-                    "Jordan trusts choices that have been validated by a large learner "
-                    "community. Among valid beginner options, Jordan prioritizes the "
-                    "strongest visible enrollment, review count, and rating evidence over "
-                    "novelty or breadth."
+                    "Jordan values mastery and prefers choices that support deep, sustained "
+                    "understanding rather than quick familiarity. Jordan is willing to "
+                    "invest substantially more effort for an option that appears "
+                    "comprehensive and demanding."
                 ),
             },
             {
                 "persona_id": "innovation",
                 "value": "Innovation",
                 "content": (
-                    "Jordan wants exposure to emerging AI capabilities. Among valid "
-                    "beginner options, Jordan prioritizes visibly current topics such as "
-                    "generative AI or large language models and any visible new-course "
-                    "signal over an older foundational curriculum. A visible generative-AI "
-                    "or large-language-model topic is decisive for Jordan. If the first "
-                    "three inspected candidates show neither signal, Jordan must use the "
-                    "site's search once for generative AI before opening or choosing a "
-                    "fourth candidate; a fourth ordinary AI/ML course is not a substitute "
-                    "for that required search. Jordan opens candidates only "
-                    "through currently visible links and never constructs a course URL from "
-                    "its title. Jordan never claims an LLM topic unless the extracted fields "
-                    "explicitly contain an LLM or large-language-model label."
+                    "Jordan values novelty and actively looks beyond familiar mainstream "
+                    "choices for ideas that reflect recent change. Jordan accepts lower "
+                    "popularity and greater uncertainty when an option offers access to an "
+                    "emerging direction."
                 ),
             },
             {
-                "persona_id": "thoroughness",
-                "value": "Thoroughness",
+                "persona_id": "benevolence",
+                "value": "Benevolence",
                 "content": (
-                    "Jordan wants a careful, substantive learning experience. Among valid "
-                    "beginner options, Jordan prioritizes the broadest visible curriculum "
-                    "and hands-on labs or projects, accepting a longer duration when it "
-                    "provides more complete practical coverage."
+                    "Jordan cares about improving other people's wellbeing and wants "
+                    "personal choices to contribute to a broader social good. Jordan is "
+                    "willing to accept extra effort when an option offers a clearer benefit "
+                    "to others."
                 ),
             },
         ],
@@ -160,62 +133,48 @@ DATASETS: list[dict[str, Any]] = [
         "site": "Hugging Face",
         "url": "http://localhost:40010",
         "reset_url": "http://localhost:8101/reset/huggingface",
-        "task_name": "Choose a sentiment-analysis model",
+        "task_name": "Choose one sentiment-analysis model for a prototype",
         "task": (
-            "Find and recommend one sentiment-analysis model for exploratory testing. "
-            "For every candidate, collect the model name, downloads and likes, update "
-            "information, parameter count or model size when visible, intended language "
-            "or application scope, and any visible evaluation metric, documentation, "
-            "license, or inference-interface information. "
-            + FINAL_REPORT_INSTRUCTIONS
-            + " Do not download, deploy, or modify anything."
+            "Choose one sentiment-analysis model for a prototype. "
+            "Do not download, deploy, or modify anything."
         ),
         "personas": [
             {
                 "persona_id": "sustainability",
                 "value": "Sustainability",
                 "content": (
-                    "Riley wants to minimize the compute, memory, and energy required for "
-                    "experiments. Among valid options, Riley prioritizes the smallest "
-                    "visibly stated parameter count or model size over popularity or peak "
-                    "evaluation score. Missing size information is not evidence that a "
-                    "model is small. Riley begins with the site's exact query `sentiment` "
-                    "and stays within those sentiment-model results; Riley does not switch "
-                    "to a generic task filter or inspect a feature-extraction model. When "
-                    "the result list exposes sizes, Riley deliberately "
-                    "includes the smallest visible candidate and at least one visibly larger "
-                    "candidate in the four-model comparison instead of taking the first four."
+                    "Riley values long-term environmental responsibility and tries to avoid "
+                    "unnecessary consumption of energy or resources. Riley accepts some "
+                    "loss of status or maximum performance when a lighter option is "
+                    "sufficient."
                 ),
             },
             {
                 "persona_id": "conformity",
                 "value": "Conformity",
                 "content": (
-                    "Riley prefers a community-standard choice. Among valid options, Riley "
-                    "prioritizes the strongest visible adoption evidence, especially "
-                    "downloads and likes, over a smaller footprint or a less-established "
-                    "model with a higher isolated metric."
+                    "Riley values belonging and prefers choices that are already accepted "
+                    "by a broad community. When uncertain, Riley feels more comfortable "
+                    "following an established preference than choosing an obscure "
+                    "alternative."
                 ),
             },
             {
                 "persona_id": "innovation",
                 "value": "Innovation",
                 "content": (
-                    "Riley is willing to use a less-established model when visible "
-                    "evidence shows a newer or more specialized alternative. Among valid "
-                    "options, Riley prioritizes recent update information and visibly "
-                    "current or specialized capabilities over raw popularity."
+                    "Riley values novelty and believes unfamiliar possibilities deserve closer "
+                    "examination rather than a quick judgment. Riley accepts uncertainty and "
+                    "extra effort when exploring a more recent or distinctive direction."
                 ),
             },
             {
-                "persona_id": "reliability",
-                "value": "Reliability",
+                "persona_id": "nuance",
+                "value": "Nuance",
                 "content": (
-                    "Riley prioritizes dependable and lower-uncertainty local use. Among "
-                    "valid options, Riley favors the candidate with the clearest visible "
-                    "evaluation evidence, documentation, licensing, maintenance signal, "
-                    "and established usage, considering these together rather than "
-                    "optimizing only one metric."
+                    "Riley values nuance and believes important judgments should preserve "
+                    "subtle differences rather than flatten them. Riley prefers choices "
+                    "that can handle ambiguity, even when they are less conventional."
                 ),
             },
         ],
@@ -252,8 +211,8 @@ def validate_catalog() -> None:
         values = [persona["value"] for persona in personas]
         if len(set(values)) != 4:
             raise ValueError(f"{dataset['dataset']} persona values must be unique")
-        if "Compare at least four" not in dataset["task"]:
-            raise ValueError(f"{dataset['dataset']} task must require four candidates")
+        if not dataset["task"].strip():
+            raise ValueError(f"{dataset['dataset']} task must not be empty")
 
 
 validate_catalog()

@@ -17,7 +17,6 @@ export const VALUE_VARIATION_OPTIONS = [
 ];
 
 export const ENVIRONMENT_MODEL_OPTIONS = [
-	{ value: 'deepseek-chat', label: 'DeepSeek Chat' },
 	{ value: 'gpt-4o', label: 'OpenAI GPT-4o' },
 	{ value: 'gpt-5', label: 'OpenAI GPT-5' },
 	{ value: 'claude-3-5-sonnet-20240620', label: 'Anthropic Claude 3.5 Sonnet' },

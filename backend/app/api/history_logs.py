@@ -217,7 +217,8 @@ async def list_history_logs(
                 "id": to_str(run_id, "unknown"),
                 "task": {
                     "name": to_str(task.get("name", "")),
-                    "url": to_str(task.get("url", ""))
+                    "url": to_str(task.get("url", "")),
+                    "description": to_str(task.get("description", "")),
                 },
                 "timestamp_utc": to_str(log.metadata.get("timestamp_utc", "")),
                 "value": to_str(log.metadata.get("value", "")),

@@ -20,7 +20,7 @@ const EMPTY_FORM = {
 
 export const usePersonaConfiguration = () => {
     const [formData, setFormData] = useState(EMPTY_FORM);
-    const [personaModel, setPersonaModel] = useState(ENVIRONMENT_MODEL_OPTIONS[1].value);
+    const [personaModel, setPersonaModel] = useState(ENVIRONMENT_MODEL_OPTIONS[0].value);
     const [errors, setErrors] = useState({});
     const [isGenerating, setIsGenerating] = useState(false);
     const [personaResult, setPersonaResult] = useState(null);

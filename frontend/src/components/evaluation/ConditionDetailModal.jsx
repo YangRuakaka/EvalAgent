@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import PropTypes from 'prop-types';
 import ReactMarkdown from 'react-markdown';
 import { useData } from '../../context/DataContext';
+import { looksLikeMarkdown, normalizeMarkdownText, resultToText } from '../../utils/resultFormatting';
 import { CrossIcon } from '../common/icons';
 import './ConditionDetailModal.css';
 
@@ -58,11 +59,20 @@ const ConditionDetailModal = ({
 		return getAssessmentStyle(criterion.overall_assessment);
 	};
 
+	const rawFinalResult = condition.raw?.final_result
+		?? condition.final_result
+		?? condition.raw?.result
+		?? condition.result
+		?? condition.raw?.output
+		?? 'No Result';
+	const finalResultText = resultToText(rawFinalResult);
+	const resultIsMarkdown = looksLikeMarkdown(finalResultText);
+
 	const displayInfo = {
 		runIndex: condition.run_index !== undefined ? condition.run_index : (condition.metadata?.run_index !== undefined ? condition.metadata.run_index : 'N/A'),
 		model: condition.model || condition.metadata?.model || 'Unknown Model',
 		persona: condition.value || condition.metadata?.value || condition.persona?.value || condition.persona || condition.metadata?.persona || 'Unknown Persona',
-		finalResult: condition.raw?.final_result || condition.raw?.output || 'No Result',
+		finalResult: finalResultText,
 		conditionId: condition.id || condition.conditionID || 'Unknown',
 	};
 
@@ -189,10 +199,12 @@ const ConditionDetailModal = ({
 				<div className="condition-detail-modal__section">
 					<h3 className="condition-detail-modal__section-title">Result</h3>
 					<div className="condition-detail-modal__result-box">
-						<div className="condition-detail-modal__text condition-detail-modal__result-text">
-							<ReactMarkdown>
-								{displayInfo.finalResult}
-							</ReactMarkdown>
+						<div className={`condition-detail-modal__text condition-detail-modal__result-text${resultIsMarkdown ? ' condition-detail-modal__result-text--markdown' : ''}`}>
+							{resultIsMarkdown ? (
+								<ReactMarkdown>{normalizeMarkdownText(displayInfo.finalResult)}</ReactMarkdown>
+							) : (
+								<p className="condition-detail-modal__plain-result">{displayInfo.finalResult}</p>
+							)}
 						</div>
 					</div>
 				</div>
@@ -225,6 +237,8 @@ ConditionDetailModal.propTypes = {
 		]),
 		metadata: PropTypes.object,
 		raw: PropTypes.object,
+		final_result: PropTypes.any,
+		result: PropTypes.any,
 		criteria: PropTypes.arrayOf(
 			PropTypes.shape({
 				title: PropTypes.string,

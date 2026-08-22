@@ -44,6 +44,7 @@ class HistoryLogDetails(BaseModel):
 class HistoryLogTask(BaseModel):
     name: str
     url: str
+    description: str = ""
 
 
 class HistoryLogMetadata(BaseModel):

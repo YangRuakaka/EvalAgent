@@ -1,0 +1,65 @@
+\begin{algorithm}[t]
+\caption{Context-Aware Agentic Auditing Pipeline}
+\label{alg:audit_pipeline}
+\begin{algorithmic}[1]
+\Require Set of Agent Traces $\mathcal{T} = \{T_1, \dots, T_n\}$, Set of Criteria $\mathcal{C}$, Task Description $D_{task}$, Confidence Threshold $\theta$
+\Ensure Set of Assessments $\mathcal{A}$, Set of Rankings $\mathcal{R}$
+
+\State $\mathcal{A} \gets \emptyset$, $\mathcal{R} \gets \emptyset$
+
+\Statex
+\Comment{\textbf{Stage 1: Global Behavior Overview}}
+\For{each trace $T_i \in \mathcal{T}$}
+    \State $(S_{global,i},\; \mathcal{P}_i) \gets \textsc{LLM\_GlobalOverview}(T_i,\; D_{task})$
+    \Comment{Segment atomic steps into labeled semantic phases; generate a global behavior summary}
+\EndFor
+
+\Statex
+\Comment{\textbf{Stage 2: Criterion-Level Evaluation}}
+\For{each trace $T_i \in \mathcal{T}$}
+    \For{each criterion $C_j \in \mathcal{C}$}
+        \State $(\mathcal{D}_j,\; intent_j,\; \sigma^+_j,\; \sigma^-_j,\; \mathcal{H}_j) \gets \textsc{LLM\_InterpretCriterion}(C_j,\; S_{global,i},\; \mathcal{P}_i,\; D_{task})$
+        \Comment{Decompose criterion into evaluation dimensions $\mathcal{D}_j$, pass/fail signals $\sigma^\pm_j$, and phase-selection heuristics $\mathcal{H}_j$}
+
+        \State $\mathcal{P}^{rel}_{i,j} \gets \textsc{LLM\_SelectPhases}(intent_j,\; \mathcal{H}_j,\; \mathcal{P}_i,\; \mathcal{D}_j)$
+        \Comment{Identify phases in $\mathcal{P}_i$ relevant to criterion $C_j$; fall back to all phases if empty}
+
+        \State $\mathcal{R}_{phase} \gets \emptyset$
+
+        \For{each phase $p \in \mathcal{P}^{rel}_{i,j}$ \textbf{(in parallel)}}
+            \State $\mathit{res}_p \gets \textsc{LLM\_EvaluatePhase}(C_j,\; \mathcal{D}_j,\; \sigma^+_j,\; \sigma^-_j,\; p_{steps},\; S_{global,i})$
+            \Comment{Judge phase steps against criterion dimensions; cite grounded evidence}
+
+            \If{$\textsc{EvidenceInsufficient}(\mathit{res}_p.\mathit{evidence},\; p_{steps})$}
+                \State $\mathit{res}_p.\mathit{evidence} \gets \textsc{LLM\_ExpandEvidence}(\mathit{res}_p.\mathit{evidence},\; C_j,\; p)$
+                \Comment{Fill evidence coverage gaps via targeted re-extraction}
+            \EndIf
+
+            \State $\mathcal{R}_{phase} \gets \mathcal{R}_{phase} \cup \{\mathit{res}_p\}$
+        \EndFor
+
+        \State $A_{i,j} \gets \textsc{LLM\_SynthesizeOverall}(C_j,\; \mathcal{D}_j,\; \mathcal{R}_{phase},\; S_{global,i})$
+        \Comment{Aggregate phase-level results into a criterion verdict with calibrated confidence}
+
+        \If{$A_{i,j}.\mathit{confidence} < \theta$ \textbf{ or } $\textsc{VerdictConflict}(A_{i,j},\; \mathcal{R}_{phase})$}
+            \State $A_{i,j} \gets \textsc{LLM\_SecondaryAssessment}(C_j,\; A_{i,j},\; \mathcal{R}_{phase})$
+            \Comment{Re-evaluate under low confidence or phase-level verdict disagreement}
+        \EndIf
+
+        \State $\mathcal{A} \gets \mathcal{A} \cup \{A_{i,j}\}$
+    \EndFor
+\EndFor
+
+\Statex
+\Comment{\textbf{Stage 3: Multi-Condition Comparative Ranking}}
+\If{$|\mathcal{T}| > 1$}
+    \For{each criterion $C_j \in \mathcal{C}$}
+        \State $Rank_j \gets \textsc{LLM\_Rank}\!\left(\{A_{i,j}\}_{i=1}^{n},\; C_j\right)$
+        \Comment{Rank agents by verdict status, confidence score, and evidence quality}
+        \State $\mathcal{R} \gets \mathcal{R} \cup \{Rank_j\}$
+    \EndFor
+\EndIf
+
+\State \Return $\mathcal{A},\; \mathcal{R}$
+\end{algorithmic}
+\end{algorithm}

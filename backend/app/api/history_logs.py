@@ -196,8 +196,10 @@ async def list_history_logs(
         for log in logs:
             raw_persona = log.metadata.get("persona", "")
             persona_content = ""
+            persona_value = ""
             if isinstance(raw_persona, dict):
                 persona_content = raw_persona.get("content", "")
+                persona_value = raw_persona.get("value", "")
             else:
                 persona_content = str(raw_persona)
 
@@ -221,7 +223,7 @@ async def list_history_logs(
                     "description": to_str(task.get("description", "")),
                 },
                 "timestamp_utc": to_str(log.metadata.get("timestamp_utc", "")),
-                "value": to_str(log.metadata.get("value", "")),
+                "value": to_str(log.metadata.get("value") or persona_value),
                 "persona": to_str(persona_content)
             }
 

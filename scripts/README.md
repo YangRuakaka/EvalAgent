@@ -19,9 +19,9 @@ Run commands from the repository root unless stated otherwise.
   and four task-specific personas per new domain.
 - `run_user_study_preruns.py` runs those 12 trajectories into an isolated
   `data1`/`data2`/`data3` staging tree without changing the UI's existing data.
-- `audit_user_study_preruns.py` requires successful legacy-format runs, visible
-  evidence markers, four distinct action trajectories per task, and at least
-  three distinct recommendations per task.
+- `audit_user_study_preruns.py` requires successful legacy-format runs, 5–10
+  steps per run, visible detail-page evidence, four distinct action trajectories,
+  and four persona-distinct recommendations per task.
 
 Examples:
 

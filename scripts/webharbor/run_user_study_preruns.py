@@ -22,7 +22,12 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import browseruse_compat as legacy
-from user_study_prerun_catalog import DATASETS, iter_runs
+from user_study_prerun_catalog import (
+    DATASETS,
+    MAX_RUN_STEPS,
+    MIN_RUN_STEPS,
+    iter_runs,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -196,6 +201,7 @@ def _plan_payload(args: argparse.Namespace, runs: list[dict[str, Any]]) -> dict[
         "purpose": "CHI user-study extension: three new domains, four personas each",
         "model": args.model,
         "max_steps": args.max_steps,
+        "required_actual_step_range": [MIN_RUN_STEPS, MAX_RUN_STEPS],
         "output_root": str(args.output_root.resolve()),
         "experimental_controls": {
             "fixed_within_dataset": [
@@ -330,8 +336,16 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run 3 new-domain x 4-persona pre-runs into an EvalAgent staging tree."
     )
-    parser.add_argument("--model", default="gpt-4.1")
-    parser.add_argument("--max-steps", type=int, default=25)
+    parser.add_argument("--model", default="gpt-5.5-2026-04-23")
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=MAX_RUN_STEPS,
+        help=(
+            f"Per-run step cap; must be between {MIN_RUN_STEPS} and "
+            f"{MAX_RUN_STEPS} (default: {MAX_RUN_STEPS})."
+        ),
+    )
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--status-path", type=Path, default=DEFAULT_STATUS_PATH)
     parser.add_argument(
@@ -353,6 +367,11 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+    if not MIN_RUN_STEPS <= args.max_steps <= MAX_RUN_STEPS:
+        raise SystemExit(
+            f"--max-steps must be between {MIN_RUN_STEPS} and {MAX_RUN_STEPS}; "
+            f"received {args.max_steps}"
+        )
     args.output_root = args.output_root.resolve()
     args.status_path = args.status_path.resolve()
     runs = _select_runs(args)

@@ -11,7 +11,12 @@ from pathlib import Path
 from typing import Any
 
 import browseruse_compat as legacy
-from user_study_prerun_catalog import DATASETS, iter_runs
+from user_study_prerun_catalog import (
+    DATASETS,
+    MAX_RUN_STEPS,
+    MIN_RUN_STEPS,
+    iter_runs,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -139,20 +144,23 @@ def _audit_run(path: Path, run: dict[str, Any]) -> dict[str, Any]:
     result["tradeoff_basis"] = _extract_final_field(final_text, "TRADE-OFF BASIS")
     result["visible_evidence"] = _extract_final_field(final_text, "VISIBLE EVIDENCE")
     result["trajectory"] = _action_events(payload)
-    extract_count = sum(
-        event.startswith("extract:") for event in result["trajectory"]
-    )
+    extract_count = sum(event.startswith("extract:") for event in result["trajectory"])
+    click_count = sum(event.startswith("click:") for event in result["trajectory"])
+    steps = summary.get("number_of_steps")
     detail_text = json.dumps(payload.get("details", {}), ensure_ascii=False).lower()
     evidence_checks = {
-        "at_least_four_extract_actions": extract_count >= 4,
+        "steps_between_5_and_10": isinstance(steps, int)
+        and MIN_RUN_STEPS <= steps <= MAX_RUN_STEPS,
+        "at_least_two_click_actions": click_count >= 2,
         "no_404_navigation": re.search(r"(?<!\d)404(?!\d)", detail_text) is None,
     }
     result["checks"].update(evidence_checks)
     result["extract_count"] = extract_count
+    result["click_count"] = click_count
     result["trajectory_hash"] = hashlib.sha256(
         "\n".join(result["trajectory"]).encode("utf-8")
     ).hexdigest()[:16]
-    result["steps"] = summary.get("number_of_steps")
+    result["steps"] = steps
 
     failed_checks = [
         name
@@ -221,7 +229,7 @@ def _audit_dataset(
         "one_fixed_model": len(model_values) == 1,
         "four_unique_personas": len({result["persona"] for result in run_results}) == 4,
         "four_unique_trajectories": len(trajectories) == 4 and not identical_pairs,
-        "at_least_three_distinct_recommendations": distinct_recommendations >= 3,
+        "four_distinct_recommendations": distinct_recommendations == 4,
     }
     return {
         "dataset": dataset["dataset"],

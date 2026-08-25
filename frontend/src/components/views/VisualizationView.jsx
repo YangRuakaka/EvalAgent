@@ -35,6 +35,19 @@ const RIGHT_PANEL_TABS = [
 	{ key: 'reasoning', label: 'Reasoning', icon: ReasoningIcon, title: 'Reasoning Process' },
 	{ key: 'evaluation', label: 'Evaluation', icon: EvaluationIcon, title: 'Evaluation' },
 ];
+const EMPTY_LIST = Object.freeze([]);
+
+const EmptyState = ({ title, description }) => (
+	<div className="visualization-view__empty-state" role="status">
+		<strong>{title}</strong>
+		<span>{description}</span>
+	</div>
+);
+
+EmptyState.propTypes = {
+	title: PropTypes.string.isRequired,
+	description: PropTypes.string.isRequired,
+};
 
 const VisualizationView = ({
 	activeRun,
@@ -203,6 +216,23 @@ const VisualizationView = ({
 			url: task.url || '',
 		};
 	}, [activeRun, activeTrajectoryEntry]);
+	const canOpenTaskUrl = useMemo(() => {
+		if (!activeTask.url) {
+			return false;
+		}
+
+		try {
+			const target = new URL(activeTask.url, window.location.origin);
+			const appHost = window.location.hostname;
+			const targetIsLocal = ['localhost', '127.0.0.1'].includes(target.hostname);
+			const appIsLocal = ['localhost', '127.0.0.1'].includes(appHost);
+			return target.protocol.startsWith('http')
+				&& target.hostname !== 'webharbor'
+				&& (!targetIsLocal || appIsLocal);
+		} catch {
+			return false;
+		}
+	}, [activeTask.url]);
 	const hasActiveTrajectoryContent = Boolean(activeTrajectoryEntry?.trajectory || shouldShowBackendLogs);
 
 	return (
@@ -229,15 +259,23 @@ const VisualizationView = ({
 						</summary>
 						<div className="visualization-view__task-body">
 							<p>{activeTask.description || 'No task description was included in this run.'}</p>
-							{activeTask.url && (
+							{canOpenTaskUrl ? (
 								<a href={activeTask.url} target="_blank" rel="noreferrer">Open task site</a>
-							)}
+							) : activeTask.url ? (
+								<span className="visualization-view__task-environment-note">
+									Task site available inside the evaluation environment
+								</span>
+							) : null}
 						</div>
 					</details>
 				)}
 
 				<div className="visualization-view__content">
-					<section className={`visualization-view__panel${activeTab !== 'trajectory' ? ' visualization-view__panel--hidden' : ''}`}>
+					<section
+						className={`visualization-view__panel${activeTab !== 'trajectory' ? ' visualization-view__panel--hidden' : ''}`}
+						hidden={activeTab !== 'trajectory'}
+						aria-hidden={activeTab !== 'trajectory'}
+					>
 						{activeTrajectoryEntry ? (
 							hasActiveTrajectoryContent ? (
 								<div className="visualization-view__run-panel">
@@ -247,29 +285,35 @@ const VisualizationView = ({
 										conditions={activeTrajectoryConditions}
 										useImageHashEnabled={effectiveTrajectoryUseImageHash}
 										refreshNonce={trajectoryRefreshNonce}
-										onNavigateToReasoning={handleTrajectoryNavigateToReasoning}
-										onDAGInteraction={onDAGInteraction}
-										showBackendLogs={shouldShowBackendLogs}
-										backendLogs={shouldShowBackendLogs ? backendLogs : []}
+									onNavigateToReasoning={handleTrajectoryNavigateToReasoning}
+									onDAGInteraction={onDAGInteraction}
+									showBackendLogs={shouldShowBackendLogs}
+									backendLogs={shouldShowBackendLogs ? backendLogs : EMPTY_LIST}
 										backendRunStatus={shouldShowBackendLogs ? backendRunStatus : null}
 									/>
 								</div>
 							) : (
-								<div style={{ padding: '20px', color: '#999' }}>
-									No trajectory data available
-								</div>
+								<EmptyState
+									title="No trajectory data"
+									description="Load a pre-run dataset or run a task to explore its trajectory."
+								/>
 							)
 						) : (
-							<div style={{ padding: '20px', color: '#999' }}>
-								No trajectory data available
-							</div>
+							<EmptyState
+								title="No trajectory selected"
+								description="Choose Load Data above to open the selected pre-run dataset."
+							/>
 						)}
 					</section>
-					<section className={`visualization-view__panel${activeTab !== 'reasoning' ? ' visualization-view__panel--hidden' : ''}`}>
+					<section
+						className={`visualization-view__panel${activeTab !== 'reasoning' ? ' visualization-view__panel--hidden' : ''}`}
+						hidden={activeTab !== 'reasoning'}
+						aria-hidden={activeTab !== 'reasoning'}
+					>
 						{(criteriaData || shouldShowBackendLogs) ? (
 							<ReasoningPanel 
 								data={criteriaData}
-								conditions={experimentsData?.conditions || []}
+								conditions={experimentsData?.conditions || EMPTY_LIST}
 								selectedExperimentId={activeRunId}
 								experimentsMap={experimentsMapByAgentId}
 								evaluationResponse={evaluationState.evaluationResponse}
@@ -280,15 +324,20 @@ const VisualizationView = ({
 								backendRunStatus={backendRunStatus}
 							/>
 						) : (
-							<div style={{ padding: '20px', color: '#999' }}>
-								No reasoning data available
-							</div>
+							<EmptyState
+								title="No reasoning data"
+								description="Select a run with recorded model output to inspect its reasoning."
+							/>
 						)}
 					</section>
-					<section className={`visualization-view__panel${activeTab !== 'evaluation' ? ' visualization-view__panel--hidden' : ''}`}>
+					<section
+						className={`visualization-view__panel${activeTab !== 'evaluation' ? ' visualization-view__panel--hidden' : ''}`}
+						hidden={activeTab !== 'evaluation'}
+						aria-hidden={activeTab !== 'evaluation'}
+					>
 						<EvaluationPanel
 							criterias={evaluationState.criterias}
-							conditions={experimentsData?.conditions || []}
+							conditions={experimentsData?.conditions || EMPTY_LIST}
 							selectedCriteriaIds={evaluationState.selectedCriteriaIds}
 							selectedConditionIds={evaluationState.selectedConditionIds}
 							evaluateModel={evaluationState.evaluateModel}

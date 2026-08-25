@@ -1230,4 +1230,4 @@ TrajectoryVisualizer.defaultProps = {
 	backendRunStatus: null,
 };
 
-export default TrajectoryVisualizer;
+export default React.memo(TrajectoryVisualizer);

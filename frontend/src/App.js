@@ -25,27 +25,30 @@ const CONFIG_TABS = [
 ];
 
 const DATA_SOURCE_OPTIONS = [
-	{ value: 'data1', label: 'Data 1' },
-	{ value: 'data2', label: 'Data 2' },
-	{ value: 'data3', label: 'Data 3' },
+	{ value: 'data1', label: 'Dessert recipes' },
+	{ value: 'data2', label: 'AI courses' },
+	{ value: 'data3', label: 'Sentiment models' },
 ];
+
+const CACHE_ENTRY_TTL_MS = 60_000;
+const MIN_CENTER_WEIGHT = 1;
 
 const SYSTEM_VARIANT_OPTIONS = [
 	{
 		value: 'A',
-		label: 'A',
+		label: 'A · Full analysis',
 		trajectoryUseImageHashEnabled: true,
 		reasoningEvidenceHighlightEnabled: true,
 	},
 	{
 		value: 'B',
-		label: 'B',
+		label: 'B · Separate images',
 		trajectoryUseImageHashEnabled: false,
 		reasoningEvidenceHighlightEnabled: true,
 	},
 	{
 		value: 'C',
-		label: 'C',
+		label: 'C · Basic evidence',
 		trajectoryUseImageHashEnabled: true,
 		reasoningEvidenceHighlightEnabled: false,
 	},
@@ -58,7 +61,6 @@ const App = () => {
 		removeExperiment,
 	} = useData();
 	const experimentEntries = useMemo(() => Object.values(experiments), [experiments]);
-	const historyEntryCount = experimentEntries.length;
 
 	const [activeRunId, setActiveRunId] = useState(null);
 	const [selectedDataSource, setSelectedDataSource] = useState('data1');
@@ -71,7 +73,6 @@ const App = () => {
 	const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
 	
 	const cacheRunsByDataSourceRef = useRef(new Map());
-    const MIN_CENTER = 1;
 
 	// Custom Hooks
 	const { sizes, containerRef, beginDrag } = usePanelResizer(50);
@@ -109,8 +110,7 @@ const App = () => {
 
 	const handleAddRunEntry = useCallback((runPayload, options = {}) => {
 		const { activate = true } = options;
-		const index = historyEntryCount;
-		const nextEntry = processVisualizationData(runPayload, index);
+		const nextEntry = processVisualizationData(runPayload);
 		
 		addExperiment(nextEntry);
 
@@ -119,17 +119,20 @@ const App = () => {
 		}
 
 		return nextEntry;
-	}, [historyEntryCount, addExperiment]);
+	}, [addExperiment]);
 
 	const handleGetCacheData = useCallback(async () => {
-		setIsFetchingCache(true);
-
 		const cacheKey = `${selectedDataSource}::${historyLogScreenshotMode}`;
-		const cachedRun = cacheRunsByDataSourceRef.current.get(cacheKey);
-		if (cachedRun?.id) {
+		const cachedRecord = cacheRunsByDataSourceRef.current.get(cacheKey);
+		const cachedRun = cachedRecord?.entry;
+		const cacheAge = Date.now() - (cachedRecord?.fetchedAt || 0);
+		if (cachedRun?.id && cacheAge < CACHE_ENTRY_TTL_MS) {
 			addExperiment(cachedRun);
 			setActiveRunId(cachedRun.id);
+			return;
 		}
+
+		setIsFetchingCache(true);
 
 		try {
 			const response = await fetchHistoryLogs({
@@ -145,7 +148,13 @@ const App = () => {
 			
 			const nextEntry = handleAddRunEntry(response.data, { activate: true });
 			if (nextEntry?.id) {
-				cacheRunsByDataSourceRef.current.set(cacheKey, nextEntry);
+				if (cachedRun?.id && cachedRun.id !== nextEntry.id) {
+					removeExperiment(cachedRun.id);
+				}
+				cacheRunsByDataSourceRef.current.set(cacheKey, {
+					entry: nextEntry,
+					fetchedAt: Date.now(),
+				});
 			}
 
 		} catch (error) {
@@ -153,7 +162,7 @@ const App = () => {
 		} finally {
 			setIsFetchingCache(false);
 		}
-	}, [addExperiment, handleAddRunEntry, historyLogScreenshotMode, selectedDataSource]);
+	}, [addExperiment, handleAddRunEntry, historyLogScreenshotMode, removeExperiment, selectedDataSource]);
 
 	const runConfirmedServerAction = useCallback(async ({
 		confirmMessage,
@@ -218,7 +227,7 @@ const App = () => {
 		setIsCriteriaManagerOpen(false);
 	}, []);
 
-	const centerWeight = Math.max(MIN_CENTER, 100 - sizes.left);
+	const centerWeight = Math.max(MIN_CENTER_WEIGHT, 100 - sizes.left);
 
 	useEffect(() => {
 		if (!historyEntries.length) {

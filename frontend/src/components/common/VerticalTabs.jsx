@@ -25,6 +25,7 @@ const VerticalTabs = ({
             className={`${container}__item ${activeKey === it.key ? `${container}__item--active` : ''}`}
             onClick={() => onChange(it.key)}
             title={it.title || it.label}
+            aria-pressed={activeKey === it.key}
           >
             {Icon ? <Icon /> : null}
             <span className={`${container}__label`}>{it.label}</span>
@@ -54,7 +55,6 @@ VerticalTabs.defaultProps = {
   containerClassName: 'vertical-tabs',
 };
 
-export default VerticalTabs;
-
+export default React.memo(VerticalTabs);
 
 

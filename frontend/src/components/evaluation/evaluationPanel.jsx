@@ -520,4 +520,4 @@ EvaluationPanel.defaultProps = {
 	isEvaluating: false,
 };
 
-export default EvaluationPanel;
+export default React.memo(EvaluationPanel);

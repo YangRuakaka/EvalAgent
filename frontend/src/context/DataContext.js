@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
 
 const DataContext = createContext();
 
@@ -300,7 +300,7 @@ export const DataProvider = ({ children }) => {
         dispatch({ type: actionTypes.UPDATE_EVALUATION_RESPONSE, payload: { experimentId, evaluationResponse } });
     }, []);
 
-    const value = {
+    const value = useMemo(() => ({
         state,
         addExperiment,
         removeExperiment,
@@ -310,7 +310,17 @@ export const DataProvider = ({ children }) => {
         recordCriteriaRead,
         updateMapping,
         updateEvaluationResponse,
-    };
+    }), [
+        state,
+        addExperiment,
+        removeExperiment,
+        addCriteria,
+        updateCriteria,
+        removeCriteria,
+        recordCriteriaRead,
+        updateMapping,
+        updateEvaluationResponse,
+    ]);
 
     return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 };

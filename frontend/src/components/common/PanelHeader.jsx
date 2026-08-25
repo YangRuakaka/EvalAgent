@@ -51,8 +51,9 @@ const PanelHeader = ({
               className="panel__action"
               onClick={onExportData}
               disabled={isExportDisabled}
+              title="Export recorded evaluation interactions"
             >
-              Export Data
+              Export
             </button>
           )}
           {canManageCriteria && (
@@ -67,31 +68,34 @@ const PanelHeader = ({
           {canCleanupServer && (
             <button
               type="button"
-              className="panel__action"
+              className="panel__action panel__action--danger"
               onClick={onCleanupServer}
               disabled={isCleanupLoading}
+              title="Remove temporary browser-agent run files"
             >
-              {isCleanupLoading ? 'Cleaning…' : 'Cleanup Server Files'}
+              {isCleanupLoading ? 'Cleaning…' : 'Cleanup'}
             </button>
           )}
           {canRestartBackend && (
             <button
               type="button"
-              className="panel__action"
+              className="panel__action panel__action--warning"
               onClick={onRestartBackend}
               disabled={isRestartLoading}
+              title="Restart the backend service"
             >
-              {isRestartLoading ? 'Restarting…' : 'Restart Backend'}
+              {isRestartLoading ? 'Restarting…' : 'Restart'}
             </button>
           )}
           {canRequestCache && (
             <button
               type="button"
-              className="panel__action"
+              className="panel__action panel__action--primary"
               onClick={onGetCacheData}
               disabled={isCacheLoading}
+              title="Load the selected pre-run dataset"
             >
-              {isCacheLoading ? 'Loading…' : 'Get Cache Data'}
+              {isCacheLoading ? 'Loading…' : 'Load Data'}
             </button>
           )}
         </div>

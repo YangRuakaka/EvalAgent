@@ -169,6 +169,7 @@ const HistoryTabs = ({ items, activeId, onSelect, onClose, closable, fullWidth }
 
                   onSelect(item.id);
                 }}
+                aria-current={isActive ? 'page' : undefined}
               >
                 {statusMeta && (
                   <span
@@ -245,4 +246,4 @@ HistoryTabs.defaultProps = {
   fullWidth: false,
 };
 
-export default HistoryTabs;
+export default React.memo(HistoryTabs);

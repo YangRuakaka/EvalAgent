@@ -1520,4 +1520,4 @@ ReasoningPanel.defaultProps = {
 	backendRunStatus: null,
 };
 
-export default ReasoningPanel;
+export default React.memo(ReasoningPanel);

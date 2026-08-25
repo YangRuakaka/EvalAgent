@@ -21,24 +21,28 @@ body,
   padding: 0;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
 ::-webkit-scrollbar {
-  display: none;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  display: none;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  display: none;
+  background: #cbd5e1;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
 }
 
-/* Firefox */
-* {
-  scrollbar-width: none;
-}
-
-/* IE and Edge */
-html {
-  -ms-overflow-style: none;
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  background-clip: padding-box;
 }

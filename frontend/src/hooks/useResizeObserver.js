@@ -32,7 +32,15 @@ const useResizeObserver = (ref) => {
 		const notify = () => {
 			cancelAnimationFrame(frame);
 			frame = requestAnimationFrame(() => {
-				setSize(getRect(node));
+				const nextSize = getRect(node);
+				setSize((previousSize) => (
+					previousSize.width === nextSize.width
+					&& previousSize.height === nextSize.height
+					&& previousSize.top === nextSize.top
+					&& previousSize.left === nextSize.left
+						? previousSize
+						: nextSize
+				));
 			});
 		};
 

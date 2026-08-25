@@ -32,6 +32,7 @@ const DATA_SOURCE_OPTIONS = [
 
 const CACHE_ENTRY_TTL_MS = 60_000;
 const MIN_CENTER_WEIGHT = 1;
+const SHOW_INTERNAL_DATA_CONTROLS = process.env.REACT_APP_SHOW_INTERNAL_DATA_CONTROLS === 'true';
 
 const SYSTEM_VARIANT_OPTIONS = [
 	{
@@ -295,6 +296,7 @@ const App = () => {
 						isCleanupLoading={isCleaningServerFiles}
 						isRestartLoading={isRestartingBackend}
 					>
+						{SHOW_INTERNAL_DATA_CONTROLS && (
 						<div className="app-shell__header-selectors" aria-label="Data and preset selectors">
 							<label className="app-shell__header-field" htmlFor="app-shell-data-source">
 								<span>Data</span>
@@ -321,6 +323,7 @@ const App = () => {
 								</select>
 							</label>
 						</div>
+						)}
 					</PanelHeader>
 				</div>
 			</header>

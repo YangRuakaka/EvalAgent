@@ -7,7 +7,7 @@ import {
     formatVariationContent 
 } from '../utils/personaUtils';
 import { extractErrorMessage } from '../utils/runUtils';
-import { ENVIRONMENT_MODEL_OPTIONS, VALUE_VARIATION_OPTIONS } from '../config/constants';
+import { VALUE_VARIATION_OPTIONS } from '../config/constants';
 
 const EMPTY_FORM = {
 	name: '',
@@ -20,7 +20,7 @@ const EMPTY_FORM = {
 
 export const usePersonaConfiguration = () => {
     const [formData, setFormData] = useState(EMPTY_FORM);
-    const [personaModel, setPersonaModel] = useState(ENVIRONMENT_MODEL_OPTIONS[0].value);
+    const [personaModel, setPersonaModel] = useState('gpt-5');
     const [errors, setErrors] = useState({});
     const [isGenerating, setIsGenerating] = useState(false);
     const [personaResult, setPersonaResult] = useState(null);

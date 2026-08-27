@@ -2,6 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 import PropTypes from 'prop-types';
 import ReactMarkdown from 'react-markdown';
 import { CheckIcon, CrossIcon } from '../common/icons';
+import { normalizeMarkdownText, resultToText } from '../../utils/resultFormatting';
 import './ConditionCard.css';
 
 const ConditionCard = ({
@@ -15,12 +16,19 @@ const ConditionCard = ({
 	draggable = false,
 }) => {
 	const displayInfo = useMemo(() => {
+		const rawFinalResult = condition.raw?.final_result
+			?? condition.final_result
+			?? condition.raw?.result
+			?? condition.result
+			?? condition.raw?.output
+			?? 'No Result';
+
 		return {
 			runIndex: condition.run_index !== undefined ? condition.run_index : (condition.metadata?.run_index !== undefined ? condition.metadata.run_index : 'N/A'),
 			model: condition.model || condition.metadata?.model || 'Unknown Model',
 			persona: condition.persona?.content || condition.metadata?.persona || (typeof condition.persona === 'string' ? condition.persona : null) || 'Unknown Persona',
 			value: condition.value || condition.persona?.value || condition.metadata?.value || 'N/A',
-			finalResult: condition.raw?.final_result || condition.raw?.output || 'No Result',
+			finalResult: resultToText(rawFinalResult),
 			isDone: condition.is_done ?? condition.raw?.is_done ?? false,
 			isSuccessful: condition.is_successful ?? condition.raw?.is_successful ?? false,
 			trajectoryColor: condition.trajectoryColor || '#6b7280',
@@ -136,7 +144,7 @@ const ConditionCard = ({
 				{/* Final Result - Prominent */}
 				<div className="condition-card__result-area">
 					<div className="condition-card__result-content" title={displayInfo.finalResult}>
-						<ReactMarkdown>{displayInfo.finalResult}</ReactMarkdown>
+						<ReactMarkdown>{normalizeMarkdownText(displayInfo.finalResult)}</ReactMarkdown>
 					</div>
 				</div>
 			</div>
@@ -167,6 +175,8 @@ ConditionCard.propTypes = {
 		})),
 		metadata: PropTypes.object,
 		raw: PropTypes.object,
+		final_result: PropTypes.any,
+		result: PropTypes.any,
 	}).isRequired,
 	isSelected: PropTypes.bool,
 	onToggleSelect: PropTypes.func,

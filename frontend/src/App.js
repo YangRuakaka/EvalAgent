@@ -25,31 +25,30 @@ const CONFIG_TABS = [
 ];
 
 const DATA_SOURCE_OPTIONS = [
-	{ value: 'data1', label: 'Dessert recipes' },
-	{ value: 'data2', label: 'AI courses' },
-	{ value: 'data3', label: 'Sentiment models' },
+	{ value: 'data1', label: '1' },
+	{ value: 'data2', label: '2' },
+	{ value: 'data3', label: '3' },
 ];
 
 const CACHE_ENTRY_TTL_MS = 60_000;
 const MIN_CENTER_WEIGHT = 1;
-const SHOW_INTERNAL_DATA_CONTROLS = process.env.REACT_APP_SHOW_INTERNAL_DATA_CONTROLS === 'true';
 
 const SYSTEM_VARIANT_OPTIONS = [
 	{
 		value: 'A',
-		label: 'A · Full analysis',
+		label: 'A',
 		trajectoryUseImageHashEnabled: true,
 		reasoningEvidenceHighlightEnabled: true,
 	},
 	{
 		value: 'B',
-		label: 'B · Separate images',
+		label: 'B',
 		trajectoryUseImageHashEnabled: false,
 		reasoningEvidenceHighlightEnabled: true,
 	},
 	{
 		value: 'C',
-		label: 'C · Basic evidence',
+		label: 'C',
 		trajectoryUseImageHashEnabled: true,
 		reasoningEvidenceHighlightEnabled: false,
 	},
@@ -296,7 +295,6 @@ const App = () => {
 						isCleanupLoading={isCleaningServerFiles}
 						isRestartLoading={isRestartingBackend}
 					>
-						{SHOW_INTERNAL_DATA_CONTROLS && (
 						<div className="app-shell__header-selectors" aria-label="Data and preset selectors">
 							<label className="app-shell__header-field" htmlFor="app-shell-data-source">
 								<span>Data</span>
@@ -310,20 +308,19 @@ const App = () => {
 									))}
 								</select>
 							</label>
-								<label className="app-shell__header-field" htmlFor="app-shell-system-variant">
-									<span>Preset</span>
+							<label className="app-shell__header-field" htmlFor="app-shell-system-variant">
+								<span>Preset</span>
 								<select
-										id="app-shell-system-variant"
-										value={selectedSystemVariant}
-										onChange={handleSystemVariantChange}
+									id="app-shell-system-variant"
+									value={selectedSystemVariant}
+									onChange={handleSystemVariantChange}
 								>
-										{SYSTEM_VARIANT_OPTIONS.map((option) => (
-											<option key={option.value} value={option.value}>{option.label}</option>
-										))}
+									{SYSTEM_VARIANT_OPTIONS.map((option) => (
+										<option key={option.value} value={option.value}>{option.label}</option>
+									))}
 								</select>
 							</label>
 						</div>
-						)}
 					</PanelHeader>
 				</div>
 			</header>

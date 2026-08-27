@@ -9,50 +9,8 @@ import { evaluateStatusMap } from './utils/criteriaInteraction';
 import useJudgeReport from '../../hooks/useJudgeReport';
 import { useData } from '../../context/DataContext';
 import { getCriteriaColorStyles } from '../../utils/colorUtils';
+import { getScreenshotDataUri } from '../../utils/screenshotUtils';
 import './ReasoningPanel.css';
-
-/**
- * Convert Base64 screenshot to data URI for img src
- * @param {string} base64Data - Base64 encoded image data
- * @returns {string|null} Data URI or null
- */
-const getScreenshotDataUri = (base64Data) => {
-	if (!base64Data) return null;
-	if (typeof base64Data !== 'string') return null;
-	const trimmed = base64Data.trim();
-	if (!trimmed) return null;
-	
-	// If it's already a data URI, return as is
-	if (trimmed.startsWith('data:')) {
-		return trimmed;
-	}
-
-	const normalized = trimmed.replace(/\s+/g, '').replace(/^data:[^,]+,/, '');
-	const looksLikeBase64 =
-		normalized.length >= 16
-		&& normalized.length % 4 === 0
-		&& /^[A-Za-z0-9+/=]+$/.test(normalized);
-
-	if (looksLikeBase64) {
-		return `data:image/png;base64,${normalized}`;
-	}
-
-	// Allow direct URL/path values (for compatibility with older cached logs)
-	if (/^(https?:)?\/\//i.test(trimmed)) {
-		return trimmed;
-	}
-
-	if (/^\/.*\.(png|jpg|jpeg|webp|gif|bmp|svg)(\?.*)?$/i.test(trimmed)) {
-		return trimmed;
-	}
-
-	// If it looks like file path, do not convert to data URI
-	if (/[\\/]/.test(trimmed) || /\.(png|jpg|jpeg|webp)$/i.test(trimmed)) {
-		return null;
-	}
-
-	return null;
-};
 
 /**
  * Helper to normalize action highlight text that might be in Python format

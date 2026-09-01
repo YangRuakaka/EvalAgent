@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 from typing import Iterable, List
 
@@ -11,7 +12,10 @@ try:
 except Exception:  # pragma: no cover - scipy might be unavailable
 	wilcoxon = None
 
-import matplotlib.pyplot as plt
+try:
+	import matplotlib.pyplot as plt
+except Exception:  # pragma: no cover - plotting is optional for statistics-only runs
+	plt = None
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -119,12 +123,42 @@ def cohen_dz(diff: pd.Series) -> float:
 	return valid.mean() / std
 
 
+def exact_signed_rank_pvalue(values: np.ndarray, alternative: str = "two-sided") -> float:
+	"""Exact sign-permutation p-value for the Wilcoxon signed-rank statistic."""
+	values = np.asarray(values, dtype=float)
+	values = values[~np.isclose(values, 0)]
+	if len(values) == 0:
+		return 1.0
+
+	ranks = pd.Series(np.abs(values)).rank(method="average").to_numpy(dtype=float)
+	observed_w_plus = float(ranks[values > 0].sum())
+	all_w_plus = np.fromiter(
+		(
+			sum(rank for rank, positive in zip(ranks, signs) if positive)
+			for signs in itertools.product((False, True), repeat=len(ranks))
+		),
+		dtype=float,
+	)
+
+	if alternative == "greater":
+		return float(np.mean(all_w_plus >= observed_w_plus - 1e-12))
+	if alternative == "less":
+		return float(np.mean(all_w_plus <= observed_w_plus + 1e-12))
+
+	total_rank = float(ranks.sum())
+	observed_stat = min(observed_w_plus, total_rank - observed_w_plus)
+	permuted_stat = np.minimum(all_w_plus, total_rank - all_w_plus)
+	return float(np.mean(permuted_stat <= observed_stat + 1e-12))
+
+
 def wilcoxon_pvalue(diff: pd.Series, alternative: str = "two-sided") -> float:
 	valid = diff.dropna()
-	if wilcoxon is None or len(valid) < 3:
+	if len(valid) < 3:
 		return np.nan
 	if np.allclose(valid.values, 0):
 		return 1.0
+	if wilcoxon is None:
+		return exact_signed_rank_pvalue(valid.to_numpy(), alternative=alternative)
 	try:
 		return float(wilcoxon(valid.values, alternative=alternative, zero_method="wilcox").pvalue)
 	except TypeError:
@@ -414,6 +448,8 @@ def summarize_learning_effect(first_second: pd.DataFrame, metrics: Iterable[str]
 
 
 def plot_core_metrics_by_condition(df: pd.DataFrame, output_file: Path) -> None:
+	if plt is None:
+		return
 	condition_order = [CONDITION_A, CONDITION_B, CONDITION_C]
 	available = [m for m in NASA_MAIN_METRICS if m in df.columns]
 	if not available:
@@ -448,6 +484,8 @@ def plot_paired_metrics(
 	title: str,
 	output_file: Path,
 ) -> None:
+	if plt is None:
+		return
 	available = [m for m in metrics if f"{m}_a" in pairs.columns and f"{m}_reduced" in pairs.columns]
 	if not available or pairs.empty:
 		return
@@ -474,6 +512,8 @@ def plot_paired_metrics(
 
 
 def plot_learning_effect(first_second: pd.DataFrame, output_file: Path) -> None:
+	if plt is None:
+		return
 	metrics = [
 		"nasa_workload_5d",
 		"performance",
